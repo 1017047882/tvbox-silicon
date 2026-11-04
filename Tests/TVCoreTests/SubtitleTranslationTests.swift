@@ -5,11 +5,11 @@ import Testing
 /// Stands in for Apple's Translation: marks each line, fails, or never answers.
 struct FakeTranslator: SubtitleTranslating {
     enum Mode { case mark, fail, hang }
-    var target = Locale.Language(identifier: "zh-Hans")
+    var target = Locale(identifier: "zh-Hans")
     var mode = Mode.mark
     var unsupported: Set<String> = []
-    func supports(_ source: Locale.Language) async -> Bool { !unsupported.contains(source.languageCode?.identifier ?? "") }
-    func translate(_ lines: [String], from source: Locale.Language) async throws -> [String] {
+    func supports(_ source: Locale) async -> Bool { !unsupported.contains(source.languageCode ?? "") }
+    func translate(_ lines: [String], from source: Locale) async throws -> [String] {
         switch mode {
         case .mark: return lines.map { "译<\($0)>" }
         case .fail: throw TVError.unsupported("no model")
@@ -20,6 +20,26 @@ struct FakeTranslator: SubtitleTranslating {
 
 private typealias Stream = RemuxPlan.Stream
 
+@Test func subtitleLanguageLocalesPreserveScriptsAndRegions() {
+    let simplified = Locale(identifier: "zh-Hans")
+    let traditional = Locale(identifier: "zh-Hant-TW")
+    #expect(simplified.languageCode == "zh")
+    #expect(simplified.scriptCode == "Hans")
+    #expect(traditional.languageCode == "zh")
+    #expect(traditional.scriptCode == "Hant")
+    #expect(traditional.regionCode == "TW")
+    #expect(!SubtitleTranslation.name(target: simplified, source: Locale(identifier: "en-US")).isEmpty)
+}
+
+@Test func invalidSubtitleTranslationTimeoutKeepsOriginalCues() async {
+    let cues = [RemuxPlan.Cue(start: 0, end: 1_000_000, text: "Original")]
+    let timeouts: [TimeInterval] = [0, -1, .nan, .infinity]
+    for timeout in timeouts {
+        let result = await SubtitleTranslation.translate(cues, from: Locale(identifier: "en"), with: FakeTranslator(), patience: timeout)
+        #expect(!result.translated && result.cues == cues && result.error != nil)
+    }
+}
+
 private func subtitle(_ index: Int, _ language: String, title: String = "", default isDefault: Bool = false, forced: Bool = false) -> RemuxPlan.Track {
     RemuxPlan.Track(stream: Stream(index: index, kind: .subtitle, codec: "subrip", language: language, title: title,
                                    isDefault: isDefault, isForced: forced, isText: true))
@@ -29,11 +49,11 @@ private func subtitle(_ index: Int, _ language: String, title: String = "", defa
     let tracks = [RemuxPlan.Track(stream: Stream(index: 0, kind: .video, codec: "h264")),
                   subtitle(1, "eng", title: "SDH"), subtitle(2, "eng", default: true), subtitle(3, "chi"), subtitle(4, "jpn", forced: true),
                   subtitle(5, "kor"), subtitle(-1, ""), subtitle(6, "fre")]
-    let chinese = SubtitleTranslation.sources(tracks, detected: [6: Locale.Language(identifier: "en")], target: .init(identifier: "zh-Hans"))
+    let chinese = SubtitleTranslation.sources(tracks, detected: [6: Locale(identifier: "en")], target: .init(identifier: "zh-Hans"))
     // English from its default track, then Korean: Chinese is the app's own, forced Japanese only translates speech,
     // the untagged file is English by its words, and French is one more than two.
     #expect(chinese.map(\.track) == [2, 5])
-    #expect(chinese.map { $0.language.languageCode?.identifier } == ["en", "ko"])
+    #expect(chinese.map { $0.language.languageCode } == ["en", "ko"])
     // An English app translates the Chinese track; a file whose language isn't known gets none.
     #expect(SubtitleTranslation.sources(tracks, detected: [:], target: .init(identifier: "en")).map(\.track) == [3, 5])
     // Twins aren't translated again.
@@ -46,20 +66,20 @@ private func subtitle(_ index: Int, _ language: String, title: String = "", defa
     let lines = ["Where are you going tonight?", "<i>I told you already.</i>", "We have to leave before dawn.", "Nobody knows the way.",
                  "Then we find it ourselves.", "Fine, let's go."]
     let english = lines.enumerated().map { RemuxPlan.Cue(start: Int64($0.offset) * 1_000_000, end: Int64($0.offset) * 1_000_000 + 900_000, text: $0.element) }
-    #expect(SubtitleTranslation.detect(english)?.languageCode?.identifier == "en")
+    #expect(SubtitleTranslation.detect(english)?.languageCode == "en")
     #expect(SubtitleTranslation.detect([.init(start: 0, end: 1, text: "Hi")]) == nil)
 }
 
 @Test func translatedCuesKeepTheirTimes() async {
     let cues = [RemuxPlan.Cue(start: 500_000, end: 2_000_000, text: "<i>Hello</i> &amp; welcome"), .init(start: 3_000_000, end: 4_000_000, text: "Second\nline")]
-    let english = Locale.Language(identifier: "en")
+    let english = Locale(identifier: "en")
     let done = await SubtitleTranslation.translate(cues, from: english, with: FakeTranslator())
     #expect(done.translated && done.error == nil)
     #expect(done.cues == [.init(start: 500_000, end: 2_000_000, text: "译&lt;Hello &amp; welcome&gt;"), .init(start: 3_000_000, end: 4_000_000, text: "译&lt;Second\nline&gt;")])
     // A translator that fails, or doesn't answer in time, leaves the words as they were.
     let failed = await SubtitleTranslation.translate(cues, from: english, with: FakeTranslator(mode: .fail))
     #expect(!failed.translated && failed.cues == cues && failed.error != nil)
-    let slow = await SubtitleTranslation.translate(cues, from: english, with: FakeTranslator(mode: .hang), patience: .milliseconds(100))
+    let slow = await SubtitleTranslation.translate(cues, from: english, with: FakeTranslator(mode: .hang), patience: 0.1)
     #expect(!slow.translated && slow.cues == cues)
     #expect(SubtitleTranslation.cueText("a --> b\n\n\nc") == "a --&gt; b\nc" && SubtitleTranslation.cueText(" \n") == nil)
 }

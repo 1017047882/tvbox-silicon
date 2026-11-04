@@ -36,7 +36,7 @@ final class RemuxSession: @unchecked Sendable {
     /// The cues of the file's own subtitles that twins translate, by segment, kept when the segment is made.
     private var sourceCues: [Key: [RemuxPlan.Cue]] = [:]
     private var translationFailed = false
-    private struct Translation { var source: Int, language: Locale.Language, translator: any SubtitleTranslating }
+    private struct Translation { var source: Int, language: Locale, translator: any SubtitleTranslating }
     private var codecs: [Int: String] = [:]
     private var startTime: Int64 = 0
 
@@ -101,11 +101,11 @@ final class RemuxSession: @unchecked Sendable {
     func addTranslations(_ translator: any SubtitleTranslating) async {
         let (tracks, files) = condition.withLock { (plan.tracks, external) }
         let target = translator.target
-        var detected: [Int: Locale.Language] = [:]
+        var detected: [Int: Locale] = [:]
         for (track, cues) in files where RemuxPlan.languageTag(tracks[track].stream.language) == nil {
             detected[track] = SubtitleTranslation.detect(cues)
         }
-        var sources: [(track: Int, language: Locale.Language)] = []
+        var sources: [(track: Int, language: Locale)] = []
         for source in SubtitleTranslation.sources(tracks, detected: detected, target: target) where await translator.supports(source.language) {
             sources.append(source)
         }
@@ -117,7 +117,7 @@ final class RemuxSession: @unchecked Sendable {
             }
             master = plan.masterPlaylist(codecs: codecs, supplemental: initializations[0].flatMap(plan.supplementalCodec))
         }
-        Diagnostics.shared.record(.info, "subtitles", "translations offered to=\(target.minimalIdentifier) from=\(sources.map { "\($0.track):\($0.language.minimalIdentifier)" })")
+        Diagnostics.shared.record(.info, "subtitles", "translations offered to=\(target.identifier) from=\(sources.map { "\($0.track):\($0.language.identifier)" })")
     }
 
     /// The segment's bytes as they are written. The caller reads it and then calls `leave`.

@@ -13,6 +13,12 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
 class DeploymentTests(unittest.TestCase):
+    def test_subtitle_core_language_types_support_ios15(self):
+        for name in ["SubtitleTranslation.swift", "RemuxPlan.swift", "RemuxSession.swift"]:
+            text = (ROOT / "Sources/TVCore" / name).read_text(encoding="utf-8")
+            self.assertNotIn("Locale.Language", text, name)
+            self.assertNotIn("minimalIdentifier", text, name)
+
     def test_core_has_no_ios17_only_observation_macros(self):
         violations = []
         for path in (ROOT / "Sources/TVCore").glob("*.swift"):

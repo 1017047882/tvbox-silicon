@@ -23,7 +23,7 @@ enum SubtitleTranslationSetup {
     static func install() {
         #if canImport(Translation) && !os(tvOS)
         if #available(iOS 18.0, macOS 15.0, *) {
-            SubtitleTranslation.translator = OnDeviceSubtitleTranslator(target: Locale.Language(identifier: L10n.resolvedLanguage()))
+            SubtitleTranslation.translator = OnDeviceSubtitleTranslator(target: Locale(identifier: L10n.resolvedLanguage()))
         }
         #endif
     }
@@ -33,14 +33,16 @@ enum SubtitleTranslationSetup {
 /// Apple's on-device Translation, for the translated subtitles the repackager offers (`SubtitleTranslating`).
 @available(iOS 18.0, macOS 15.0, *)
 struct OnDeviceSubtitleTranslator: SubtitleTranslating {
-    let target: Locale.Language
+    let target: Locale
 
-    func supports(_ source: Locale.Language) async -> Bool {
-        await LanguageAvailability().status(from: source, to: target) != .unsupported
+    func supports(_ source: Locale) async -> Bool {
+        await LanguageAvailability().status(from: Locale.Language(identifier: source.identifier),
+                                            to: Locale.Language(identifier: target.identifier)) != .unsupported
     }
 
-    func translate(_ lines: [String], from source: Locale.Language) async throws -> [String] {
-        try await SubtitleTranslationQueue.shared.translate(lines, from: source, to: target)
+    func translate(_ lines: [String], from source: Locale) async throws -> [String] {
+        try await SubtitleTranslationQueue.shared.translate(lines, from: Locale.Language(identifier: source.identifier),
+                                                           to: Locale.Language(identifier: target.identifier))
     }
 }
 

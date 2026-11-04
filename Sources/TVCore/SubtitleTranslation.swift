@@ -8,12 +8,12 @@ import NaturalLanguage
 /// a translated twin in the player's Subtitles menu. Nothing is translated until that twin is chosen; then each
 /// segment is translated as AVPlayer asks for it, a little ahead of the picture.
 public protocol SubtitleTranslating: Sendable {
-    /// The language subtitles are translated into: the app's.
-    var target: Locale.Language { get }
+    /// The app's language identifier, carried by Locale for iOS 15 compatibility.
+    var target: Locale { get }
     /// Whether the device translates `source` into `target`, now or once the languages are downloaded.
-    func supports(_ source: Locale.Language) async -> Bool
+    func supports(_ source: Locale) async -> Bool
     /// The lines in `target`, one for each, in order.
-    func translate(_ lines: [String], from source: Locale.Language) async throws -> [String]
+    func translate(_ lines: [String], from source: Locale) async throws -> [String]
 }
 
 public enum SubtitleTranslation {
@@ -28,16 +28,16 @@ public enum SubtitleTranslation {
     /// The most twins one file gets: one for each of its subtitle languages, in their order.
     static let most = 2
     /// How long a segment waits for its translation before it is served as it was: AVPlayer waits for it too.
-    static let patience: Duration = .seconds(8)
+    static let patience: TimeInterval = 8
 
     /// The subtitle tracks a twin translates, with their languages: the first text subtitle of each language other
     /// than `target`'s (the default one first), leaving out forced subtitles. A track's language is its tag, else
     /// what `detected` found its words to be in.
-    static func sources(_ tracks: [RemuxPlan.Track], detected: [Int: Locale.Language], target: Locale.Language) -> [(track: Int, language: Locale.Language)] {
-        var chosen: [(track: Int, language: Locale.Language)] = []
+    static func sources(_ tracks: [RemuxPlan.Track], detected: [Int: Locale], target: Locale) -> [(track: Int, language: Locale)] {
+        var chosen: [(track: Int, language: Locale)] = []
         let subtitles = tracks.indices.filter { tracks[$0].kind == .subtitle && tracks[$0].stream.codec != codec && !tracks[$0].stream.isForced }
         for index in subtitles.sorted(by: { (tracks[$0].stream.isDefault ? 0 : 1, $0) < (tracks[$1].stream.isDefault ? 0 : 1, $1) }) {
-            guard let language = RemuxPlan.languageTag(tracks[index].stream.language).map(Locale.Language.init(identifier:)) ?? detected[index],
+            guard let language = RemuxPlan.languageTag(tracks[index].stream.language).map(Locale.init(identifier:)) ?? detected[index],
                   let code = language.languageCode, code != target.languageCode,
                   !chosen.contains(where: { $0.language.languageCode == code }) else { continue }
             chosen.append((index, language))
@@ -49,7 +49,7 @@ public enum SubtitleTranslation {
     static let codec = "translated"
 
     /// The language most of the cues' words are in, when that is clear.
-    static func detect(_ cues: [RemuxPlan.Cue]) -> Locale.Language? {
+    static func detect(_ cues: [RemuxPlan.Cue]) -> Locale? {
         #if canImport(NaturalLanguage)
         let sample = cues.prefix(80).map { plain($0.text) }.joined(separator: "\n")
         guard sample.count >= 20 else { return nil }
@@ -57,7 +57,7 @@ public enum SubtitleTranslation {
         recognizer.processString(sample)
         guard let (language, probability) = recognizer.languageHypotheses(withMaximum: 1).first, probability >= 0.6,
               language != .undetermined else { return nil }
-        return Locale.Language(identifier: language.rawValue)
+        return Locale(identifier: language.rawValue)
         #else
         return nil
         #endif
@@ -65,7 +65,7 @@ public enum SubtitleTranslation {
 
     /// A cue's words without WebVTT markup: tags dropped, entities read.
     static func plain(_ text: String) -> String {
-        text.replacing(/<[^>]*>/, with: "")
+        text.replacingOccurrences(of: "<[^>]*>", with: "", options: .regularExpression)
             .replacingOccurrences(of: "&lt;", with: "<").replacingOccurrences(of: "&gt;", with: ">")
             .replacingOccurrences(of: "&nbsp;", with: " ").replacingOccurrences(of: "&amp;", with: "&")
     }
@@ -73,14 +73,17 @@ public enum SubtitleTranslation {
     /// Translated words as WebVTT cue text.
     static func cueText(_ words: String) -> String? {
         let text = words.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;").replacingOccurrences(of: ">", with: "&gt;")
-            .replacingOccurrences(of: "\r\n", with: "\n").replacing(/\n{2,}/, with: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\n{2,}", with: "\n", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines)
         return text.isEmpty ? nil : text
     }
 
     /// The cues in the translator's language, timed as they were. When it fails, or takes longer than `patience`,
     /// they keep their words, and `translated` is false.
-    static func translate(_ cues: [RemuxPlan.Cue], from source: Locale.Language, with translator: any SubtitleTranslating,
-                          patience: Duration = patience) async -> (cues: [RemuxPlan.Cue], translated: Bool, error: String?) {
+    static func translate(_ cues: [RemuxPlan.Cue], from source: Locale, with translator: any SubtitleTranslating,
+                          patience: TimeInterval = patience) async -> (cues: [RemuxPlan.Cue], translated: Bool, error: String?) {
+        guard patience.isFinite, patience > 0, patience < Double(UInt64.max) / 1_000_000_000 else {
+            return (cues, false, "invalid translation timeout")
+        }
         let lines = cues.map { plain($0.text).trimmingCharacters(in: .whitespacesAndNewlines) }
         let wanted = lines.indices.filter { !lines[$0].isEmpty }
         guard !wanted.isEmpty else { return (cues, true, nil) }
@@ -88,7 +91,7 @@ public enum SubtitleTranslation {
             group.addTask {
                 do { return .success(try await translator.translate(wanted.map { lines[$0] }, from: source)) } catch { return .failure(error) }
             }
-            group.addTask { try? await Task.sleep(for: patience); return nil }
+            group.addTask { try? await Task.sleep(nanoseconds: UInt64(patience * 1_000_000_000)); return nil }
             let first = await group.next() ?? nil
             group.cancelAll()
             return first
@@ -107,10 +110,10 @@ public enum SubtitleTranslation {
     }
 
     /// The name a twin goes by in the Subtitles menu: "Chinese (Translated from English)".
-    static func name(target: Locale.Language, source: Locale.Language) -> String {
+    static func name(target: Locale, source: Locale) -> String {
         let locale = Locale(identifier: L10n.resolvedLanguage())
-        let targetName = locale.localizedString(forIdentifier: target.minimalIdentifier) ?? target.minimalIdentifier
-        let sourceName = source.languageCode.flatMap { locale.localizedString(forLanguageCode: $0.identifier) } ?? source.minimalIdentifier
+        let targetName = locale.localizedString(forIdentifier: target.identifier) ?? target.identifier
+        let sourceName = source.languageCode.flatMap { locale.localizedString(forLanguageCode: $0) } ?? source.identifier
         return L10n.text("%@ (Translated from %@)", targetName, sourceName)
     }
 }

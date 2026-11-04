@@ -80,10 +80,10 @@ struct RemuxPlan: Sendable, Equatable {
 
     /// Translated twins of subtitle tracks (`SubtitleTranslation.sources`), after the others. Like a subtitle file's,
     /// their tracks name no stream. Returns their indices.
-    mutating func addTranslations(_ sources: [(track: Int, language: Locale.Language)], target: Locale.Language) -> [Int] {
+    mutating func addTranslations(_ sources: [(track: Int, language: Locale)], target: Locale) -> [Int] {
         let first = tracks.count
         for source in sources {
-            tracks.append(Track(stream: Stream(index: -1, kind: .subtitle, codec: SubtitleTranslation.codec, language: target.minimalIdentifier,
+            tracks.append(Track(stream: Stream(index: -1, kind: .subtitle, codec: SubtitleTranslation.codec, language: target.identifier,
                                                title: SubtitleTranslation.name(target: target, source: source.language), isText: true)))
         }
         return Array(first..<tracks.count)
