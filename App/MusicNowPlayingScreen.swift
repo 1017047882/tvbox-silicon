@@ -1,3 +1,4 @@
+import Perception
 #if os(iOS)
 import AVKit
 import MediaPlayer
@@ -17,6 +18,7 @@ struct MusicNowPlayingScreen: View {
     @Namespace private var cover
 
     var body: some View {
+        WithPerceptionTracking {
         let music = store.music
         VStack(spacing: 0) {
             if let panel {
@@ -49,15 +51,19 @@ struct MusicNowPlayingScreen: View {
         .padding(.horizontal, 28).padding(.top, 30).padding(.bottom, 6)
         .foregroundStyle(.white)
         .tint(.white)
-        .background { backdrop.ignoresSafeArea() }
+        .background {
+            WithPerceptionTracking {
+ backdrop.ignoresSafeArea()
+            }
+        }
         .environment(\.colorScheme, .dark)
-        .presentationDragIndicator(.visible)
+        .tvPresentationDragIndicator(.visible)
         .presentationBackground { backdrop }
         .task(id: music.track?.artwork) {
             guard let url = music.track?.artwork, let color = await PosterPalette.average(url) else { return }
             withAnimation(.easeInOut(duration: 0.6)) { tint = color }
         }
-        .onChange(of: music.track == nil) { _, gone in if gone { dismiss() } }
+        .tvOnChange(of: music.track == nil) { _, gone in if gone { dismiss() } }
         #if DEBUG
         .onAppear {
             switch UserDefaults.standard.string(forKey: "qaNowPlaying") {
@@ -67,7 +73,13 @@ struct MusicNowPlayingScreen: View {
             }
         }
         #endif
-        .sheet(isPresented: $showsChannels) { MusicChannelsView() }
+        .sheet(isPresented: $showsChannels) {
+            WithPerceptionTracking {
+ MusicChannelsView()
+            }
+        }
+
+        }
     }
 
     private var backdrop: some View {
@@ -138,10 +150,10 @@ struct MusicNowPlayingScreen: View {
                 if music.failure != nil {
                     control("arrow.clockwise", size: 36, label: "Retry") { music.retry() }
                 } else if music.busy && !music.isPlaying {
-                    ProgressView().controlSize(.large).frame(width: 72, height: 72)
+                    ProgressView().tvLargeControl().frame(width: 72, height: 72)
                 } else {
                     control(music.isPlaying ? "pause.fill" : "play.fill", size: 44, label: music.isPlaying ? "Pause" : "Play") { music.toggle() }
-                        .contentTransition(.symbolEffect(.replace))
+                        .tvContentTransition(.symbolEffect(.replace))
                 }
             }
             Spacer()
@@ -153,7 +165,7 @@ struct MusicNowPlayingScreen: View {
 
     private func control(_ symbol: String, size: CGFloat, label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: symbol).font(.system(size: size)).frame(width: 72, height: 72).contentShape(.rect)
+            Image(systemName: symbol).font(.system(size: size)).frame(width: 72, height: 72).contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(L10n.text(label))
@@ -198,16 +210,18 @@ struct MusicVolumeSlider: View {
     @State private var system = SystemSlider()
 
     var body: some View {
+        WithPerceptionTracking {
         HStack(spacing: 12) {
             Image(systemName: "speaker.fill")
             GeometryReader { proxy in
+                WithPerceptionTracking {
                 ZStack(alignment: .leading) {
                     Capsule().fill(.white.opacity(0.22))
                     Capsule().fill(.white.opacity(dragging ? 1 : 0.78)).frame(width: max(0, proxy.size.width * level))
                 }
                 .frame(height: dragging ? 12 : 7)
                 .frame(maxHeight: .infinity)
-                .contentShape(.rect)
+                .contentShape(Rectangle())
                 .gesture(DragGesture(minimumDistance: 0)
                     .onChanged { value in
                         dragging = true
@@ -216,6 +230,8 @@ struct MusicVolumeSlider: View {
                     }
                     .onEnded { _ in dragging = false })
                 .animation(.easeOut(duration: 0.15), value: dragging)
+
+                }
             }
             .frame(height: 22)
             Image(systemName: "speaker.wave.3.fill")
@@ -223,7 +239,11 @@ struct MusicVolumeSlider: View {
         .font(.caption)
         .foregroundStyle(.secondary)
         .frame(height: 40)
-        .background { HiddenVolumeView(system: system).frame(width: 1, height: 1).opacity(0.01) }
+        .background {
+            WithPerceptionTracking {
+ HiddenVolumeView(system: system).frame(width: 1, height: 1).opacity(0.01)
+            }
+        }
         .onReceive(AVAudioSession.sharedInstance().publisher(for: \.outputVolume)) { volume in
             if !dragging { withAnimation(.easeOut(duration: 0.15)) { level = Double(volume) } }
         }
@@ -233,6 +253,8 @@ struct MusicVolumeSlider: View {
         .accessibilityAdjustableAction { direction in
             level = min(1, max(0, level + (direction == .increment ? 0.0625 : -0.0625)))
             system.set(level)
+        }
+
         }
     }
 

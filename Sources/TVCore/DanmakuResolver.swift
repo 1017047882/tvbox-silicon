@@ -142,7 +142,7 @@ public struct DanmakuResolver: Sendable {
         let outcome = await withTaskGroup(of: Outcome.self) { group in
             group.addTask { await self.dandan(context, cached: cached) }
             group.addTask {
-                try? await Task.sleep(for: .seconds(wait))
+                try? await tvSleep(for: .seconds(wait))
                 return Outcome()
             }
             let result = await group.next() ?? Outcome()
@@ -167,7 +167,7 @@ public struct DanmakuResolver: Sendable {
             // dmku first; the backup only when dmku fails or has no comments for the page.
             var servers = [("dmku", dmkuServer, [URLQueryItem(name: "ac", value: "dm"), .init(name: "url", value: safe.absoluteString)])]
             if let backupServer {
-                servers.append((backupServer.host() ?? "backup", backupServer, [.init(name: "type", value: "json"), .init(name: "id", value: safe.absoluteString)]))
+                servers.append((backupServer.host ?? "backup", backupServer, [.init(name: "type", value: "json"), .init(name: "id", value: safe.absoluteString)]))
             }
             var comments: [CatalogDanmakuComment] = [], source = "dmku", failure: Error = URLError(.cannotConnectToHost), answered = false
             for (name, server, query) in servers {

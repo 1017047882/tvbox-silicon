@@ -239,8 +239,8 @@ public struct CloudDriveQRLogin: Sendable {
     static func aliyunRefreshToken(_ bizExt: String) -> String? {
         guard let data = Data(base64Encoded: bizExt) else { return nil }
         let text = String(decoding: data.map { $0 < 0x80 ? $0 : 0x20 }, as: UTF8.self)
-        guard let match = text.firstMatch(of: /"refreshToken"\s*:\s*"([0-9A-Za-z]+)"/) else { return nil }
-        return String(match.1)
+        guard let match = text.tvFirstMatch(#""refreshToken"\s*:\s*"([0-9A-Za-z]+)""#) else { return nil }
+        return String(match[1])
     }
 
     private static func aliyunRequest(_ url: URL) -> URLRequest {

@@ -109,7 +109,7 @@ public enum TMDBCalendar {
 
     /// `region` is for series; anime ignores it.
     public static func week(_ kind: Kind, region: Region = .preferred, language: String = TMDBMatch.language, session: URLSession = .shared) async throws -> Week {
-        var parts = URLComponents(url: base.appending(path: "calendar"), resolvingAgainstBaseURL: false)!
+        var parts = URLComponents(url: base.appendingPathComponent("calendar"), resolvingAgainstBaseURL: false)!
         parts.queryItems = [URLQueryItem(name: "kind", value: kind.rawValue), URLQueryItem(name: "language", value: language)]
         if kind == .tv { parts.queryItems!.append(URLQueryItem(name: "region", value: region.rawValue)) }
         let (data, response) = try await session.data(for: URLRequest(url: parts.url!, timeoutInterval: 30))

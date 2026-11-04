@@ -1,7 +1,8 @@
+import Perception
 import SwiftUI
 import TVCore
 
-@MainActor @Observable final class Store {
+@MainActor @Perceptible final class Store {
     static let defaultURL = "https://raw.githubusercontent.com/qist/tvbox/master/fty.json"
     let searchModel = SearchModel()
     /// Song search and the music player; both outlive the Music page, so a song keeps playing elsewhere in the app.
@@ -51,7 +52,7 @@ import TVCore
         didSet { if let channel = playing, let queue = listeningQueue(for: channel) { playing = nil; listen(queue, from: channel) } }
     }
     /// Set while a listening source's episode goes to the video player on purpose.
-    @ObservationIgnored private var playsAsVideo = false
+    @PerceptionIgnored private var playsAsVideo = false
     /// The videos whose iPhone watch page is on screen (`PlaybackHistoryContext.id`): their episodes play at the top
     /// of the page instead of in the full-screen player.
     var watchPageScopes: Set<String> = []
@@ -78,8 +79,8 @@ import TVCore
     }
     /// Yingxia's own sources (`CloudSources`), added beside the viewer's subscriptions once one works.
     private(set) var cloudDocument: Subscription?
-    @ObservationIgnored private var cloudFetchedAt: Date?
-    @ObservationIgnored private var cloudFetch: Task<Void, Never>?
+    @PerceptionIgnored private var cloudFetchedAt: Date?
+    @PerceptionIgnored private var cloudFetch: Task<Void, Never>?
     /// Sections kept out of the tab bar and sidebar until then.
     var hiddenSections: [AppSection] { extrasUnlocked ? [] : [.music] }
     private let defaults: UserDefaults
@@ -87,12 +88,12 @@ import TVCore
     /// Rebuilt source rows are expensive (every source is classified and copied) and Watch Now reads
     /// them many times while drawing one frame. The stamp is the inputs, so a later frame reuses the row.
     /// Not observed: views fill these while drawing, and a write would draw every reader again.
-    @ObservationIgnored private var siteListStamp = ""
-    @ObservationIgnored private var cloudDrivesObserver: NSObjectProtocol?
-    @ObservationIgnored private var automaticCache: [Site]?
-    @ObservationIgnored private var orderedCache: [Site]?
-    @ObservationIgnored private var recommendationCache: [Site]?
-    @ObservationIgnored private var groupsCache: [Bool: [SourceGroup]] = [:]
+    @PerceptionIgnored private var siteListStamp = ""
+    @PerceptionIgnored private var cloudDrivesObserver: NSObjectProtocol?
+    @PerceptionIgnored private var automaticCache: [Site]?
+    @PerceptionIgnored private var orderedCache: [Site]?
+    @PerceptionIgnored private var recommendationCache: [Site]?
+    @PerceptionIgnored private var groupsCache: [Bool: [SourceGroup]] = [:]
     /// What the cached rows were built from: the merged subscription, which subscriptions are on, and the viewer's pins, hides, and order.
     private func currentSiteListStamp() -> String {
         let imported = subscription?.importedAt.timeIntervalSince1970 ?? 0
@@ -115,7 +116,7 @@ import TVCore
         playbackDefaults = defaults.bool(forKey: "qaIsolatedData")
             ? UserDefaults(suiteName: "com.tvbox.yingxia.qa.player") ?? defaults : defaults
         playbackHistory = defaults.bool(forKey: "qaIsolatedData")
-            ? PlaybackHistory(file: URL.cachesDirectory.appending(path: "qa-player-history.json"), defaults: playbackDefaults) : .shared
+            ? PlaybackHistory(file: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("qa-player-history.json"), defaults: playbackDefaults) : .shared
         #else
         playbackDefaults = defaults
         playbackHistory = .shared
@@ -211,7 +212,7 @@ import TVCore
                                   subtitles: stream.subtitles)
             Task { @MainActor [weak self] in
                 // The video player can't open while Now Playing is still closing (as PlayOn waits for the player).
-                if covered { try? await Task.sleep(for: .milliseconds(700)) }
+                if covered { try? await tvSleep(for: .milliseconds(700)) }
                 guard let self, self.playing == nil else { return }
                 self.playsAsVideo = true
                 self.playing = channel
@@ -256,7 +257,7 @@ import TVCore
         }
         let address = try await EmbeddedJarHost.shared.recoverProxy(channel.url)
         if let media = await EmbeddedJarHost.shared.directMedia(address) {
-            Diagnostics.shared.record(.info, "download", "cloud direct host=\(media.url.host() ?? "-") length=\(media.length)")
+            Diagnostics.shared.record(.info, "download", "cloud direct host=\(media.url.host ?? "-") length=\(media.length)")
             return Channel(name: channel.name, group: channel.group, url: media.url, headers: media.headers)
         }
         return address == channel.url ? channel : Channel(name: channel.name, group: channel.group, url: address, headers: channel.headers)
@@ -266,15 +267,15 @@ import TVCore
     /// `restoreSubscription()` refetches what is gone from the saved addresses.
     private static var subscriptionDirectory: URL {
         #if os(tvOS)
-        return URL.cachesDirectory
+        return FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         #else
-        return URL.applicationSupportDirectory
+        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         #endif
     }
-    private static var legacyFile: URL { subscriptionDirectory.appending(path: "subscription.json") }
-    private static var cloudFile: URL { subscriptionDirectory.appending(path: "cloud-sources.json") }
+    private static var legacyFile: URL { subscriptionDirectory.appendingPathComponent("subscription.json") }
+    private static var cloudFile: URL { subscriptionDirectory.appendingPathComponent("cloud-sources.json") }
     private static func file(for entry: SubscriptionEntry) -> URL {
-        subscriptionDirectory.appending(path: "subscriptions").appending(path: entry.cacheName)
+        subscriptionDirectory.appendingPathComponent("subscriptions").appendingPathComponent(entry.cacheName)
     }
     private static func save(_ data: Data, to file: URL) throws {
         try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -327,7 +328,7 @@ import TVCore
             saveSubscriptionList()
             rebuildSubscription()
         } catch {
-            Diagnostics.shared.failure("subscription", "import host=\((try? WebAddress.resolve(typed))?.host() ?? "-")", error)
+            Diagnostics.shared.failure("subscription", "import host=\((try? WebAddress.resolve(typed))?.host ?? "-")", error)
             importError = L10n.text("Import failed: %@", error.localizedDescription)
         }
     }
@@ -426,7 +427,7 @@ import TVCore
             case .success(.alist):
                 subscriptionErrors[entry.address] = L10n.text("This address is now an AList server. Add it again to browse it in Cloud Files.")
             case .failure(let error):
-                Diagnostics.shared.failure("subscription", "refresh host=\(URL(string: entry.address)?.host() ?? "-")", error)
+                Diagnostics.shared.failure("subscription", "refresh host=\(URL(string: entry.address)?.host ?? "-")", error)
                 subscriptionErrors[entry.address] = error.localizedDescription
             }
         }

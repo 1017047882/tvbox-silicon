@@ -1,3 +1,5 @@
+import Perception
+import NavigationBackport
 import SwiftUI
 import TVCore
 
@@ -6,6 +8,7 @@ struct LiveView: View {
     @State private var query = ""
     private var trimmed: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
     var body: some View {
+        WithPerceptionTracking {
         Group {
             if let config = store.subscription, !config.lives.isEmpty {
                 ScrollView {
@@ -30,6 +33,8 @@ struct LiveView: View {
         }
         .screenBackdrop()
         .tabTitle(L10n.text("Live TV"))
+
+        }
     }
 }
 
@@ -40,6 +45,7 @@ struct LiveSourceGrid: View {
     /// Section titles; Home's Live TV section has its own header and leaves them out.
     var titled = true
     var body: some View {
+        WithPerceptionTracking {
         let platforms = sources.compactMap(\.platform)
         let playlists = sources.filter { !$0.isBuiltIn }
         VStack(alignment: .leading, spacing: titled ? Layout.sectionSpacing : Layout.cardSpacing) {
@@ -47,8 +53,14 @@ struct LiveSourceGrid: View {
                 VStack(alignment: .leading, spacing: Layout.headerSpacing) {
                     if titled { SectionHeader(title: L10n.text("Live Platforms")) }
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: Layout.tileMin), spacing: Layout.cardSpacing)], spacing: Layout.cardSpacing) {
+                        WithPerceptionTracking {
                         ForEach(platforms) { platform in
+                            WithPerceptionTracking {
                             RouteLink { LivePlatformView(platform: platform) } label: { LivePlatformCard(platform: platform) }.tileButton()
+
+                            }
+                        }
+
                         }
                     }
                 }.tvFocusSection()
@@ -57,12 +69,20 @@ struct LiveSourceGrid: View {
                 VStack(alignment: .leading, spacing: Layout.headerSpacing) {
                     if titled { SectionHeader(title: L10n.text("Live Playlists")) }
                     LazyVGrid(columns: Layout.cardColumns, spacing: Layout.cardSpacing) {
+                        WithPerceptionTracking {
                         ForEach(playlists) { source in
+                            WithPerceptionTracking {
                             RouteLink { ChannelListView(source: source) } label: { LiveSourceCard(source: source) }.tileButton()
+
+                            }
+                        }
+
                         }
                     }
                 }.tvFocusSection()
             }
+        }
+
         }
     }
 }
@@ -80,6 +100,7 @@ struct LiveSourceCard: View {
     private let icon: CGFloat = 48, padding: CGFloat = 12, radius: CGFloat = 16
     #endif
     var body: some View {
+        WithPerceptionTracking {
         let name = Self.split(source.name)
         let label = SourceLabel(name.title)
         let detail = (label.parts.dropFirst() + [name.note].compactMap { $0 }).joined(separator: " · ")
@@ -99,8 +120,14 @@ struct LiveSourceCard: View {
             #endif
         }
         .padding(padding).frame(maxWidth: .infinity, alignment: .leading)
-        .background { TileSurface(focused: focused, radius: radius) }
+        .background {
+            WithPerceptionTracking {
+ TileSurface(focused: focused, radius: radius)
+            }
+        }
         .accessibilityElement(children: .combine)
+
+        }
     }
 
     /// "范明明（需开启V6网络）" → ("范明明", "需开启V6网络").
@@ -128,6 +155,7 @@ struct ChannelListView: View {
         channels.filter { (group == nil || $0.group == group) && (query.isEmpty || $0.name.localizedCaseInsensitiveContains(query)) }
     }
     var body: some View {
+        WithPerceptionTracking {
         #if os(tvOS)
         TVChannelGuide(source: source, channels: channels, query: $query, group: $group,
                        loading: waiting, refreshing: loading, error: error,
@@ -145,7 +173,7 @@ struct ChannelListView: View {
                 #endif
                 if !channels.isEmpty { filterBar } else if waiting { ChipSkeletonRow() }
                 if waiting {
-                    LoadingCard { .server(source.url.host(), title: L10n.text("Loading channels…")) }
+                    LoadingCard { .server(source.url.host, title: L10n.text("Loading channels…")) }
                     ChannelSkeletonGrid()
                 }
                 if let error {
@@ -159,7 +187,7 @@ struct ChannelListView: View {
                     ).padding(.vertical, 24).tvFocusSection()
                 }
                 if !waiting && error == nil && filtered.isEmpty {
-                    ContentUnavailableView(L10n.text("No Matching Channels"), systemImage: "magnifyingglass").frame(maxWidth: .infinity)
+                    TVEmptyState(L10n.text("No Matching Channels"), systemImage: "magnifyingglass").frame(maxWidth: .infinity)
                 }
                 if !filtered.isEmpty {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: Layout.cardMin), spacing: 12)], spacing: 12) {
@@ -173,6 +201,8 @@ struct ChannelListView: View {
         .toolbar { Button { Task { await load() } } label: { Image(systemName: "arrow.clockwise") }.disabled(loading).accessibilityLabel(L10n.text("Refresh")) }
         .task(id: source.id) { if !loaded { await load() } }
         #endif
+
+        }
     }
     private var filterBar: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -181,7 +211,10 @@ struct ChannelListView: View {
                     HStack(spacing: 8) {
                         Chip(title: L10n.text("All"), selected: group == nil) { group = nil }
                         ForEach(groups, id: \.self) { value in
+                            WithPerceptionTracking {
                             Chip(title: value.isEmpty ? L10n.text("Ungrouped") : value, selected: group == value) { group = value }
+
+                            }
                         }
                     }
                 }.padding(.vertical, 4)
@@ -197,7 +230,7 @@ struct ChannelListView: View {
         catch is CancellationError { }
         catch {
             guard !Task.isCancelled else { return }
-            Diagnostics.shared.failure("live", "playlist host=\(source.url.host() ?? "-")", error)
+            Diagnostics.shared.failure("live", "playlist host=\(source.url.host ?? "-")", error)
             self.error = error.localizedDescription
         }
     }
@@ -225,6 +258,7 @@ private struct TVChannelGuide: View {
     private var highlighted: Channel? { filtered.first { $0.id == focusedChannel } ?? filtered.first }
 
     var body: some View {
+        WithPerceptionTracking {
         VStack(alignment: .leading, spacing: 26) {
             HStack(spacing: 18) {
                 Text(source.name).font(.system(size: 28, weight: .semibold)).lineLimit(1)
@@ -263,14 +297,17 @@ private struct TVChannelGuide: View {
                     HStack(spacing: 12) {
                         category(L10n.text("All"), value: nil)
                         ForEach(groups, id: \.self) { value in
+                            WithPerceptionTracking {
                             category(value.isEmpty ? L10n.text("Ungrouped") : value, value: value)
+
+                            }
                         }
                     }.padding(4)
-                }.scrollClipDisabled().tvFocusSection()
+                }.tvScrollClipDisabled().tvFocusSection()
             }
 
             if loading {
-                LoadingCard(maxWidth: LoadingCard.compact) { .server(source.url.host(), title: L10n.text("Loading channels…")) }
+                LoadingCard(maxWidth: LoadingCard.compact) { .server(source.url.host, title: L10n.text("Loading channels…")) }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let error {
                 ErrorStateCard(title: L10n.text("Unable to Load Channels"),
@@ -278,7 +315,7 @@ private struct TVChannelGuide: View {
                                details: error, retry: reload, goBack: { dismiss() }, busy: refreshing)
                 Spacer()
             } else if filtered.isEmpty {
-                ContentUnavailableView(L10n.text("No Matching Channels"), systemImage: "magnifyingglass")
+                TVEmptyState(L10n.text("No Matching Channels"), systemImage: "magnifyingglass")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 VStack(alignment: .leading, spacing: 12) {
@@ -289,23 +326,33 @@ private struct TVChannelGuide: View {
                     }.font(.system(size: 20)).foregroundStyle(.secondary)
                     ScrollView {
                         LazyVStack(spacing: 8) {
+                            WithPerceptionTracking {
                             ForEach(filtered) { channel in
+                                WithPerceptionTracking {
                                 channelRow(channel)
                                     .focused($focusedChannel, equals: channel.id)
+
+                                }
+                            }
+
                             }
                         }.padding(4)
-                    }.scrollClipDisabled().tvFocusSection()
+                    }.tvScrollClipDisabled().tvFocusSection()
                 }
             }
         }
         .padding(.horizontal, Layout.gutter).padding(.top, 24).padding(.bottom, 24)
         .screenBackdrop()
-        .toolbar(.hidden, for: .navigationBar)
+        .tvToolbar(.hidden, for: .navigationBar)
         .fullScreenCover(isPresented: $showingSearch) {
-            NavigationStack {
+            WithPerceptionTracking {
+            NBNavigationStack {
+                WithPerceptionTracking {
                 ScrollView {
                     LazyVStack(spacing: 12) {
+                        WithPerceptionTracking {
                         ForEach(filtered) { channel in
+                            WithPerceptionTracking {
                             Button {
                                 showingSearch = false
                                 store.playing = channel
@@ -317,13 +364,23 @@ private struct TVChannelGuide: View {
                                     Image(systemName: "play.fill")
                                 }.padding(20)
                             }.buttonStyle(TVGuideRowStyle())
+
+                            }
                         }
                         if filtered.isEmpty { Text(L10n.text("No Matching Channels")) }
+
+                        }
                     }.padding(48)
                 }
                 .searchable(text: $query, prompt: Text(L10n.text("Search channels")))
                 .screenBackdrop()
+
+                }
             }.onExitCommand { showingSearch = false }
+
+            }
+        }
+
         }
     }
 
@@ -347,9 +404,12 @@ private struct TVChannelGuide: View {
         }
         .buttonStyle(TVGuideRowStyle())
         .contextMenu {
+            WithPerceptionTracking {
             Button { store.toggleFavorite(channel) } label: {
                 Label(store.isFavorite(channel) ? L10n.text("Remove %@ from favorites", channel.name) : L10n.text("Add %@ to favorites", channel.name),
                       systemImage: store.isFavorite(channel) ? "heart.slash" : "heart")
+            }
+
             }
         }
         .accessibilityLabel("\(channel.name), \(channel.displayGroup), \(L10n.text("Play"))")
@@ -360,6 +420,7 @@ private struct TVGuideLogo: View {
     let channel: Channel
     let size: CGFloat
     var body: some View {
+        WithPerceptionTracking {
         ZStack {
             Text(String(channel.name.prefix(1))).font(.system(size: size * 0.55, weight: .bold))
                 .foregroundStyle(Color.white)
@@ -373,6 +434,8 @@ private struct TVGuideLogo: View {
         }.frame(width: size, height: size)
             .background(TVStyle.raised, in: RoundedRectangle(cornerRadius: 8))
             .clipShape(RoundedRectangle(cornerRadius: 8))
+
+        }
     }
 }
 
@@ -382,11 +445,14 @@ private struct TVGuideRowStyle: ButtonStyle {
         let configuration: ButtonStyleConfiguration
         @Environment(\.isFocused) private var focused
         var body: some View {
+            WithPerceptionTracking {
             configuration.label
                 .foregroundStyle(focused ? Color.black : Color.white)
                 .background(focused ? Color.white : TVStyle.surface, in: RoundedRectangle(cornerRadius: 8))
                 .scaleEffect(configuration.isPressed ? 0.99 : 1)
                 .animation(.easeOut(duration: 0.12), value: focused)
+
+            }
         }
     }
 }
@@ -399,12 +465,19 @@ private struct TVGuideCategoryStyle: ButtonStyle {
         let selected: Bool
         @Environment(\.isFocused) private var focused
         var body: some View {
+            WithPerceptionTracking {
             configuration.label.font(.system(size: 23, weight: .semibold))
                 .padding(.horizontal, 24).padding(.vertical, 13)
                 .foregroundStyle(selected ? Brand.onAccent : Color.white)
                 .background(selected ? Brand.accent : TVStyle.raised, in: Capsule())
-                .overlay { Capsule().strokeBorder(focused ? Color.white : .clear, lineWidth: 3).padding(-5) }
+                .overlay {
+                    WithPerceptionTracking {
+ Capsule().strokeBorder(focused ? Color.white : .clear, lineWidth: 3).padding(-5)
+                    }
+                }
                 .scaleEffect(configuration.isPressed ? 0.97 : 1)
+
+            }
         }
     }
 }
@@ -413,6 +486,7 @@ private struct TVGuideCategoryStyle: ButtonStyle {
 struct FavoritesView: View {
     @Environment(Store.self) private var store
     var body: some View {
+        WithPerceptionTracking {
         Group {
             if store.favorites.items.isEmpty {
                 EmptyPage(symbol: AppSection.favorites.icon, title: L10n.text("No Favorites Yet"),
@@ -436,6 +510,8 @@ struct FavoritesView: View {
         }
         .screenBackdrop()
         .tabTitle(L10n.text("Favorites"))
+
+        }
     }
 
     private var liveSection: some View {
@@ -452,8 +528,14 @@ struct FavoritesView: View {
         VStack(alignment: .leading, spacing: Layout.headerSpacing) {
             SectionHeader(title: L10n.text("Films"))
             LazyVGrid(columns: Layout.posterColumns, spacing: Layout.gridRowSpacing) {
+                WithPerceptionTracking {
                 ForEach(store.favorites.items(.video)) { item in
+                    WithPerceptionTracking {
                     if case .video(let video) = item { FavoriteFilmCard(video: video) }
+
+                    }
+                }
+
                 }
             }
         }
@@ -464,8 +546,14 @@ struct FavoritesView: View {
         VStack(alignment: .leading, spacing: Layout.headerSpacing) {
             SectionHeader(title: L10n.text("Saved Episodes"))
             LazyVGrid(columns: Layout.posterColumns, spacing: Layout.gridRowSpacing) {
+                WithPerceptionTracking {
                 ForEach(store.favorites.items(.episode)) { item in
+                    WithPerceptionTracking {
                     if case .episode(let episode) = item { FavoriteEpisodeCard(episode: episode) }
+
+                    }
+                }
+
                 }
             }
         }
@@ -476,7 +564,9 @@ struct FavoritesView: View {
         VStack(alignment: .leading, spacing: Layout.headerSpacing) {
             SectionHeader(title: L10n.text("Music"))
             LazyVStack(alignment: .leading, spacing: MusicLayout.rowSpacing) {
+                WithPerceptionTracking {
                 ForEach(store.favorites.items(.music)) { item in
+                    WithPerceptionTracking {
                     if case .music(let track) = item {
                         HStack(spacing: 10) {
                             MusicTrackRow(track: track, showsFavoriteMark: false) { store.music.play(track) }
@@ -488,6 +578,10 @@ struct FavoritesView: View {
                             #endif
                         }
                     }
+
+                    }
+                }
+
                 }
             }
         }
@@ -498,8 +592,14 @@ struct FavoritesView: View {
         VStack(alignment: .leading, spacing: Layout.headerSpacing) {
             SectionHeader(title: L10n.text("Cloud Files"))
             LazyVStack(alignment: .leading, spacing: Layout.cardSpacing) {
+                WithPerceptionTracking {
                 ForEach(store.favorites.items(.cloud)) { item in
+                    WithPerceptionTracking {
                     if case .cloud(let file) = item { FavoriteCloudRow(file: file) }
+
+                    }
+                }
+
                 }
             }
         }
@@ -520,6 +620,7 @@ struct FavoriteVideoOpener<Label: View>: View {
     }
 
     var body: some View {
+        WithPerceptionTracking {
         if let listing = video.listingVideo(), let client = store.catalogClient(for: video) {
             RouteLink { VideoDetailView(video: listing, client: client) } label: { label }
                 .buttonStyle(IgnoreStripDragCardStyle(drag: drag))
@@ -528,6 +629,8 @@ struct FavoriteVideoOpener<Label: View>: View {
                 if drag?.active != true { store.reportMissingFavoriteSource() }
             } label: { label }
             .cardButton()
+        }
+
         }
     }
 }
@@ -558,6 +661,7 @@ private struct FavoriteFilmCard: View {
     }
 
     var body: some View {
+        WithPerceptionTracking {
         ZStack(alignment: .topLeading) {
             FavoriteVideoOpener(video: video) {
                 if let listing = video.listingVideo() {
@@ -575,8 +679,10 @@ private struct FavoriteFilmCard: View {
         }
         #if os(macOS)
         .onHover { hovering = $0 }
-        .animation(.smooth(duration: 0.15), value: hovering)
+        .animation(.tvSmooth(duration: 0.15), value: hovering)
         #endif
+
+        }
     }
 }
 
@@ -594,6 +700,7 @@ private struct FavoriteEpisodeCard: View {
     }
 
     var body: some View {
+        WithPerceptionTracking {
         ZStack(alignment: .topLeading) {
             Button { store.play(episode) } label: {
                 VStack(alignment: .leading, spacing: 4) {
@@ -614,11 +721,17 @@ private struct FavoriteEpisodeCard: View {
                 .padding(8)
             #endif
         }
-        .overlay(alignment: .topTrailing) { if hovering { detailsLink.padding(8).transition(.opacity) } }
+        .overlay(alignment: .topTrailing) {
+            WithPerceptionTracking {
+ if hovering { detailsLink.padding(8).transition(.opacity) }
+            }
+        }
         #if !os(tvOS)
         .onHover { hovering = $0 }
-        .animation(.smooth(duration: 0.15), value: hovering)
+        .animation(.tvSmooth(duration: 0.15), value: hovering)
         #endif
+
+        }
     }
 
     /// The title's page, where a click on the card only plays the episode. A pointer shows it, as on history cards.
@@ -639,6 +752,7 @@ private struct FavoriteCloudRow: View {
     let file: FavoriteCloudFile
 
     var body: some View {
+        WithPerceptionTracking {
         let cloud = CloudFile(id: file.fileID, name: file.fileName, isFolder: false, size: file.size)
         let driveName = CloudFiles.drive(key: file.driveKey)?.name ?? file.driveKey
         HStack(spacing: 10) {
@@ -655,6 +769,8 @@ private struct FavoriteCloudRow: View {
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentPanel()
+
+        }
     }
 }
 
@@ -670,6 +786,7 @@ struct ChannelLogo: View {
         Self.palette[channel.name.unicodeScalars.reduce(0) { $0 &+ Int($1.value) } % Self.palette.count]
     }
     var body: some View {
+        WithPerceptionTracking {
         #if os(tvOS)
         let size: CGFloat = 72
         #endif
@@ -688,6 +805,8 @@ struct ChannelLogo: View {
         }
         .frame(width: size, height: size)
         .clipShape(RoundedRectangle(cornerRadius: size * 0.28, style: .continuous))
+
+        }
     }
 }
 
@@ -696,6 +815,7 @@ struct ChannelCard: View {
     @Environment(\.stripDrag) private var drag
     let channel: Channel
     var body: some View {
+        WithPerceptionTracking {
         let favorite = store.isFavorite(channel)
         HStack(spacing: 10) {
             Button { if drag?.active != true { store.playing = channel } } label: {
@@ -711,12 +831,14 @@ struct ChannelCard: View {
             Button { if drag?.active != true { store.toggleFavorite(channel) } } label: {
                 Image(systemName: favorite ? "heart.fill" : "heart")
                     .font(.title3).foregroundStyle(favorite ? Brand.rose : .secondary)
-                    .frame(width: 44, height: 44).contentTransition(.symbolEffect(.replace))
+                    .frame(width: 44, height: 44).tvContentTransition(.symbolEffect(.replace))
             }
             .buttonStyle(.plain)
             .accessibilityLabel(favorite ? L10n.text("Remove %@ from favorites", channel.name) : L10n.text("Add %@ to favorites", channel.name))
         }
         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
         .contentPanel()
+
+        }
     }
 }

@@ -1,3 +1,4 @@
+import Perception
 import SwiftUI
 import TVCore
 
@@ -30,16 +31,24 @@ struct DiscoverCalendarView: View {
     private var dateBinding: Binding<String> { Binding(get: { date ?? "" }, set: { picked[key] = $0 }) }
 
     var body: some View {
+        WithPerceptionTracking {
         content
-            .background { DiscoverCanvas(poster: day?.items.first?.cover) }
+            .background {
+                WithPerceptionTracking {
+ DiscoverCanvas(poster: day?.items.first?.cover)
+                }
+            }
             .foregroundStyle(.white).preferredColorScheme(.dark)
             .task(id: key) { if weeks[key] == nil { await load() } }
+
+        }
     }
 
     #if os(tvOS)
     private static var width: CGFloat { 6 * 224 + 5 * 51 }
     private var content: some View {
         GeometryReader { proxy in
+            WithPerceptionTracking {
         ScrollView {
             VStack(spacing: 0) {
                 Text(L10n.text("Airing Schedule")).font(.system(size: 52, weight: .semibold)).foregroundStyle(.white.opacity(0.45)).lineLimit(1)
@@ -56,9 +65,15 @@ struct DiscoverCalendarView: View {
                 .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 56).focusSection()
                 if let day, !day.items.isEmpty {
                     LazyVGrid(columns: Array(repeating: GridItem(.fixed(224), spacing: 51, alignment: .top), count: 6), spacing: 66) {
+                        WithPerceptionTracking {
                         ForEach(day.items) { item in
+                            WithPerceptionTracking {
                             DiscoverAiringLink(item: item) { DiscoverAiringTile(item: item, next: item.id == next, width: 224) }
                                 .accessibilityIdentifier("calendar.item.\(item.id)")
+
+                            }
+                        }
+
                         }
                     }.padding(.top, 54)
                 }
@@ -71,10 +86,12 @@ struct DiscoverCalendarView: View {
             .padding(.bottom, 80)
             .frame(minHeight: proxy.size.height, alignment: .top)
         }
-        .scrollClipDisabled()
+        .tvScrollClipDisabled()
+
+            }
         }
         .ignoresSafeArea(edges: .top)
-        .toolbar(.hidden, for: .navigationBar)
+        .tvToolbar(.hidden, for: .navigationBar)
     }
 
     /// A filter as a chip that opens a menu, as on Browse and the person page.
@@ -94,38 +111,54 @@ struct DiscoverCalendarView: View {
     #else
     private var content: some View {
         GeometryReader { proxy in
+            WithPerceptionTracking {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 ScrollView(.horizontal) {
                     HStack(spacing: 8) {
                         ForEach(TMDBCalendar.Kind.allCases, id: \.self) { value in
+                            WithPerceptionTracking {
                             DiscoverChip(title: value.title, selected: kind == value) { kind = value }
                                 .accessibilityIdentifier("calendar.kind.\(value.rawValue)")
+
+                            }
                         }
                         if kind == .tv {
                             Divider().frame(height: 18).padding(.horizontal, 4)
                             ForEach(TMDBCalendar.Region.allCases, id: \.self) { value in
+                                WithPerceptionTracking {
                                 DiscoverChip(title: value.title, selected: region == value) { region = value }
                                     .accessibilityIdentifier("calendar.region.\(value.rawValue)")
+
+                                }
                             }
                         }
                     }.padding(.horizontal, DiscoverLayout.gutter)
-                }.scrollIndicators(.hidden)
+                }.tvScrollIndicators(.hidden)
                 if let week {
                     ScrollView(.horizontal) {
                         HStack(spacing: 8) {
                             ForEach(week.days) { value in
+                                WithPerceptionTracking {
                                 DiscoverChip(title: DiscoverAiring.dayName(value.date, in: week), selected: value.date == date) { picked[key] = value.date }
                                     .accessibilityIdentifier("calendar.day.\(value.weekday)")
+
+                                }
                             }
                         }.padding(.horizontal, DiscoverLayout.gutter)
-                    }.scrollIndicators(.hidden)
+                    }.tvScrollIndicators(.hidden)
                 }
                 if let day, !day.items.isEmpty {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: DiscoverLayout.posterWidth), spacing: DiscoverLayout.spacing)], alignment: .leading, spacing: 22) {
+                        WithPerceptionTracking {
                         ForEach(day.items) { item in
+                            WithPerceptionTracking {
                             DiscoverAiringLink(item: item) { DiscoverAiringTile(item: item, next: item.id == next) }
                                 .accessibilityIdentifier("calendar.item.\(item.id)")
+
+                            }
+                        }
+
                         }
                     }
                     .padding(.horizontal, DiscoverLayout.gutter).padding(.top, 8)
@@ -138,11 +171,13 @@ struct DiscoverCalendarView: View {
             .padding(.vertical, DiscoverLayout.gutter)
             .frame(minHeight: proxy.size.height, alignment: .top)
         }
+
+            }
         }
         .navigationTitle(L10n.text("Airing Schedule"))
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(.hidden, for: .navigationBar)
+        .tvToolbarBackground(.hidden, for: .navigationBar)
         #endif
     }
     #endif
@@ -235,6 +270,7 @@ struct DiscoverAiringTile: View {
     var next = false
     var width: CGFloat = DiscoverLayout.posterWidth
     var body: some View {
+        WithPerceptionTracking {
         #if os(tvOS)
         VStack(spacing: 5) {
             // The badge is painted into the cover, so it lifts with it.
@@ -249,10 +285,22 @@ struct DiscoverAiringTile: View {
         #else
         VStack(alignment: .leading, spacing: 0) {
             Color.clear.aspectRatio(2.0 / 3, contentMode: .fit)
-                .overlay { PosterImage(url: item.cover, symbol: "tv") }
+                .overlay {
+                    WithPerceptionTracking {
+ PosterImage(url: item.cover, symbol: "tv")
+                    }
+                }
                 .posterClip(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.primary.opacity(0.1), lineWidth: 0.5) }
-                .overlay(alignment: .topLeading) { badge.padding(6) }
+                .overlay {
+                    WithPerceptionTracking {
+ RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.primary.opacity(0.1), lineWidth: 0.5)
+                    }
+                }
+                .overlay(alignment: .topLeading) {
+                    WithPerceptionTracking {
+ badge.padding(6)
+                    }
+                }
             VStack(alignment: .leading, spacing: 1) {
                 Text(item.title).font(.system(size: DiscoverLayout.caption)).lineLimit(1)
                 Text(DiscoverAiring.caption(item)).lineLimit(1)
@@ -262,6 +310,8 @@ struct DiscoverAiringTile: View {
         }
         .accessibilityElement(children: .combine)
         #endif
+
+        }
     }
 
     @ViewBuilder private var badge: some View {
@@ -283,12 +333,15 @@ struct DiscoverAiringLink<Label: View>: View {
     let item: TMDBCalendar.Item
     @ViewBuilder let label: Label
     var body: some View {
+        WithPerceptionTracking {
         RouteLink { DiscoverAiring.destination(item) } label: { label }
         #if os(tvOS)
         .cardButton()
         #else
         .tmdbCardButton()
         #endif
+
+        }
     }
 }
 
@@ -300,6 +353,7 @@ struct DiscoverAiringTitleView: View {
     @State private var match: TMDBCatalog.Item?
     @State private var looked = false
     var body: some View {
+        WithPerceptionTracking {
         Group {
             if let match { DiscoverDetailView(item: match) }
             else if looked { card }
@@ -309,6 +363,8 @@ struct DiscoverAiringTitleView: View {
             guard !looked else { return }
             match = await find()
             looked = true
+        }
+
         }
     }
 
@@ -335,7 +391,11 @@ struct DiscoverAiringTitleView: View {
                 DiscoverFindSourcesButton(title: item.title).padding(.top, 8).accessibilityIdentifier("calendar.findSources")
             }.padding(40).frame(maxWidth: .infinity)
         }
-        .background { DiscoverCanvas(poster: item.cover) }
+        .background {
+            WithPerceptionTracking {
+ DiscoverCanvas(poster: item.cover)
+            }
+        }
         .foregroundStyle(.white).preferredColorScheme(.dark)
     }
 }
@@ -346,6 +406,7 @@ struct DiscoverFindSourcesButton: View {
     @Environment(Store.self) private var store
     let title: String
     var body: some View {
+        WithPerceptionTracking {
         Button {
             if store.subscription == nil { store.section = .settings } else { store.searchVideos(title) }
         } label: {
@@ -362,6 +423,8 @@ struct DiscoverFindSourcesButton: View {
         #else
         .buttonStyle(.plain)
         #endif
+
+        }
     }
 }
 
@@ -372,6 +435,7 @@ struct DiscoverChip: View {
     let selected: Bool
     let action: () -> Void
     var body: some View {
+        WithPerceptionTracking {
         #if os(macOS)
         Button(action: action) {
             Text(title).font(.system(size: 13, weight: selected ? .semibold : .regular)).lineLimit(1)
@@ -385,10 +449,16 @@ struct DiscoverChip: View {
             Text(title).font(.system(size: 15)).lineLimit(1)
                 .padding(.horizontal, 16).frame(height: 36)
                 .foregroundStyle(selected ? Color.black : Color.primary)
-                .background { if selected { Capsule().fill(Color.white) } }
+                .background {
+                    WithPerceptionTracking {
+ if selected { Capsule().fill(Color.white) }
+                    }
+                }
                 .glassSurface(selected ? .identity : .regular, in: Capsule())
         }.buttonStyle(.plain).accessibilityAddTraits(selected ? .isSelected : [])
         #endif
+
+        }
     }
 }
 #endif
@@ -397,16 +467,20 @@ struct DiscoverChip: View {
 private struct DiscoverCalendarCredits: View {
     let week: TMDBCalendar.Week
     var body: some View {
+        WithPerceptionTracking {
         if !week.attribution.isEmpty {
             HStack(spacing: 4) {
                 Text(L10n.text("Data:"))
                 ForEach(Array(week.attribution.enumerated()), id: \.offset) { index, credit in
+                    WithPerceptionTracking {
                     if index > 0 { Text("·") }
                     #if os(tvOS)
                     Text(credit.name)
                     #else
                     Link(credit.name, destination: credit.url)
                     #endif
+
+                    }
                 }
             }
             #if os(tvOS)
@@ -415,6 +489,8 @@ private struct DiscoverCalendarCredits: View {
             .font(.caption2)
             #endif
             .foregroundStyle(.white.opacity(0.5)).padding(.top, 12)
+        }
+
         }
     }
 }

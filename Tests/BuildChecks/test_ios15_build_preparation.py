@@ -13,6 +13,11 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
 class DeploymentTests(unittest.TestCase):
+    def test_subtitle_parser_avoids_ios16_interfaces(self):
+        text = (ROOT / "Sources/TVCore/SubtitleFile.swift").read_text(encoding="utf-8")
+        for unavailable in ["timeout: Duration", "Task.sleep(for:", ".host()", ".firstMatch(of:", "let clock = /", "let timing = /"]:
+            self.assertNotIn(unavailable, text)
+
     def test_subtitle_core_language_types_support_ios15(self):
         for name in ["SubtitleTranslation.swift", "RemuxPlan.swift", "RemuxSession.swift"]:
             text = (ROOT / "Sources/TVCore" / name).read_text(encoding="utf-8")

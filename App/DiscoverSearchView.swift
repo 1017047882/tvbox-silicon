@@ -1,3 +1,5 @@
+import Perception
+import NavigationBackport
 import SwiftUI
 import TVCore
 
@@ -6,7 +8,7 @@ import TVCore
 struct DiscoverSearchView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var model = DiscoverSearchModel()
-    @State private var path = NavigationPath()
+    @State private var path = NBNavigationPath()
     @State private var query = ""
     @State private var feed: TMDBCatalog.SearchFeed = .popular
     @State private var filter: TMDBCatalog.Filter?
@@ -19,15 +21,21 @@ struct DiscoverSearchView: View {
     private let sections: [DiscoverFilterSection] = [.type, .genres, .years, .sort, .platform, .language, .region, .keywords]
 
     var body: some View {
-        NavigationStack(path: $path) {
+        WithPerceptionTracking {
+        NBNavigationStack(path: $path) {
             GeometryReader { geometry in
+                WithPerceptionTracking {
                 ZStack(alignment: .top) {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 0) {
+                            WithPerceptionTracking {
                             if keyword.isEmpty && filter == nil && !model.history.isEmpty { history.padding(.bottom, 12) }
                             if model.loading && model.groups.isEmpty { ProgressView().frame(maxWidth: .infinity).padding(.top, 50) }
                             ForEach([TMDBCatalog.SearchKind.person, .movie, .tv], id: \.self) { kind in
+                                WithPerceptionTracking {
                                 if let group = model.groups[kind], group.count > 0 || (filter != nil && group.hasMore) { results(group, kind: kind, width: geometry.size.width) }
+
+                                }
                             }
                             if model.isEmpty && !model.loading && !model.failed {
                                 EmptyResults(symbol: "magnifyingglass", title: L10n.text("No Results"), message: L10n.text("Try another title or change your filters."),
@@ -35,14 +43,24 @@ struct DiscoverSearchView: View {
                                     .accessibilityIdentifier("discover.search.empty")
                             }
                             if model.failed { EmptyResults(symbol: "wifi.exclamationmark", title: L10n.text("Couldn't Load Results"), action: L10n.text("Try Again")) { revision += 1 } }
+
+                            }
                         }.padding(.top, 4).padding(.bottom, 16)
                     }
-                    .scrollIndicators(.hidden)
+                    .tvScrollIndicators(.hidden)
                     #if os(iOS)
-                    .scrollDismissesKeyboard(.interactively)
+                    .tvScrollDismissesKeyboard(.interactively)
                     #endif
-                    .safeAreaInset(edge: .top, spacing: 0) { topChrome }
-                    .safeAreaInset(edge: .bottom, spacing: 0) { bottomChrome }
+                    .safeAreaInset(edge: .top, spacing: 0) {
+                        WithPerceptionTracking {
+ topChrome
+                        }
+                    }
+                    .safeAreaInset(edge: .bottom, spacing: 0) {
+                        WithPerceptionTracking {
+ bottomChrome
+                        }
+                    }
                     if let section = filterSection {
                         Color.clear.contentShape(Rectangle()).onTapGesture { filterSection = nil }
                             .padding(.top, 122)
@@ -53,19 +71,27 @@ struct DiscoverSearchView: View {
                             .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .top)))
                     }
                 }.frame(width: geometry.size.width, height: geometry.size.height).clipShape(DiscoverSearchHorizontalClip())
+
+                }
             }
-            .background { DiscoverSearchAtmosphere() }
+            .background {
+                WithPerceptionTracking {
+ DiscoverSearchAtmosphere()
+                }
+            }
             #if !os(macOS)
-            .toolbar(.hidden, for: .navigationBar)
+            .tvToolbar(.hidden, for: .navigationBar)
             #endif
             .routeDestinations()
-            .navigationDestination(for: TMDBCatalog.Item.self) { DiscoverDetailView(item: $0) }
-            .navigationDestination(for: TMDBCatalog.SearchPerson.self) { DiscoverPersonView(id: $0.id, name: $0.name, profile: $0.profile) }
+            .nbNavigationDestination(for: TMDBCatalog.Item.self) { DiscoverDetailView(item: $0) }
+            .nbNavigationDestination(for: TMDBCatalog.SearchPerson.self) { DiscoverPersonView(id: $0.id, name: $0.name, profile: $0.profile) }
         }
         .environment(\.openRoute, RouteOpener { path.append($0) })
         .tint(.primary)
         .task(id: request) { expanded.removeAll(); await model.load(request) }
-        .onChange(of: path.count) { _, value in if value > 0 { focused = false; filterSection = nil } }
+        .tvOnChange(of: path.count) { _, value in if value > 0 { focused = false; filterSection = nil } }
+
+        }
     }
 
     private var topChrome: some View {
@@ -74,14 +100,18 @@ struct DiscoverSearchView: View {
             ScrollView(.horizontal) {
                 GlassGroup(spacing: 8) { HStack(spacing: 8) {
                     ForEach(sections, id: \.self) { section in
+                        WithPerceptionTracking {
                         if section == .type {
                             Menu {
                                 Button(L10n.text("Any")) { filter = nil; filterSection = nil }
                                 ForEach([TMDBCatalog.SearchKind.movie, .tv], id: \.self) { kind in
+                                    WithPerceptionTracking {
                                     Button(kind.title) {
                                         var next = filter ?? .init()
                                         if next.kind != kind { next = .init(); next.kind = kind }
                                         filter = next; filterSection = nil; focused = false
+                                    }
+
                                     }
                                 }
                             } label: { filterChip(section) }
@@ -93,13 +123,15 @@ struct DiscoverSearchView: View {
                             } label: { filterChip(section) }
                                 .accessibilityIdentifier("discover.filter.section.\(section.rawValue)")
                         }
+
+                        }
                     }
                     if filter != nil {
                         Button { filter = nil; filterSection = nil } label: { Image(systemName: "xmark").frame(width: 38, height: 38).glassSurface(.regular, in: Circle()) }
                             .accessibilityLabel(L10n.text("Reset Filters")).accessibilityIdentifier("discover.search.resetFilters")
                     }
                 } }.padding(.horizontal, 16)
-            }.scrollIndicators(.hidden).scrollClipDisabled().frame(height: 38)
+            }.tvScrollIndicators(.hidden).tvScrollClipDisabled().frame(height: 38)
         }.padding(.top, 16).padding(.bottom, 5)
     }
     private func filterChip(_ section: DiscoverFilterSection) -> some View {
@@ -115,7 +147,10 @@ struct DiscoverSearchView: View {
                 if filter == nil {
                     Menu {
                         ForEach(TMDBCatalog.SearchFeed.allCases, id: \.self) { value in
+                            WithPerceptionTracking {
                             Button { feed = value } label: { if feed == value { Label(value.title, systemImage: "checkmark") } else { Text(value.title) } }
+
+                            }
                         }
                     } label: { Image(systemName: "line.3.horizontal.decrease.circle").font(.system(size: 23)).foregroundStyle(.secondary) }
                         .accessibilityLabel(L10n.text("Discover More")).accessibilityIdentifier("discover.search.feed")
@@ -145,10 +180,13 @@ struct DiscoverSearchView: View {
             ScrollView(.horizontal) {
                 HStack(spacing: 8) {
                     ForEach(model.history, id: \.self) { text in
+                        WithPerceptionTracking {
                         Button { query = text; focused = false } label: { Text(text).font(.system(size: 13)).padding(.horizontal, 14).frame(height: 34).glassSurface(.regular, in: Capsule()) }
+
+                        }
                     }
                 }.padding(.horizontal, 16)
-            }.scrollIndicators(.hidden)
+            }.tvScrollIndicators(.hidden)
         }
     }
     @ViewBuilder private func results(_ group: DiscoverSearchGroup, kind: TMDBCatalog.SearchKind, width: CGFloat) -> some View {
@@ -158,14 +196,24 @@ struct DiscoverSearchView: View {
             if kind == .person {
                 ScrollView(.horizontal) {
                     LazyHStack(alignment: .top, spacing: 14) {
+                        WithPerceptionTracking {
                         ForEach(group.people) { person in
+                            WithPerceptionTracking {
                             Button { model.remember(keyword); focused = false; path.append(person) } label: { DiscoverSearchPersonRow(person: person) }
                                 .buttonStyle(.plain).accessibilityIdentifier("discover.search.person.\(person.id)")
+
+                            }
+                        }
+
                         }
                     }.padding(.horizontal, 16)
-                }.scrollIndicators(.hidden).frame(height: 124).padding(.bottom, 12)
+                }.tvScrollIndicators(.hidden).frame(height: 124).padding(.bottom, 12)
             } else if expanded.contains(kind) || filter != nil {
-                ForEach(group.items, id: \.key) { item in titleButton(item).padding(.horizontal, 16).padding(.bottom, 10) }
+                ForEach(group.items, id: \.key) { item in
+                    WithPerceptionTracking {
+ titleButton(item).padding(.horizontal, 16).padding(.bottom, 10)
+                    }
+                }
                 if group.hasMore {
                     Button { Task { await model.more(kind, request: request) } } label: {
                         Group { if group.loadingMore { ProgressView() } else { Text(L10n.text(group.failedMore ? "Try Again" : "Load More")) } }
@@ -175,9 +223,16 @@ struct DiscoverSearchView: View {
             } else {
                 ScrollView(.horizontal) {
                     LazyHStack(spacing: 10) {
-                        ForEach(group.items, id: \.key) { item in titleButton(item).frame(width: min(265.333, width - 32)) }
+                        WithPerceptionTracking {
+                        ForEach(group.items, id: \.key) { item in
+                            WithPerceptionTracking {
+ titleButton(item).frame(width: min(265.333, width - 32))
+                            }
+                        }
+
+                        }
                     }.padding(.horizontal, 16)
-                }.scrollIndicators(.hidden).frame(height: 136).padding(.bottom, 12)
+                }.tvScrollIndicators(.hidden).frame(height: 136).padding(.bottom, 12)
             }
         } header: {
             Button {
@@ -213,6 +268,7 @@ struct DiscoverSearchRow: View {
     @Environment(\.colorScheme) private var colorScheme
     let item: TMDBCatalog.Item
     var body: some View {
+        WithPerceptionTracking {
         HStack(spacing: 10) {
             PosterImage(url: item.poster).frame(width: 80, height: 120).clipShape(RoundedRectangle(cornerRadius: 12))
             VStack(alignment: .leading, spacing: 5) {
@@ -223,8 +279,11 @@ struct DiscoverSearchRow: View {
                     HStack(spacing: 5) {
                         HStack(spacing: 1) {
                             ForEach(0..<5) { index in
+                                WithPerceptionTracking {
                                 Image(systemName: rating / 2 >= Double(index + 1) ? "star.fill" : rating / 2 > Double(index) ? "star.leadinghalf.filled" : "star")
                                     .font(.system(size: 11)).frame(width: 12).foregroundStyle(rating / 2 > Double(index) ? Color.yellow : .secondary)
+
+                                }
                             }
                         }
                         Text(rating, format: .number.precision(.fractionLength(1))).font(.system(size: 13)).foregroundStyle(.yellow)
@@ -234,19 +293,28 @@ struct DiscoverSearchRow: View {
             }.frame(maxWidth: .infinity, alignment: .leading).padding(.trailing, 4)
         }.padding(8).frame(height: 136)
             .background(.white.opacity(colorScheme == .dark ? 0.10 : 0.54), in: RoundedRectangle(cornerRadius: 20))
-            .overlay { RoundedRectangle(cornerRadius: 20).strokeBorder(.white.opacity(colorScheme == .dark ? 0.07 : 0.45), lineWidth: 0.5) }
+            .overlay {
+                WithPerceptionTracking {
+ RoundedRectangle(cornerRadius: 20).strokeBorder(.white.opacity(colorScheme == .dark ? 0.07 : 0.45), lineWidth: 0.5)
+                }
+            }
             .contentShape(RoundedRectangle(cornerRadius: 20))
+
+        }
     }
 }
 private struct DiscoverSearchPersonRow: View {
     let person: TMDBCatalog.SearchPerson
     var body: some View {
+        WithPerceptionTracking {
         VStack(spacing: 0) {
             PosterImage(url: person.profile, symbol: "person.fill").frame(width: 83, height: 83).clipShape(Circle())
             Text(person.name).font(.system(size: 13)).lineLimit(1).padding(.top, 8)
             Text(L10n.text(person.department == "Acting" ? "Actor" : person.department ?? "People"))
                 .font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1).padding(.top, 2)
         }.frame(width: 83)
+
+        }
     }
 }
 /// Keep Duo's side display clear while allowing glass shadows through the vertical safe areas.
@@ -258,7 +326,9 @@ struct DiscoverSearchAtmosphere: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var started = Date()
     var body: some View {
+        WithPerceptionTracking {
         GeometryReader { geometry in
+            WithPerceptionTracking {
             // A drift this slow needs no more than 15 frames a second, and soft-edged gradients look like the
             // blurred ellipses they replace: two full-screen blurs redrawn at the display's rate kept the GPU
             // busy for as long as the page was open (issue #368).
@@ -274,7 +344,11 @@ struct DiscoverSearchAtmosphere: View {
                         .offset(x: 90 - 190 * shift, y: 270 - 160 * shift)
                 }
             }
+
+            }
         }.discoverFullBleed().allowsHitTesting(false)
+
+        }
     }
 
     /// An ellipse of this size as if blurred by `blur`: a gradient that falls off as a Gaussian blur does, from
@@ -315,7 +389,7 @@ struct DiscoverSearchGroup {
     var count: Int { items.count + people.count }
     var hasMore: Bool { page < totalPages }
 }
-@MainActor @Observable final class DiscoverSearchModel {
+@MainActor @Perceptible final class DiscoverSearchModel {
     var groups: [TMDBCatalog.SearchKind: DiscoverSearchGroup] = [:]
     var loading = false
     var failed = false
@@ -329,7 +403,7 @@ struct DiscoverSearchGroup {
         loading = true; failed = false; groups = [:]
         guard request.filter?.isValid != false else { loading = false; return }
         do {
-            if !request.keyword.isEmpty { try await Task.sleep(for: .milliseconds(350)) }
+            if !request.keyword.isEmpty { try await tvSleep(for: .milliseconds(350)) }
             try Task.checkCancellation()
             let kinds = request.filter.map { [$0.kind] } ?? TMDBCatalog.SearchKind.allCases
             await withTaskGroup(of: (TMDBCatalog.SearchKind, TMDBCatalog.SearchPage?).self) { group in
@@ -399,13 +473,17 @@ struct DiscoverMacSearchView: View {
     private let preview = 6
 
     var body: some View {
+        WithPerceptionTracking {
         ScrollView {
             VStack(alignment: .leading, spacing: 26) {
                 filters
                 if keyword.isEmpty && filter == nil && !model.history.isEmpty { history }
                 if model.loading && model.groups.isEmpty { ProgressView().frame(maxWidth: .infinity).padding(.top, 40) }
                 ForEach([TMDBCatalog.SearchKind.person, .movie, .tv], id: \.self) { kind in
+                    WithPerceptionTracking {
                     if let group = model.groups[kind], group.count > 0 || (filter != nil && group.hasMore) { results(group, kind: kind) }
+
+                    }
                 }
                 if model.isEmpty && !model.loading && !model.failed {
                     EmptyResults(symbol: "magnifyingglass", title: L10n.text("No Results"), message: L10n.text("Try another title or change your filters."),
@@ -416,16 +494,23 @@ struct DiscoverMacSearchView: View {
             }
             .padding(.horizontal, 24).padding(.top, 12).padding(.bottom, 28)
         }
-        .background { DiscoverSearchAtmosphere() }
+        .background {
+            WithPerceptionTracking {
+ DiscoverSearchAtmosphere()
+            }
+        }
         .navigationTitle(L10n.text("Search Catalog"))
         .searchable(text: $query, isPresented: $searching, placement: .toolbar, prompt: Text(L10n.text("Search")))
         .onSubmit(of: .search) { model.remember(keyword) }
-        .onChange(of: query) { _, value in if value.count > 100 { query = String(value.prefix(100)) } }
+        .tvOnChange(of: query) { _, value in if value.count > 100 { query = String(value.prefix(100)) } }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Menu {
                     ForEach(TMDBCatalog.SearchFeed.allCases, id: \.self) { value in
+                        WithPerceptionTracking {
                         Button { feed = value } label: { if feed == value { Label(value.title, systemImage: "checkmark") } else { Text(value.title) } }
+
+                        }
                     }
                 } label: { Label(L10n.text("Discover More"), systemImage: "line.3.horizontal.decrease.circle") }
                     .disabled(filter != nil)
@@ -433,11 +518,14 @@ struct DiscoverMacSearchView: View {
             }
         }
         .task(id: request) { expanded.removeAll(); await model.load(request) }
+
+        }
     }
 
     private var filters: some View {
         DiscoverChipFlow(spacing: 8) {
             ForEach(sections, id: \.self) { section in
+                WithPerceptionTracking {
                 Button { filterSection = filterSection == section ? nil : section } label: { chip(section.chipTitle(filter), open: filterSection == section) }
                     .buttonStyle(.plain)
                     .popover(isPresented: Binding(get: { filterSection == section }, set: { if !$0, filterSection == section { filterSection = nil } }),
@@ -445,6 +533,8 @@ struct DiscoverMacSearchView: View {
                         DiscoverSearchFilters(filter: Binding(get: { filter ?? .init() }, set: { filter = $0 }), section: section).frame(width: 360)
                     }
                     .accessibilityIdentifier("discover.filter.section.\(section.rawValue)")
+
+                }
             }
             if filter != nil {
                 Button { filter = nil; filterSection = nil } label: {
@@ -469,10 +559,13 @@ struct DiscoverMacSearchView: View {
             }
             DiscoverChipFlow(spacing: 8) {
                 ForEach(model.history, id: \.self) { text in
+                    WithPerceptionTracking {
                     Button { query = text } label: {
                         Text(text).font(.system(size: 13)).padding(.horizontal, 12).frame(height: 28)
                             .background(.primary.opacity(0.07), in: Capsule()).contentShape(Capsule())
                     }.buttonStyle(.plain)
+
+                    }
                 }
             }
         }
@@ -493,17 +586,29 @@ struct DiscoverMacSearchView: View {
             if kind == .person {
                 DiscoverRail(arrowCenter: 41.5) {
                     LazyHStack(alignment: .top, spacing: 18) {
+                        WithPerceptionTracking {
                         ForEach(group.people) { person in
+                            WithPerceptionTracking {
                             DiscoverButton { open(person) } label: { DiscoverSearchPersonRow(person: person) }
                                 .buttonStyle(.plain).accessibilityIdentifier("discover.search.person.\(person.id)")
+
+                            }
+                        }
+
                         }
                     }
                 }
             } else {
                 LazyVGrid(columns: columns, alignment: .leading, spacing: 14) {
+                    WithPerceptionTracking {
                     ForEach(all ? group.items : Array(group.items.prefix(preview)), id: \.key) { item in
+                        WithPerceptionTracking {
                         Button { open(item) } label: { DiscoverSearchRow(item: item) }
                             .buttonStyle(.plain).accessibilityIdentifier("discover.search.result.\(item.key)")
+
+                        }
+                    }
+
                     }
                 }
                 if all, group.hasMore {
@@ -612,11 +717,14 @@ private struct DiscoverSearchInput: View {
     let submit: () -> Void
     @FocusState private var hasFocus: Bool
     var body: some View {
+        WithPerceptionTracking {
         TextField(L10n.text("Search"), text: $text)
-            .font(.system(size: 16)).focused($hasFocus).autocorrectionDisabled().onSubmit(submit)
-            .onChange(of: focused) { _, value in hasFocus = value }
-            .onChange(of: hasFocus) { _, value in focused = value }
+            .font(.system(size: 16)).focused($hasFocus).disableAutocorrection().onSubmit(submit)
+            .tvOnChange(of: focused) { _, value in hasFocus = value }
+            .tvOnChange(of: hasFocus) { _, value in focused = value }
             .accessibilityIdentifier("discover.search.input")
+
+        }
     }
 }
 #endif

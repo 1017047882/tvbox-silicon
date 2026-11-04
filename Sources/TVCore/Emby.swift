@@ -24,7 +24,7 @@ public actor Emby {
     /// may be the one the web app opens at (`http://nas:8096/web/index.html#!/home`), or have the
     /// path a reverse proxy serves the server under (`https://host/emby`).
     public static func probe(_ url: URL, session: URLSession = .shared) async -> AListServer? {
-        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false), let host = url.host(),
+        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false), let host = url.host,
               ["http", "https"].contains(parts.scheme?.lowercased() ?? "") else { return nil }
         var segments = parts.path.split(separator: "/").map(String.init)
         if let web = segments.firstIndex(where: { $0.lowercased() == "web" }) { segments.removeSubrange(web...) }

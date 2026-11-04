@@ -117,9 +117,9 @@ public final class LXSourceLibrary: @unchecked Sendable {
     static var defaultFolder: URL {
         #if os(tvOS)
         // tvOS only permits Caches; a cleared script is fetched again from where it came from.
-        URL.cachesDirectory.appending(path: "com.tvbox.yingxia/LXSources", directoryHint: .isDirectory)
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("com.tvbox.yingxia/LXSources", isDirectory: true)
         #else
-        URL.applicationSupportDirectory.appending(path: "com.tvbox.yingxia/LXSources", directoryHint: .isDirectory)
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("com.tvbox.yingxia/LXSources", isDirectory: true)
         #endif
     }
     static let defaultsKey = "musicLXSources"
@@ -197,7 +197,7 @@ public final class LXSourceLibrary: @unchecked Sendable {
         return text
     }
 
-    private func file(_ id: String) -> URL { folder.appending(path: id + ".js") }
+    private func file(_ id: String) -> URL { folder.appendingPathComponent(id + ".js") }
 
     private func update(_ change: (inout [LXSource]) -> Void) {
         lock.withLock {
@@ -251,7 +251,7 @@ public actor LXSourceRuntime {
         let input: JSONValue = .object(["source": .string(key), "quality": .string(quality), "musicInfo": .object(musicInfo)])
         let json = String(decoding: try JSONEncoder().encode(input), as: UTF8.self)
         let envelope = await session.evaluate("__lx.musicUrl(\(json))", within: Self.lookupSeconds)
-        if let address = envelope["value"]?["url"]?.string, let url = URL(string: address), url.host() != nil { return url }
+        if let address = envelope["value"]?["url"]?.string, let url = URL(string: address), url.host != nil { return url }
         // The script's own message can hold its API's address or key, so it is not passed on.
         if envelope["error"]?.string?.contains("interrupted") == true { throw MusicProviderError.timeout }
         throw MusicProviderError.noResource

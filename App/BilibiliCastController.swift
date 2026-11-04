@@ -26,7 +26,7 @@ import TVCore
         ticker = Task { [weak self] in
             while !Task.isCancelled {
                 self?.report()
-                try? await Task.sleep(for: .seconds(1))
+                try? await tvSleep(for: .seconds(1))
             }
         }
     }
@@ -54,7 +54,7 @@ import TVCore
                     let channel = try await Bilibili.castChannel(aid: aid, cid: cid, episode: episode, in: store?.subscription)
                     BilibiliCastReceiver.log("resolved \(channel.url.absoluteString.prefix(80))")
                     // A new cast replaces what is playing: close the player first so it starts afresh.
-                    if store?.playing != nil { store?.playing = nil; try? await Task.sleep(for: .milliseconds(700)) }
+                    if store?.playing != nil { store?.playing = nil; try? await tvSleep(for: .milliseconds(700)) }
                     store?.playing = channel
                 } catch { BilibiliCastReceiver.log("play failed \(error)"); store?.error = error.localizedDescription }
             }
@@ -64,7 +64,7 @@ import TVCore
                 guard let platform = LivePlatform(rawValue: "bilibili"), let url = URL(string: "\(platform.scheme)://room/\(room)") else {
                     store?.error = L10n.text("The phone sent a video this app can't open."); return
                 }
-                if store?.playing != nil { store?.playing = nil; try? await Task.sleep(for: .milliseconds(700)) }
+                if store?.playing != nil { store?.playing = nil; try? await tvSleep(for: .milliseconds(700)) }
                 store?.playing = Channel(name: "", group: platform.name, url: url)
             }
         case .media(let url, let title):
@@ -74,13 +74,13 @@ import TVCore
                 if let cid = Bilibili.castCID(url), let aid = await Bilibili.castVideo(cid: cid, title: title),
                    let channel = try? await Bilibili.castChannel(aid: aid, cid: cid, episode: 0, in: store?.subscription) {
                     BilibiliCastReceiver.log("play hd aid=\(aid) cid=\(cid)")
-                    if store?.playing != nil { store?.playing = nil; try? await Task.sleep(for: .milliseconds(700)) }
+                    if store?.playing != nil { store?.playing = nil; try? await tvSleep(for: .milliseconds(700)) }
                     store?.playing = channel
                     return
                 }
                 let comments = DanmakuSource.registerBilibiliMedia(url)
                 BilibiliCastReceiver.log("play media danmaku=\(comments) \(url.absoluteString.prefix(120))")
-                if store?.playing != nil { store?.playing = nil; try? await Task.sleep(for: .milliseconds(700)) }
+                if store?.playing != nil { store?.playing = nil; try? await tvSleep(for: .milliseconds(700)) }
                 // Bilibili's CDN wants its referer; other servers ignore it.
                 store?.playing = Channel(name: title.isEmpty ? L10n.text("Bilibili") : title, group: L10n.text("Bilibili"), url: url,
                                          headers: ["Referer": "https://www.bilibili.com/", "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15"])

@@ -348,7 +348,7 @@ typedef struct Track {
     /// Tone mapping on the media engine: VideoToolbox decodes, a pixel transfer shrinks and maps the picture, and
     /// the encoder takes it from a VideoToolbox frame pool, with no copy through memory.
     AVBufferRef *hwDevice, *hwFrames;
-    VTPixelTransferSessionRef transfer;
+    CFTypeRef transfer;
     AVFrame *uploaded, *downloaded;
     /// Audio: the next sample's time (output clock, before the offset); AV_NOPTS_VALUE after a reset.
     int64_t nextSample;
@@ -567,17 +567,23 @@ static int hardware_frames(Track *track, int width, int height) {
 
 /// Shrinks a decoded HDR picture and maps it to SDR BT.709 (VideoToolbox's own tone mapping) into `out`.
 static int transfer_picture(Track *track, const AVFrame *frame, AVFrame *out) {
-    if (!track->transfer) {
-        if (VTPixelTransferSessionCreate(kCFAllocatorDefault, &track->transfer) != noErr) { track->transfer = NULL; return AVERROR_EXTERNAL; }
-        VTSessionSetProperty(track->transfer, kVTPixelTransferPropertyKey_DestinationColorPrimaries, kCVImageBufferColorPrimaries_ITU_R_709_2);
-        VTSessionSetProperty(track->transfer, kVTPixelTransferPropertyKey_DestinationTransferFunction, kCVImageBufferTransferFunction_ITU_R_709_2);
-        VTSessionSetProperty(track->transfer, kVTPixelTransferPropertyKey_DestinationYCbCrMatrix, kCVImageBufferYCbCrMatrix_ITU_R_709_2);
+    /* iOS 15 uses the caller's existing software tone mapper. This function is serial per track. */
+    if (__builtin_available(iOS 16.0, tvOS 16.0, macOS 10.8, *)) {
+        if (!track->transfer) {
+            VTPixelTransferSessionRef transfer = NULL;
+            if (VTPixelTransferSessionCreate(kCFAllocatorDefault, &transfer) != noErr) return AVERROR_EXTERNAL;
+            track->transfer = transfer;
+            VTSessionSetProperty(track->transfer, kVTPixelTransferPropertyKey_DestinationColorPrimaries, kCVImageBufferColorPrimaries_ITU_R_709_2);
+            VTSessionSetProperty(track->transfer, kVTPixelTransferPropertyKey_DestinationTransferFunction, kCVImageBufferTransferFunction_ITU_R_709_2);
+            VTSessionSetProperty(track->transfer, kVTPixelTransferPropertyKey_DestinationYCbCrMatrix, kCVImageBufferYCbCrMatrix_ITU_R_709_2);
+        }
+        CVPixelBufferRef source = (CVPixelBufferRef)frame->data[3], target = (CVPixelBufferRef)out->data[3];
+        if (av_vt_pixbuf_set_attachments(NULL, source, frame) < 0 || av_vt_pixbuf_set_attachments(NULL, target, out) < 0) return AVERROR_EXTERNAL;
+        OSStatus result = VTPixelTransferSessionTransferImage((VTPixelTransferSessionRef)track->transfer, source, target);
+        if (result != noErr) av_log(NULL, AV_LOG_WARNING, "pixel transfer failed: %d\n", (int)result);
+        return result == noErr ? 0 : AVERROR_EXTERNAL;
     }
-    CVPixelBufferRef source = (CVPixelBufferRef)frame->data[3], target = (CVPixelBufferRef)out->data[3];
-    if (av_vt_pixbuf_set_attachments(NULL, source, frame) < 0 || av_vt_pixbuf_set_attachments(NULL, target, out) < 0) return AVERROR_EXTERNAL;
-    OSStatus result = VTPixelTransferSessionTransferImage(track->transfer, source, target);
-    if (result != noErr) av_log(NULL, AV_LOG_WARNING, "pixel transfer failed: %d\n", (int)result);
-    return result == noErr ? 0 : AVERROR_EXTERNAL;
+    return AVERROR(ENOSYS);
 }
 
 static int open_decoder(Track *track) {
@@ -806,7 +812,10 @@ void tvm_cursor_free(TVMCursor *cursor) {
         av_frame_free(&track->shrunk);
         av_frame_free(&track->uploaded);
         av_frame_free(&track->downloaded);
-        if (track->transfer) { VTPixelTransferSessionInvalidate(track->transfer); CFRelease(track->transfer); }
+        if (track->transfer) {
+            if (__builtin_available(iOS 16.0, tvOS 16.0, macOS 10.8, *)) VTPixelTransferSessionInvalidate((VTPixelTransferSessionRef)track->transfer);
+            CFRelease(track->transfer);
+        }
         av_buffer_unref(&track->hwFrames);
         av_buffer_unref(&track->hwDevice);
         drop_held(track);

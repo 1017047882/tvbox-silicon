@@ -1,3 +1,4 @@
+import Perception
 import SwiftUI
 import AVFoundation
 import CoreText
@@ -16,6 +17,7 @@ struct DanmakuOverlay: View {
     @Environment(\.displayScale) private var scale
 
     var body: some View {
+        WithPerceptionTracking {
         TimelineView(.animation) { timeline in
             Canvas { context, size in
                 // Reading the timeline's date makes every tick a new drawing; the clock itself is the player's.
@@ -32,6 +34,8 @@ struct DanmakuOverlay: View {
         .allowsHitTesting(false)
         .accessibilityHidden(true)
         .task(id: "\(revision):\(comments.count)") { engine.load(comments) }
+
+        }
     }
 }
 
@@ -43,9 +47,10 @@ enum DanmakuPreference {
 #if !os(tvOS)
 /// Text size and opacity for the player's danmaku menu, next to the area, for whatever comments are playing.
 struct DanmakuStylePickers: View {
-    @Bindable var model: CatalogDanmakuModel
+    @Perception.Bindable var model: CatalogDanmakuModel
 
     var body: some View {
+        WithPerceptionTracking {
         Picker(selection: $model.fontSize) {
             ForEach(DanmakuStyle.fontSizes(including: model.fontSize), id: \.self) { Text(verbatim: "\(Int($0.rounded()))").tag($0) }
         } label: { Label(L10n.text("Text Size"), systemImage: "textformat.size") }
@@ -54,6 +59,8 @@ struct DanmakuStylePickers: View {
             ForEach(DanmakuStyle.opacities(including: model.opacity), id: \.self) { Text(verbatim: "\(Int(($0 * 100).rounded()))%").tag($0) }
         } label: { Label(L10n.text("Opacity"), systemImage: "circle.lefthalf.filled") }
         .pickerStyle(.menu)
+
+        }
     }
 }
 #endif
@@ -219,14 +226,22 @@ struct DanmakuListView: View {
 
     #if os(tvOS)
     var body: some View {
+        WithPerceptionTracking {
         ScrollViewReader { proxy in
+            WithPerceptionTracking {
             // Not a List: tvOS puts a square focus background behind list cells.
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 4) {
+                    WithPerceptionTracking {
                     ForEach(shown, id: \.offset) { item in
+                        WithPerceptionTracking {
                         Button { jump(to: item.element.time) } label: { tvRow(item.element) }
                             .glassRow()
                             .id(item.offset)
+
+                        }
+                    }
+
                     }
                 }
                 .glassRowInsets()
@@ -235,6 +250,10 @@ struct DanmakuListView: View {
                 let now = player.currentTime().seconds
                 if now.isFinite, let target = comments.firstIndex(where: { $0.time >= now - 1 }) { proxy.scrollTo(target, anchor: .top) }
             }
+
+            }
+        }
+
         }
     }
 
@@ -249,6 +268,7 @@ struct DanmakuListView: View {
     }
     #else
     var body: some View {
+        WithPerceptionTracking {
         VStack(alignment: .leading, spacing: 0) {
             header.padding(.horizontal, 20).padding(.top, 22)
             DanmakuDensity(bins: density, progress: duration > 0 ? now / duration : 0) { fraction in
@@ -266,8 +286,10 @@ struct DanmakuListView: View {
             while !Task.isCancelled {
                 let time = player.currentTime().seconds
                 if time.isFinite { now = time }
-                try? await Task.sleep(for: .milliseconds(500))
+                try? await tvSleep(for: .milliseconds(500))
             }
+        }
+
         }
     }
 
@@ -296,7 +318,7 @@ struct DanmakuListView: View {
             Image(systemName: "magnifyingglass").foregroundStyle(.white.opacity(0.5))
             TextField(L10n.text("Filter comments"), text: $query)
                 .textFieldStyle(.plain)
-                .autocorrectionDisabled()
+                .disableAutocorrection()
                 #if os(iOS)
                 .textInputAutocapitalization(.never)
                 .submitLabel(.search)
@@ -315,19 +337,26 @@ struct DanmakuListView: View {
         let items = shown
         let playhead = query.isEmpty ? nowIndex : nil
         return ScrollViewReader { proxy in
+            WithPerceptionTracking {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
+                    WithPerceptionTracking {
                     ForEach(items, id: \.offset) { item in
+                        WithPerceptionTracking {
                         if item.offset == playhead { nowLine }
                         Button { jump(to: item.element.time) } label: { row(item.element, upcoming: item.element.time > now + 0.5) }
                             .buttonStyle(DanmakuRowStyle())
                             .id(item.offset)
+
+                        }
                     }
                     if playhead == comments.count { nowLine }
+
+                    }
                 }
                 .padding(.horizontal, 10).padding(.bottom, 80)
             }
-            .scrollIndicators(.hidden)
+            .tvScrollIndicators(.hidden)
             // Rows fade out under the search field instead of being cut off.
             .mask {
                 VStack(spacing: 0) {
@@ -338,11 +367,15 @@ struct DanmakuListView: View {
             // Scrolling by hand stops following the video until “Back to Now”.
             .onScrollByHand { following = false }
             .overlay {
+                WithPerceptionTracking {
                 if items.isEmpty {
-                    ContentUnavailableView.search(text: query)
+                    TVEmptyState.search(text: query)
+                }
+
                 }
             }
             .overlay(alignment: .bottom) {
+                WithPerceptionTracking {
                 if !following, query.isEmpty {
                     Button {
                         following = true
@@ -359,11 +392,15 @@ struct DanmakuListView: View {
                     .padding(.bottom, 20)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
+
+                }
             }
-            .animation(.smooth(duration: 0.3), value: following)
+            .animation(.tvSmooth(duration: 0.3), value: following)
             .onAppear { follow(proxy, animated: false) }
-            .onChange(of: now) { _, _ in if following { follow(proxy, animated: true) } }
-            .onChange(of: query) { _, text in if text.isEmpty { follow(proxy, animated: false) } }
+            .tvOnChange(of: now) { _, _ in if following { follow(proxy, animated: true) } }
+            .tvOnChange(of: query) { _, text in if text.isEmpty { follow(proxy, animated: false) } }
+
+            }
         }
     }
 
@@ -398,7 +435,7 @@ struct DanmakuListView: View {
         let target = min(comments.count - 1, nowIndex)
         guard target != anchor || !animated else { return }
         anchor = target
-        if animated { withAnimation(.smooth(duration: 0.4)) { proxy.scrollTo(target, anchor: UnitPoint(x: 0.5, y: 0.4)) } }
+        if animated { withAnimation(.tvSmooth(duration: 0.4)) { proxy.scrollTo(target, anchor: UnitPoint(x: 0.5, y: 0.4)) } }
         else { proxy.scrollTo(target, anchor: UnitPoint(x: 0.5, y: 0.4)) }
     }
 
@@ -419,7 +456,7 @@ struct DanmakuListView: View {
     #endif
 
     static func clock(_ time: Double) -> String {
-        Duration.seconds(Int(time)).formatted(.time(pattern: time >= 3600 ? .hourMinuteSecond : .minuteSecond))
+        TVDelay.seconds(Int(time)).clock(hours: time >= 3600)
     }
 
     /// The comment's own colour; the usual white as a quiet grey so coloured ones stand out.
@@ -444,29 +481,41 @@ private struct DanmakuDensity: View {
     let progress: Double
     let seek: (Double) -> Void
     var body: some View {
+        WithPerceptionTracking {
         GeometryReader { geometry in
+            WithPerceptionTracking {
             let width = geometry.size.width, height = geometry.size.height
             HStack(alignment: .bottom, spacing: 2) {
                 ForEach(bins.indices, id: \.self) { index in
+                    WithPerceptionTracking {
                     let played = (Double(index) + 0.5) / Double(bins.count) <= progress
                     Capsule()
                         .fill(played ? Brand.cyan : Color.white.opacity(0.22))
                         .frame(height: max(3, bins[index] * height))
+
+                    }
                 }
             }
             .frame(width: width, height: height, alignment: .bottom)
             .overlay(alignment: .bottomLeading) {
+                WithPerceptionTracking {
                 Capsule().fill(.white).frame(width: 2, height: height + 6)
                     .offset(x: min(width - 2, max(0, progress * width - 1)), y: 3)
                     .shadow(color: .black.opacity(0.4), radius: 2)
+
+                }
             }
             .contentShape(Rectangle())
             .gesture(DragGesture(minimumDistance: 0).onEnded { value in seek(min(1, max(0, value.location.x / width))) })
+
+            }
         }
         .frame(height: 34)
         .accessibilityElement()
         .accessibilityLabel(L10n.text("Danmaku"))
         .accessibilityValue("\(Int(progress * 100))%")
+
+        }
     }
 }
 
@@ -474,6 +523,7 @@ private struct DanmakuDensity: View {
 private struct DanmakuNowLine: View {
     let time: Double
     var body: some View {
+        WithPerceptionTracking {
         HStack(spacing: 10) {
             Text(DanmakuListView.clock(time))
                 .font(.caption.monospacedDigit().weight(.bold))
@@ -483,6 +533,8 @@ private struct DanmakuNowLine: View {
             Capsule().fill(Brand.cyan).frame(height: 2)
         }
         .padding(.horizontal, 12).padding(.vertical, 6)
+
+        }
     }
 }
 
@@ -498,10 +550,10 @@ extension View {
     /// The danmaku list as a sheet over the player: dark, half height first, pulled up for more.
     func danmakuListPresentation() -> some View {
         #if os(iOS)
-        self.presentationDetents([.medium, .large])
-            .presentationDragIndicator(.visible)
-            .presentationBackground(.ultraThinMaterial)
-            .presentationCornerRadius(28)
+        self.tvPresentationDetents([.medium, .large])
+            .tvPresentationDragIndicator(.visible)
+            .tvPresentationBackground(.ultraThinMaterial)
+            .tvPresentationCornerRadius(28)
             .preferredColorScheme(.dark)
         #else
         self.frame(width: 520, height: 640)

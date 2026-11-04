@@ -1,3 +1,4 @@
+import Perception
 import SwiftUI
 import AVKit
 import CoreMedia
@@ -27,7 +28,13 @@ enum VideoEnhancement {
         #if targetEnvironment(simulator)
         return false
         #else
-        if #available(macOS 26, iOS 26, tvOS 26, *) { return VTLowLatencySuperResolutionScalerConfiguration.isSupported }
+
+#if compiler(>=6.2)
+if #available(macOS 26, iOS 26, tvOS 26, *) { return VTLowLatencySuperResolutionScalerConfiguration.isSupported }
+#else
+
+#endif
+
         return false
         #endif
     }()
@@ -36,7 +43,13 @@ enum VideoEnhancement {
         #if targetEnvironment(simulator)
         return false
         #else
-        if #available(macOS 26, iOS 26, tvOS 26, *) { return VTLowLatencyFrameInterpolationConfiguration.isSupported }
+
+#if compiler(>=6.2)
+if #available(macOS 26, iOS 26, tvOS 26, *) { return VTLowLatencyFrameInterpolationConfiguration.isSupported }
+#else
+
+#endif
+
         return false
         #endif
     }()
@@ -72,26 +85,26 @@ private protocol EnhancementEngine: AnyObject, Sendable {
 }
 
 /// One per playback session: follows the player's item and owns the layer the surfaces show.
-@MainActor @Observable final class VideoEnhancer {
+@MainActor @Perceptible final class VideoEnhancer {
     /// What is on screen now: processed frames drawn over AVKit's picture.
     private(set) var status = VideoEnhancementStatus()
     /// A line for logs and QA: the processors running, frame counts and timing.
     private(set) var summary = "off"
-    @ObservationIgnored let layer = AVSampleBufferDisplayLayer()
-    @ObservationIgnored private weak var player: AVPlayer?
-    @ObservationIgnored private var engine: (any EnhancementEngine)?
-    @ObservationIgnored private var item: AVPlayerItem?
-    @ObservationIgnored private var output: AVPlayerItemVideoOutput?
-    @ObservationIgnored private var itemObservation: NSKeyValueObservation?
-    @ObservationIgnored private var jumpObserver: NSObjectProtocol?
-    @ObservationIgnored private var options = VideoEnhancementOptions()
-    @ObservationIgnored private var displaySize = CGSize.zero
+    @PerceptionIgnored let layer = AVSampleBufferDisplayLayer()
+    @PerceptionIgnored private weak var player: AVPlayer?
+    @PerceptionIgnored private var engine: (any EnhancementEngine)?
+    @PerceptionIgnored private var item: AVPlayerItem?
+    @PerceptionIgnored private var output: AVPlayerItemVideoOutput?
+    @PerceptionIgnored private var itemObservation: NSKeyValueObservation?
+    @PerceptionIgnored private var jumpObserver: NSObjectProtocol?
+    @PerceptionIgnored private var options = VideoEnhancementOptions()
+    @PerceptionIgnored private var displaySize = CGSize.zero
     /// The frames' format, for asking the TV for a display mode.
-    @ObservationIgnored private var format: CMFormatDescription?
-    @ObservationIgnored private var announced: String?
-    @ObservationIgnored private var displayState = ""
+    @PerceptionIgnored private var format: CMFormatDescription?
+    @PerceptionIgnored private var announced: String?
+    @PerceptionIgnored private var displayState = ""
     /// Called when what the screen should do changes: smoothing, its rate, or the first known format.
-    @ObservationIgnored var onDisplayChange: (() -> Void)?
+    @PerceptionIgnored var onDisplayChange: (() -> Void)?
 
     /// Smoothed frames need the screen at `rate`; nil when the screen should follow the video as usual.
     var displayRequest: (rate: Double, format: CMFormatDescription)? {
@@ -115,11 +128,17 @@ private protocol EnhancementEngine: AnyObject, Sendable {
         layer.backgroundColor = nil
         guard VideoEnhancement.canUpscale || VideoEnhancement.canSmooth else { return }
         #if !targetEnvironment(simulator)
-        if #available(macOS 26, iOS 26, tvOS 26, *) {
+
+#if compiler(>=6.2)
+if #available(macOS 26, iOS 26, tvOS 26, *) {
             engine = EnhancementPipeline(renderer: layer.sampleBufferRenderer) { [weak self] status, summary, note, format in
                 Task { @MainActor [weak self] in self?.apply(status, summary: summary, note: note, format: format) }
             }
         }
+#else
+
+#endif
+
         #endif
         itemObservation = player.observe(\.currentItem, options: [.initial, .new]) { [weak self] _, _ in
             Task { @MainActor [weak self] in self?.refresh() }
@@ -129,7 +148,7 @@ private protocol EnhancementEngine: AnyObject, Sendable {
         Task { [weak self] in
             while !Task.isCancelled, self != nil {
                 self?.refresh()
-                try? await Task.sleep(for: .milliseconds(250))
+                try? await tvSleep(for: .milliseconds(250))
             }
         }
     }
@@ -151,7 +170,7 @@ private protocol EnhancementEngine: AnyObject, Sendable {
         #if DEBUG
         next.mark = defaults.bool(forKey: "qaEnhanceHUD")
         #endif
-        let current = (next.upscale || next.smooth) ? player.currentItem : nil
+        let current = (next.upscale || next.tvSmooth) ? player.currentItem : nil
         if current !== item || (current != nil && output == nil) {
             if let item, let output { item.remove(output) }
             if let jumpObserver { NotificationCenter.default.removeObserver(jumpObserver) }
@@ -269,7 +288,7 @@ private protocol EnhancementEngine: AnyObject, Sendable {
                     manager.preferredDisplayCriteria = criteria
                     return
                 }
-                try? await Task.sleep(for: .milliseconds(250))
+                try? await tvSleep(for: .milliseconds(250))
             }
         }
     }
@@ -284,11 +303,14 @@ struct EnhancedVideoSurface: View {
     /// watch page it keeps to its frame, so the enhanced picture must too.
     var bleeds = true
     var body: some View {
+        WithPerceptionTracking {
         if VideoEnhancement.canUpscale || VideoEnhancement.canSmooth {
             // The same area as AVKit's own picture: inside the safe area (under the Mac's title bar) the fitted
             // picture came out smaller than AVKit's, and under the status bar above a watch page's player it came out
             // taller and higher; either way AVKit's picture showed around its edges.
             Host(enhancer: enhancer, fills: fills).ignoresSafeArea(edges: bleeds ? .all : []).allowsHitTesting(false).accessibilityHidden(true)
+        }
+
         }
     }
 
@@ -365,6 +387,8 @@ struct EnhancedVideoSurface: View {
 #if !targetEnvironment(simulator)
 /// The frame pipeline. Everything below runs on `queue`; session starts (which load ML models and can
 /// take longer than a frame) run on `setup` so playback never waits for them.
+
+#if compiler(>=6.2)
 @available(macOS 26, iOS 26, tvOS 26, *)
 private final class EnhancementPipeline: EnhancementEngine, @unchecked Sendable {
     /// How far ahead of the clock frames are pulled, so processing finishes before they are due.
@@ -961,11 +985,17 @@ private final class EnhancementPipeline: EnhancementEngine, @unchecked Sendable 
     /// OS 27 reports the interpolator's size limit. OS 26 has no query, and above 1280×720 its sessions
     /// start and then fail every frame (reported by other developers), so stay within that there.
     private static func interpolationFits(width: Int, height: Int) -> Bool {
-        if #available(macOS 27, iOS 27, tvOS 27, *) {
+
+#if TVBOX_SDK27
+if #available(macOS 27, iOS 27, tvOS 27, *) {
             guard let side = VTLowLatencyFrameInterpolationConfiguration.maximumDimension(forSpatialScaleFactor: 1),
                   let pixels = VTLowLatencyFrameInterpolationConfiguration.maximumPixelCount(forSpatialScaleFactor: 1) else { return false }
             return max(width, height) <= side && width * height <= pixels
         }
+#else
+
+#endif
+
         return max(width, height) <= 1280 && width * height <= 1280 * 720
     }
 
@@ -1025,12 +1055,16 @@ private final class EnhancementPipeline: EnhancementEngine, @unchecked Sendable 
                             counts.failed, counts.cuts, changeMax.histogram, changeMax.difference, average, counts.shown > 0 ? counts.lead / Double(counts.shown) * 1000 : 0)
     }
 }
+#endif
+
 
 private enum StageError: Error { case unsupported, format, pool }
 
 /// Where the two real frames around an in-between one agree (subtitles, logos, a still background), the nearer real
 /// frame's own full-resolution pixels; where they differ, the in-between frame (made from a smaller copy for big
 /// pictures). Two Metal passes: a half-resolution map of what moves, once per interval, then a blend per frame.
+
+#if compiler(>=6.2)
 @available(macOS 26, iOS 26, tvOS 26, *)
 private final class StillRegions: @unchecked Sendable {
     private static let shader = """
@@ -1156,8 +1190,12 @@ private final class StillRegions: @unchecked Sendable {
         return buffer
     }
 }
+#endif
+
 
 /// One running processor and the pool its output frames come from.
+
+#if compiler(>=6.2)
 @available(macOS 26, iOS 26, tvOS 26, *)
 private final class Stage: @unchecked Sendable {
     let key: String
@@ -1207,4 +1245,6 @@ private final class Stage: @unchecked Sendable {
 
     private final class Outcome: @unchecked Sendable { var error: Error? }
 }
+#endif
+
 #endif

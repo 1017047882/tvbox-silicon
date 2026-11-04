@@ -24,7 +24,7 @@ public enum DashStreams {
     public static func files(for url: URL, quality: Int? = nil) -> DashFiles? {
         guard url.scheme == scheme else { return nil }
         let sources = PlaylistStore.shared.sources(url)
-        let named = url.lastPathComponent.firstMatch(of: /^master-(\d+)\.m3u8$/).flatMap { Int($0.1) }
+        let named = url.lastPathComponent.tvFirstMatch(#"^master-(\d+)\.m3u8$"#).flatMap { Int($0[1]) }
         if let wanted = named ?? quality, let match = sources.first(where: { $0.quality == wanted }) { return match }
         return named == nil ? sources.first : nil
     }
@@ -102,7 +102,7 @@ public enum DashStreams {
                       streamInfo: streamInfo[item.quality] ?? "", headers: headers, cid: cid, duration: duration)
         }
         PlaylistStore.shared.add(files, token: token, headers: headers, qualities: qualities, sources: sources)
-        Diagnostics.shared.record(.info, "dash", "qualities=\(video.map { "\($0.0.quality)/\($0.0.codecs)" }.joined(separator: ",")) audio=\(sound?.0.codecs ?? "-") host=\(video[0].1.url.host() ?? "-")")
+        Diagnostics.shared.record(.info, "dash", "qualities=\(video.map { "\($0.0.quality)/\($0.0.codecs)" }.joined(separator: ",")) audio=\(sound?.0.codecs ?? "-") host=\(video[0].1.url.host ?? "-")")
         guard let master = URL(string: address("master.m3u8")) else { return nil }
         if let cid { DanmakuSource.register(master, bilibiliCID: cid, duration: duration) }
         return master
@@ -315,19 +315,19 @@ final class PlaylistStore: @unchecked Sendable {
         }
     }
     func sources(_ url: URL) -> [DashFiles] {
-        guard let token = url.host() else { return [] }
+        guard let token = url.host else { return [] }
         return lock.withLock { files[token] ?? [] }
     }
     func headers(_ url: URL) -> [String: String] {
-        guard let token = url.host() else { return [:] }
+        guard let token = url.host else { return [:] }
         return lock.withLock { requestHeaders[token] ?? [:] }
     }
     func qualities(_ url: URL) -> [StreamQuality] {
-        guard let token = url.host() else { return [] }
+        guard let token = url.host else { return [] }
         return lock.withLock { choices[token] ?? [] }
     }
     func playlist(_ url: URL) -> String? {
-        guard let token = url.host() else { return nil }
+        guard let token = url.host else { return nil }
         return lock.withLock { streams[token]?[url.lastPathComponent] }
     }
 }

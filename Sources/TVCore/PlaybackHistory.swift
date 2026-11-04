@@ -94,11 +94,11 @@ extension PlaybackHistoryEntry {
     public init(file: URL? = nil, cache: MediaCache = .shared, defaults: UserDefaults = .standard) {
         self.cache = cache; self.defaults = defaults
         #if os(tvOS)
-        let directory = URL.cachesDirectory
+        let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         #else
-        let directory = URL.applicationSupportDirectory
+        let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         #endif
-        self.file = file ?? directory.appending(path: "playback-history-v1.json")
+        self.file = file ?? directory.appendingPathComponent("playback-history-v1.json")
         if let data = try? Data(contentsOf: self.file), data.count <= 2 * 1024 * 1024,
            let decoded = try? JSONDecoder().decode([PlaybackHistoryEntry].self, from: data) {
             var seen = Set<String>()

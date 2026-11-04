@@ -1,3 +1,5 @@
+import Perception
+import NavigationBackport
 #if os(iOS)
 import SwiftUI
 import TVCore
@@ -15,7 +17,7 @@ struct PhoneTabs: Equatable {
     /// does, not only compact ones: iPhone Duo's inner display is regular both ways, and there the full set of
     /// sections overflowed the side tab bar into the system's own More list, without the editor. iPads on iOS 17
     /// use it too. Their classic tab bar shows seven tabs and moves the rest into UIKit's More list, which wraps
-    /// each tab's NavigationStack in its own navigation controller: opening a section there and then another tab
+    /// each tab's NBNavigationStack in its own navigation controller: opening a section there and then another tab
     /// crashed with "Layout requested for visible navigation bar ... nest wrapped navigation controllers" (#301).
     /// Seven sections and the app's own More fit that bar without the system list.
     @MainActor static func inUse(horizontal: UserInterfaceSizeClass?) -> Bool {
@@ -85,6 +87,7 @@ struct SectionGlyph: View {
     let section: AppSection
     var size: CGFloat = 36
     var body: some View {
+        WithPerceptionTracking {
         let tint = section.glyphTint
         Image(systemName: section.icon)
             .font(.system(size: size * 0.46, weight: .semibold))
@@ -93,6 +96,8 @@ struct SectionGlyph: View {
             .background(LinearGradient(colors: [tint.blend(with: .white, by: 0.12), tint.blend(with: .black, by: 0.2)], startPoint: .top, endPoint: .bottom),
                         in: RoundedRectangle(cornerRadius: size * 0.3, style: .continuous))
             .accessibilityHidden(true)
+
+        }
     }
 }
 
@@ -100,8 +105,10 @@ struct SectionGlyph: View {
 struct TabBarPreview: View {
     let bar: [AppSection]
     var body: some View {
+        WithPerceptionTracking {
         HStack(spacing: 0) {
             ForEach(bar + [.more]) { item in
+                WithPerceptionTracking {
                 VStack(spacing: 3) {
                     Image(systemName: item.icon).font(.system(size: 17, weight: .medium)).frame(height: 22)
                     Text(item.title).font(.system(size: 10, weight: .medium)).lineLimit(1).minimumScaleFactor(0.7)
@@ -109,12 +116,16 @@ struct TabBarPreview: View {
                 .foregroundStyle(item == bar.first ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
                 .frame(maxWidth: .infinity)
                 .transition(.scale(scale: 0.6).combined(with: .opacity))
+
+                }
             }
         }
         .padding(.horizontal, 6).padding(.vertical, 8)
         .glassSurface(.regular, in: Capsule())
-        .animation(.smooth(duration: 0.3), value: bar)
+        .animation(.tvSmooth(duration: 0.3), value: bar)
         .accessibilityElement(children: .combine)
+
+        }
     }
 }
 
@@ -130,26 +141,35 @@ struct MoreView: View {
     private var slots: Int { PhoneTabs.slots(horizontal: horizontalSizeClass, vertical: verticalSizeClass) }
 
     var body: some View {
+        WithPerceptionTracking {
         let tabs = PhoneTabs(stored: storedTabs).arranged(slots: slots, hiding: store.hiddenSections)
         ScrollView {
             VStack(spacing: 12) {
                 // Pairs; an odd last tile spans the row instead of leaving a hole.
                 ForEach(Array(stride(from: 0, to: tabs.more.count, by: 2)), id: \.self) { start in
+                    WithPerceptionTracking {
                     HStack(spacing: 12) {
                         let row = tabs.more[start..<min(start + 2, tabs.more.count)]
                         ForEach(row) { section in
+                            WithPerceptionTracking {
                             MoreTile(section: section, count: count(section),
                                      badge: badge(section), wide: row.count == 1)
+
+                            }
                         }
                     }
                     .fixedSize(horizontal: false, vertical: true)
+
+                    }
                 }
             }
             .pageContainer()
         }
-        .scrollIndicators(.hidden)
+        .tvScrollIndicators(.hidden)
         .screenBackdrop()
         .screenTitle(L10n.text("More"))
+
+        }
     }
 
     private func badge(_ section: AppSection) -> Bool {
@@ -183,7 +203,8 @@ private struct MoreTile: View {
         (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String).map { L10n.text("Version %@", $0) }
     }
     var body: some View {
-        NavigationLink(value: section) {
+        WithPerceptionTracking {
+        NBNavigationLink(value: section) {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .top, spacing: 8) {
                     SectionGlyph(section: section, size: 38)
@@ -198,7 +219,7 @@ private struct MoreTile: View {
                             .font(.system(size: 26, weight: .bold, design: .rounded))
                             .monospacedDigit().lineLimit(1)
                             .foregroundStyle(.primary)
-                            .contentTransition(.numericText())
+                            .tvContentTransition(.numericText())
                     }
                 }
                 Spacer(minLength: 0)
@@ -209,14 +230,19 @@ private struct MoreTile: View {
             .padding(14)
             .frame(maxWidth: .infinity, minHeight: 104, maxHeight: .infinity, alignment: .leading)
             .background {
+                WithPerceptionTracking {
                 RoundedRectangle(cornerRadius: 22, style: .continuous)
                     .fill(LinearGradient(colors: [section.glyphTint.opacity(0.24), section.glyphTint.opacity(0.03)],
                                          startPoint: .topLeading, endPoint: .bottomTrailing))
+
+                }
             }
             .contentPanel(cornerRadius: 22)
-            .contentShape(.rect(cornerRadius: 22))
+            .contentShape(RoundedRectangle(cornerRadius: 22))
         }
         .buttonStyle(LiftButtonStyle())
+
+        }
     }
 }
 
@@ -230,6 +256,7 @@ struct EditTabBarRow: View {
     private var slots: Int { PhoneTabs.slots(horizontal: horizontalSizeClass, vertical: verticalSizeClass) }
 
     var body: some View {
+        WithPerceptionTracking {
         if PhoneTabs.inUse(horizontal: horizontalSizeClass) {
             Button { editing = true } label: {
                 HStack(spacing: 8) {
@@ -250,6 +277,8 @@ struct EditTabBarRow: View {
             // `-qaEditTabs 1` opens the editor for screenshots once Settings is shown.
             .onAppear { if UserDefaults.standard.bool(forKey: "qaEditTabs") { editing = true } }
             #endif
+        }
+
         }
     }
 }
@@ -284,7 +313,9 @@ private struct TabBarEditor: View {
     private var standard: PhoneTabs { PhoneTabs.standard.arranged(slots: slots) }
 
     var body: some View {
-        NavigationStack {
+        WithPerceptionTracking {
+        NBNavigationStack {
+            WithPerceptionTracking {
             List {
                 Section {
                     TabBarPreview(bar: tabs.bar)
@@ -293,6 +324,7 @@ private struct TabBarEditor: View {
                 }
                 Section {
                     ForEach(rows) { row in
+                        WithPerceptionTracking {
                         switch row {
                         case .section(let section):
                             HStack(spacing: 12) {
@@ -300,12 +332,14 @@ private struct TabBarEditor: View {
                                 Text(section.title).font(.body.weight(.medium)).lineLimit(1)
                             }
                             .padding(.vertical, 3)
-                            .listRowBackground(Surface().clipShape(.rect(cornerRadius: 16, style: .continuous)))
+                            .listRowBackground(Surface().clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous)))
                         case .divider:
                             heading(L10n.text("In More"), symbol: AppSection.more.icon)
                                 .padding(.top, 10)
                                 .listRowBackground(Color.clear)
                                 .moveDisabled(true)
+                        }
+
                         }
                     }
                     .onMove(perform: move)
@@ -317,10 +351,14 @@ private struct TabBarEditor: View {
                                    : "Drag to reorder. Up to four sections fit in the tab bar; the rest stay in More."))
                 }
             }
-            .listRowSpacing(8)
+            .tvListRowSpacing(8)
             .environment(\.editMode, .constant(.active))
-            .scrollContentBackground(.hidden)
-            .background { Backdrop() }
+            .tvScrollContentBackground(.hidden)
+            .background {
+                WithPerceptionTracking {
+ Backdrop()
+                }
+            }
             .navigationTitle(L10n.text("Edit Tab Bar"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -331,10 +369,14 @@ private struct TabBarEditor: View {
                     Button(L10n.text("Done")) { save(tabs); dismiss() }.fontWeight(.semibold)
                 }
                 ToolbarItem(placement: .bottomBar) {
-                    Button(L10n.text("Reset")) { withAnimation(.smooth) { rows = Row.rows(standard) } }
+                    Button(L10n.text("Reset")) { withAnimation(.tvSmooth) { rows = Row.rows(standard) } }
                         .disabled(tabs == standard)
                 }
             }
+
+            }
+        }
+
         }
     }
 
@@ -349,7 +391,7 @@ private struct TabBarEditor: View {
         next.move(fromOffsets: source, toOffset: destination)
         let tabs = Row.tabs(next, slots: slots)
         guard !tabs.bar.isEmpty else { return } // The tab bar keeps at least one section besides More.
-        withAnimation(.smooth) { rows = Row.rows(tabs) }
+        withAnimation(.tvSmooth) { rows = Row.rows(tabs) }
     }
 }
 #endif

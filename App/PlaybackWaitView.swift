@@ -1,3 +1,4 @@
+import Perception
 import SwiftUI
 import TVCore
 
@@ -48,7 +49,9 @@ struct PlaybackWaitView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
+        WithPerceptionTracking {
         GeometryReader { proxy in
+            WithPerceptionTracking {
             let picture = Self.picture(in: proxy.size)
             let layout = Self.layout(size: proxy.size, picture: picture)
             ZStack {
@@ -60,6 +63,8 @@ struct PlaybackWaitView: View {
                 if showsWords { words(in: proxy.size, layout: layout) }
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
+
+            }
         }
         .ignoresSafeArea()
         .allowsHitTesting(false)
@@ -70,6 +75,8 @@ struct PlaybackWaitView: View {
             guard !Task.isCancelled else { return }
             withAnimation(.easeOut(duration: 0.6)) { poster = image }
             drifting = true
+        }
+
         }
     }
 
@@ -82,11 +89,14 @@ struct PlaybackWaitView: View {
     /// The artwork's colours, blurred, so the room around the picture is never black.
     private var ambient: some View {
         Color.black.overlay {
+            WithPerceptionTracking {
             if let poster {
                 Image(decorative: poster, scale: 1).resizable().scaledToFill()
                     .blur(radius: 70).opacity(0.55)
                     .overlay(Color.black.opacity(0.32))
                     .transition(.opacity)
+            }
+
             }
         }
         .clipped()
@@ -97,9 +107,12 @@ struct PlaybackWaitView: View {
             // A wide still fills the picture and drifts, slowly, like an opening title.
             ZStack {
                 Color.clear.overlay {
+                    WithPerceptionTracking {
                     Image(decorative: poster, scale: 1).resizable().scaledToFill()
                         .scaleEffect(drifting && !reduceMotion ? 1.05 : 1)
                         .animation(.linear(duration: 30), value: drifting)
+
+                    }
                 }
                 .overlay(Color.black.opacity(0.16))
                 if !reduceMotion { LightSweep() }
@@ -114,9 +127,17 @@ struct PlaybackWaitView: View {
             let shape = RoundedRectangle(cornerRadius: height * 0.035, style: .continuous)
             Image(decorative: poster, scale: 1).resizable()
                 .frame(width: width, height: height)
-                .overlay { if !reduceMotion { LightSweep() } }
+                .overlay {
+                    WithPerceptionTracking {
+ if !reduceMotion { LightSweep() }
+                    }
+                }
                 .clipShape(shape)
-                .overlay { shape.strokeBorder(.white.opacity(0.14), lineWidth: 0.5) }
+                .overlay {
+                    WithPerceptionTracking {
+ shape.strokeBorder(.white.opacity(0.14), lineWidth: 0.5)
+                    }
+                }
                 .shadow(color: .black.opacity(0.5), radius: height * 0.09, y: height * 0.035)
                 .position(x: area.midX, y: area.midY)
                 .transition(.opacity)
@@ -222,7 +243,7 @@ struct PlaybackWaitView: View {
                     }
                 }
             }
-            .animation(.smooth(duration: 0.45), value: wait)
+            .animation(.tvSmooth(duration: 0.45), value: wait)
             .padding(.horizontal, 24)
             .accessibilityElement(children: .combine)
             VStack(spacing: 0) {
@@ -275,15 +296,21 @@ struct WaitDetails: View {
     var detail: String?
     var steps: [String] = []
     var body: some View {
+        WithPerceptionTracking {
         VStack(spacing: 3) {
             if let detail { Text(detail).font(.caption.monospacedDigit()).foregroundStyle(.white.opacity(0.75)) }
             ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
+                WithPerceptionTracking {
                 Text(step).font(.caption2).foregroundStyle(.white.opacity(index == steps.count - 1 ? 0.55 : 0.35))
+
+                }
             }
         }
         .lineLimit(1)
         .multilineTextAlignment(.center)
         .shadow(color: .black.opacity(0.45), radius: 6)
+
+        }
     }
 }
 
@@ -291,7 +318,9 @@ struct WaitDetails: View {
 private struct LightSweep: View {
     private static let light = Color(red: 1, green: 0.93, blue: 0.83)
     var body: some View {
+        WithPerceptionTracking {
         GeometryReader { proxy in
+            WithPerceptionTracking {
             // 30 frames a second is plenty for a slow band of light, and half the work of the display rate.
             TimelineView(.animation(minimumInterval: 1.0 / 30)) { timeline in
                 let period = 2.9, travel = 2.2
@@ -305,7 +334,11 @@ private struct LightSweep: View {
                     .position(x: -band + (proxy.size.width + band * 2) * eased, y: proxy.size.height / 2)
                     .blendMode(.screen)
             }
+
+            }
         }
         .allowsHitTesting(false)
+
+        }
     }
 }

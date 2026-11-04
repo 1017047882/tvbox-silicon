@@ -1,3 +1,4 @@
+import Perception
 import SwiftUI
 import TVCore
 
@@ -19,24 +20,35 @@ struct WatchNowPhonePage: View {
     }
 
     var body: some View {
+        WithPerceptionTracking {
         let entries = upNext
         GeometryReader { proxy in
+            WithPerceptionTracking {
             let heroHeight = DiscoverLayout.heroHeight(proxy.size.width)
             ZStack(alignment: .top) {
                 WatchNowPhoneBackdrop(state: hero, width: proxy.size.width, height: heroHeight)
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 30) {
+                        WithPerceptionTracking {
                         if !entries.isEmpty {
                             WatchNowPhoneHero(entries: entries, state: hero, width: proxy.size.width, height: heroHeight)
                                 .modifier(WatchNowPhoneTheme(state: hero))
                         }
                         rows
+
+                        }
                     }
                     .padding(.top, entries.isEmpty ? 8 : 0)
                     .padding(.bottom, 28)
                     .background {
+                        WithPerceptionTracking {
                         GeometryReader { geometry in
+                            WithPerceptionTracking {
                             Color.clear.preference(key: DiscoverScrollKey.self, value: -geometry.frame(in: .named("watchNowScroll")).minY)
+
+                            }
+                        }
+
                         }
                     }
                 }
@@ -47,19 +59,23 @@ struct WatchNowPhonePage: View {
                     let past = value > heroHeight - 140
                     if pastHero != past { pastHero = past }
                 })))
-                .scrollIndicators(.hidden)
+                .tvScrollIndicators(.hidden)
             }
             .task(id: entries.map(\.id)) { await hero.load(entries) }
+
+            }
         }
         // Over the hero the page has no title, as Discover; without one it keeps its name.
         .navigationTitle(entries.isEmpty ? L10n.text("Watch Now") : "")
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.visible, for: .navigationBar)
-        .toolbarBackground(entries.isEmpty ? .automatic : .hidden, for: .navigationBar)
-        .toolbarColorScheme(entries.isEmpty || pastHero || hero.paint == nil ? nil : hero.paint?.isDark == false ? .light : .dark, for: .navigationBar)
+        .tvToolbar(.visible, for: .navigationBar)
+        .tvToolbarBackground(entries.isEmpty ? .automatic : .hidden, for: .navigationBar)
+        .tvToolbarColorScheme(entries.isEmpty || pastHero || hero.paint == nil ? nil : hero.paint?.isDark == false ? .light : .dark, for: .navigationBar)
         #endif
         .ignoresSafeArea(edges: entries.isEmpty ? [] : .top)
+
+        }
     }
 
     @ViewBuilder private var rows: some View {
@@ -75,10 +91,20 @@ struct WatchNowPhonePage: View {
                 VStack(alignment: .leading, spacing: 0) {
                     WatchNowPhoneHeading(title: L10n.text("Pinned Sources"), action: { store.section = .sites })
                     LazyVGrid(columns: Layout.cardColumns, spacing: Layout.cardSpacing) {
+                        WithPerceptionTracking {
                         ForEach(pinned) { site in
+                            WithPerceptionTracking {
                             RouteLink { SiteView(site: site, origin: config.origin, jarURL: config.spiderURL) } label: { SiteCard(site: site, marksPinned: false) }
-                                .tileButton().contextMenu { PinSourceButton(site: site, origin: config.origin) }
+                                .tileButton().contextMenu {
+                                    WithPerceptionTracking {
+ PinSourceButton(site: site, origin: config.origin)
+                                    }
+                                }
                                 .accessibilityIdentifier("home.pinned." + site.key)
+
+                            }
+                        }
+
                         }
                     }
                     .padding(.horizontal, DiscoverLayout.gutter)
@@ -109,8 +135,11 @@ struct WatchNowPhonePage: View {
 private struct WatchNowPhoneTheme: ViewModifier {
     let state: WatchNowHeroState
     func body(content: Content) -> some View {
+        WithPerceptionTracking {
         content.foregroundStyle(state.paint?.isDark == false ? Color.black : Color.white)
             .environment(\.colorScheme, state.paint?.isDark == false ? .light : .dark)
+
+        }
     }
 }
 
@@ -125,6 +154,7 @@ private struct WatchNowPhoneBackdrop: View {
     private static let fade: CGFloat = 90
 
     var body: some View {
+        WithPerceptionTracking {
         ZStack(alignment: .top) {
             Backdrop()
             ZStack(alignment: .top) {
@@ -140,6 +170,8 @@ private struct WatchNowPhoneBackdrop: View {
         .discoverFullBleed()
         .accessibilityHidden(true)
         .allowsHitTesting(false)
+
+        }
     }
 
     private func layer(_ paint: DiscoverPaint) -> some View {
@@ -190,6 +222,7 @@ private struct WatchNowPhoneHero: View {
     private var selectedID: String? { state.selected ?? entries.first?.id }
 
     var body: some View {
+        WithPerceptionTracking {
         ZStack(alignment: .bottom) {
             #if os(macOS)
             // One title at a time, as Discover on the Mac: in the split view's detail a horizontal scroll view takes
@@ -198,6 +231,7 @@ private struct WatchNowPhoneHero: View {
             page(entries[index]).frame(width: width, height: height)
                 .id(entries[index].id).transition(.opacity)
                 .overlay {
+                    WithPerceptionTracking {
                     if entries.count > 1 {
                         HStack {
                             arrow("chevron.left", label: L10n.text("Previous"), to: index - 1)
@@ -206,28 +240,49 @@ private struct WatchNowPhoneHero: View {
                         }
                         .padding(.horizontal, 20).opacity(hovering ? 1 : 0).animation(.easeOut(duration: 0.2), value: hovering)
                     }
+
+                    }
                 }
                 .onHover { hovering = $0 }
             #else
+            if #available(iOS 17, *) {
             ScrollView(.horizontal) {
                 LazyHStack(spacing: 0) {
+                    WithPerceptionTracking {
                     ForEach(entries) { entry in
+                        WithPerceptionTracking {
                         page(entry).frame(width: width, height: height).id(entry.id)
+
+                        }
+                    }
+
                     }
                 }
-                .scrollTargetLayout()
+                .tvScrollTargetLayout()
             }
-            .scrollTargetBehavior(.paging)
-            .scrollPosition(id: Binding(get: { selectedID }, set: { id in
+            .tvScrollTargetBehavior(.paging)
+            .tvScrollPosition(id: Binding(get: { selectedID }, set: { id in
                 guard let id, id != state.selected else { return }
                 withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.35)) { state.selected = id }
             }))
-            .scrollIndicators(.hidden)
+            .tvScrollIndicators(.hidden)
+            } else {
+                TabView(selection: Binding(get: { selectedID }, set: { state.selected = $0 })) {
+                    ForEach(entries) { entry in
+                        WithPerceptionTracking {
+                            page(entry).frame(width: width, height: height).tag(Optional(entry.id))
+                        }
+                    }
+                }
+                .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
+            }
             #endif
             if entries.count > 1 { dots.padding(.bottom, 8) }
         }
         .frame(height: height)
         .accessibilityIdentifier("home.upNext")
+
+        }
     }
 
     private func page(_ entry: PlaybackHistoryEntry) -> some View {
@@ -252,7 +307,11 @@ private struct WatchNowPhoneHero: View {
             if entry.duration > 0 {
                 HStack(spacing: 8) {
                     Capsule().fill(.primary.opacity(0.25)).frame(width: 90, height: 4)
-                        .overlay(alignment: .leading) { Capsule().fill(.primary).frame(width: 90 * entry.progress) }
+                        .overlay(alignment: .leading) {
+                            WithPerceptionTracking {
+ Capsule().fill(.primary).frame(width: 90 * entry.progress)
+                            }
+                        }
                     Text(HistoryFormat.status(entry)).font(.system(size: 12).monospacedDigit()).opacity(0.75)
                 }
                 .padding(.top, 8)
@@ -305,6 +364,7 @@ private struct WatchNowPhoneHero: View {
     private var dots: some View {
         HStack(spacing: 0) {
             ForEach(entries) { entry in
+                WithPerceptionTracking {
                 Button {
                     withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.35)) { state.selected = entry.id }
                 } label: {
@@ -314,6 +374,8 @@ private struct WatchNowPhoneHero: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel(entry.context.videoName)
                 .accessibilityAddTraits(entry.id == selectedID ? [.isSelected] : [])
+
+                }
             }
         }
     }
@@ -326,6 +388,7 @@ struct WatchNowPhoneHeading: View {
     var route: Route? = nil
     var action: (() -> Void)? = nil
     var body: some View {
+        WithPerceptionTracking {
         Button {
             if let route { openRoute?(route) } else { action?() }
         } label: {
@@ -343,6 +406,8 @@ struct WatchNowPhoneHeading: View {
         .disabled(route == nil && action == nil)
         .padding(.horizontal, DiscoverLayout.gutter)
         .accessibilityAddTraits(.isHeader)
+
+        }
     }
 }
 
@@ -353,9 +418,12 @@ struct WatchNowPhoneShelf<Content: View>: View {
     var action: (() -> Void)? = nil
     @ViewBuilder let content: () -> Content
     var body: some View {
+        WithPerceptionTracking {
         VStack(alignment: .leading, spacing: 0) {
             WatchNowPhoneHeading(title: title, route: route, action: action)
             WatchNowPhoneRow(content: content)
+        }
+
         }
     }
 }
@@ -363,9 +431,16 @@ struct WatchNowPhoneShelf<Content: View>: View {
 struct WatchNowPhoneRow<Content: View>: View {
     @ViewBuilder let content: () -> Content
     var body: some View {
+        WithPerceptionTracking {
         DiscoverRail {
-            LazyHStack(alignment: .top, spacing: DiscoverLayout.spacing) { content() }
+            LazyHStack(alignment: .top, spacing: DiscoverLayout.spacing) {
+                WithPerceptionTracking {
+ content()
+                }
+            }
                 .padding(.horizontal, DiscoverLayout.gutter)
+        }
+
         }
     }
 }
@@ -378,15 +453,26 @@ struct WatchNowPhoneCover: View {
     let poster: URL?
     var headers: [String: String] = [:]
     var body: some View {
+        WithPerceptionTracking {
         VStack(alignment: .leading, spacing: 0) {
             Color.clear.aspectRatio(2.0 / 3, contentMode: .fit)
-                .overlay { PosterImage(url: poster, headers: headers) }
+                .overlay {
+                    WithPerceptionTracking {
+ PosterImage(url: poster, headers: headers)
+                    }
+                }
                 .posterClip(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.primary.opacity(0.1), lineWidth: 0.5) }
+                .overlay {
+                    WithPerceptionTracking {
+ RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.primary.opacity(0.1), lineWidth: 0.5)
+                    }
+                }
             WatchNowPhoneCaption(title: title, detail: detail)
         }
         .frame(width: Self.width)
         .accessibilityElement(children: .combine)
+
+        }
     }
 }
 
@@ -394,23 +480,30 @@ private struct WatchNowPhoneCaption: View {
     let title: String
     let detail: String
     var body: some View {
+        WithPerceptionTracking {
         VStack(alignment: .leading, spacing: 1) {
             Text(title).font(.system(size: DiscoverLayout.caption)).lineLimit(1)
             Text(detail.isEmpty ? " " : detail).font(.system(size: DiscoverLayout.secondary, design: .rounded))
                 .foregroundStyle(.primary.opacity(0.56)).lineLimit(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading).frame(height: DiscoverLayout.captionHeight)
+
+        }
     }
 }
 
 /// Placeholders for a row still loading, as tall as the covers and captions that replace them.
 struct WatchNowPhoneSkeletonRow: View {
     var body: some View {
+        WithPerceptionTracking {
         HStack(alignment: .top, spacing: DiscoverLayout.spacing) {
             ForEach(0..<4, id: \.self) { _ in
+                WithPerceptionTracking {
                 SkeletonBlock(cornerRadius: 12)
                     .frame(width: WatchNowPhoneCover.width, height: WatchNowPhoneCover.width * 1.5)
                     .frame(height: WatchNowPhoneCover.width * 1.5 + DiscoverLayout.captionHeight, alignment: .top)
+
+                }
             }
         }
         .padding(.horizontal, DiscoverLayout.gutter)
@@ -418,6 +511,8 @@ struct WatchNowPhoneSkeletonRow: View {
         .clipped()
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(L10n.text("Loading…"))
+
+        }
     }
 }
 
@@ -428,21 +523,34 @@ private struct WatchNowPhoneFavorite: View {
     let item: FavoriteItem
 
     var body: some View {
+        WithPerceptionTracking {
         switch item {
         case .video(let video):
             let cover = WatchNowPhoneCover(title: video.videoName, detail: SourceLabel(video.sourceName).text, poster: video.poster, headers: video.posterHeaders)
             if let listing = video.listingVideo(), let client = store.catalogClient(for: video) {
                 RouteLink { VideoDetailView(video: listing, client: client) } label: { cover }
-                    .tmdbCardButton().contextMenu { FavoriteMenuButton(item: item, name: video.videoName) }
+                    .tmdbCardButton().contextMenu {
+                        WithPerceptionTracking {
+ FavoriteMenuButton(item: item, name: video.videoName)
+                        }
+                    }
             } else {
                 Button { store.reportMissingFavoriteSource() } label: { cover }
-                    .tmdbCardButton().contextMenu { FavoriteMenuButton(item: item, name: video.videoName) }
+                    .tmdbCardButton().contextMenu {
+                        WithPerceptionTracking {
+ FavoriteMenuButton(item: item, name: video.videoName)
+                        }
+                    }
             }
         case .episode(let episode):
             Button { store.play(episode) } label: {
                 WatchNowPhoneCover(title: episode.video.videoName, detail: episode.episodeName, poster: episode.video.poster, headers: episode.video.posterHeaders)
             }
-            .tmdbCardButton().contextMenu { FavoriteMenuButton(item: item, name: episode.video.videoName) }
+            .tmdbCardButton().contextMenu {
+                WithPerceptionTracking {
+ FavoriteMenuButton(item: item, name: episode.video.videoName)
+                }
+            }
         case .live(let channel):
             plate(title: channel.name, detail: channel.displayGroup, action: { store.playing = channel }) {
                 ChannelLogo(channel: channel, size: 64)
@@ -456,6 +564,8 @@ private struct WatchNowPhoneFavorite: View {
             plate(title: file.fileName, detail: CloudFiles.drive(key: file.driveKey)?.name ?? file.driveKey, action: { store.play(file) }) {
                 Image(systemName: cloud.symbol).font(.system(size: 40, weight: .medium)).foregroundStyle(cloud.tint)
             }
+        }
+
         }
     }
 
@@ -474,14 +584,22 @@ private struct WatchNowPhoneFavorite: View {
             VStack(alignment: .leading, spacing: 0) {
                 RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.primary.opacity(0.08))
                     .aspectRatio(2.0 / 3, contentMode: .fit)
-                    .overlay { art() }
+                    .overlay {
+                        WithPerceptionTracking {
+ art()
+                        }
+                    }
                 WatchNowPhoneCaption(title: title, detail: detail)
             }
             .frame(width: WatchNowPhoneCover.width)
             .accessibilityElement(children: .combine)
         }
         .tmdbCardButton()
-        .contextMenu { FavoriteMenuButton(item: item, name: name) }
+        .contextMenu {
+            WithPerceptionTracking {
+ FavoriteMenuButton(item: item, name: name)
+            }
+        }
     }
 }
 
@@ -496,6 +614,7 @@ struct WatchNowPhoneCategoryRail: View {
     private var key: String { WatchNowRows.key(category: category, client: client) }
 
     var body: some View {
+        WithPerceptionTracking {
         let row = WatchNowRows.shared.rows[key]
         Group {
             if let row, row.videos.isEmpty {
@@ -507,11 +626,14 @@ struct WatchNowPhoneCategoryRail: View {
                     if let row {
                         WatchNowPhoneRow {
                             ForEach(row.videos.prefix(20)) { video in
+                                WithPerceptionTracking {
                                 let cover = WatchNowPhoneCover(title: video.name, detail: video.remarks, poster: video.poster, headers: video.posterHeaders)
                                 if isIndex {
                                     Button { store.searchVideos(video.name) } label: { cover }.tmdbCardButton()
                                 } else {
                                     RouteLink { CatalogDestination(video: video, client: client) } label: { cover }.tmdbCardButton()
+                                }
+
                                 }
                             }
                         }
@@ -522,6 +644,8 @@ struct WatchNowPhoneCategoryRail: View {
             }
         }
         .task(id: key) { WatchNowRows.shared.load(category: category, client: client) }
+
+        }
     }
 }
 #endif

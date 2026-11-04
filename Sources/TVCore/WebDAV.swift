@@ -19,7 +19,7 @@ public actor WebDAV {
     /// address's server; its path is the folder to start in. Throws when the share wants an account
     /// and none, or a wrong one, was given.
     public func probe(_ url: URL, username: String = "", password: String = "") async throws -> AListServer? {
-        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false), let host = url.host(),
+        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false), let host = url.host,
               ["http", "https"].contains(parts.scheme?.lowercased() ?? "") else { return nil }
         let root = AListServer.folder(parts.percentEncodedPath)
         parts.percentEncodedPath = ""; parts.query = nil; parts.fragment = nil; parts.user = nil; parts.password = nil

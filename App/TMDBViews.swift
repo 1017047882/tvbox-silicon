@@ -1,10 +1,12 @@
+import Perception
+import NavigationBackport
 import ImageIO
 import SwiftUI
 import TVCore
 
 /// A video page's TMDB details (`TMDBMatch`): what this device already knows shows at once; otherwise the lookup runs
 /// while the page is open and its steps show, since a title nobody opened before takes some seconds.
-@MainActor @Observable final class TMDBLookup {
+@MainActor @Perceptible final class TMDBLookup {
     enum Phase: Equatable {
         case idle, looking, matched, ambiguous, notFound, failed, off
     }
@@ -57,7 +59,7 @@ import TVCore
             guard let fresh = try? await TMDBMatch.details(match.mediaType, id: match.id, season: match.season),
                   self.key == key, !chosen, fresh != details else { return }
             let answer = await TMDBMatchStore.shared.update(fresh, for: key)
-            withAnimation(.smooth(duration: 0.35)) {
+            withAnimation(.tvSmooth(duration: 0.35)) {
                 details = fresh
                 if let answer { self.answer = answer }
             }
@@ -74,11 +76,11 @@ import TVCore
             let answer = try await TMDBMatch.lookup(request) { step in
                 Task { @MainActor [weak self] in
                     guard let self, step != .thinking || self.step == .starting else { return }
-                    withAnimation(.smooth(duration: 0.25)) { self.step = step }
+                    withAnimation(.tvSmooth(duration: 0.25)) { self.step = step }
                 }
             }
             await TMDBMatchStore.shared.save(answer, for: key)
-            withAnimation(.smooth(duration: 0.35)) { show(answer) }
+            withAnimation(.tvSmooth(duration: 0.35)) { show(answer) }
         } catch {
             guard !Task.isCancelled, !(error is CancellationError), (error as? URLError)?.code != .cancelled else { phase = .idle; return }
             // Not a failure of the page: it just shows the source's own details.
@@ -104,14 +106,14 @@ import TVCore
         guard let key else { return }
         chosen = true
         await TMDBMatchStore.shared.choose(.none, for: key)
-        withAnimation(.smooth(duration: 0.3)) { details = nil; phase = .notFound }
+        withAnimation(.tvSmooth(duration: 0.3)) { details = nil; phase = .notFound }
     }
 
     private func load(_ type: TMDBMatch.MediaType, id: Int, season: Int?) async {
         phase = .looking; step = .loading
         do {
             let value = try await TMDBMatch.details(type, id: id, season: season)
-            withAnimation(.smooth(duration: 0.35)) { details = value; phase = .matched }
+            withAnimation(.tvSmooth(duration: 0.35)) { details = value; phase = .matched }
         } catch {
             guard !Task.isCancelled else { return }
             Diagnostics.shared.record(.warning, "tmdb", "details failed: \(error.localizedDescription)")
@@ -182,6 +184,7 @@ extension TMDBMatch.Details {
 struct TMDBLookupStatus: View {
     let lookup: TMDBLookup
     var body: some View {
+        WithPerceptionTracking {
         switch lookup.phase {
         case .looking:
             HStack(spacing: 12) {
@@ -189,7 +192,7 @@ struct TMDBLookupStatus: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(L10n.text("Finding this title on TMDB")).font(.subheadline.weight(.semibold))
                     Text(lookup.step.text).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                        .contentTransition(.opacity)
+                        .tvContentTransition(.opacity)
                         .id(lookup.step.text)
                         .transition(.opacity)
                 }
@@ -205,6 +208,8 @@ struct TMDBLookupStatus: View {
         default:
             EmptyView()
         }
+
+        }
     }
 }
 
@@ -212,6 +217,7 @@ struct TMDBLookupStatus: View {
 struct TMDBChoices: View {
     let lookup: TMDBLookup
     var body: some View {
+        WithPerceptionTracking {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -225,10 +231,13 @@ struct TMDBChoices: View {
             ScrollView(.horizontal) {
                 HStack(alignment: .top, spacing: TMDBMetrics.spacing) {
                     ForEach(lookup.candidates) { candidate in
+                        WithPerceptionTracking {
                         Button { Task { await lookup.choose(candidate.mediaType, id: candidate.id, season: nil) } } label: {
                             TMDBCandidateTile(candidate: candidate)
                         }
                         .tmdbCardButton()
+
+                        }
                     }
                     Button { Task { await lookup.reject() } } label: {
                         VStack(spacing: 8) {
@@ -243,11 +252,13 @@ struct TMDBChoices: View {
                 }
                 .padding(.vertical, TMDBMetrics.focusRoom)
             }
-            .scrollIndicators(.never)
-            .scrollClipDisabled()
+            .tvScrollIndicators(.never)
+            .tvScrollClipDisabled()
         }
         .padding(14)
         .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+        }
     }
 }
 
@@ -263,6 +274,7 @@ struct TMDBCandidateTile: View {
         self.name = name; self.year = year; self.mediaType = mediaType; self.poster = poster
     }
     var body: some View {
+        WithPerceptionTracking {
         VStack(alignment: .leading, spacing: 6) {
             PosterImage(url: poster)
                 .frame(width: TMDBMetrics.candidate, height: TMDBMetrics.candidate * 1.5)
@@ -273,17 +285,22 @@ struct TMDBCandidateTile: View {
         }
         .frame(width: TMDBMetrics.candidate, alignment: .leading)
         .foregroundStyle(.primary)
+
+        }
     }
 }
 
 /// TMDB's name for what the details come from, in its colors.
 struct TMDBBadge: View {
     var body: some View {
+        WithPerceptionTracking {
         Text("TMDB")
             .font(.system(size: TMDBMetrics.badge, weight: .heavy, design: .rounded))
             .foregroundStyle(LinearGradient(colors: [Color(red: 0.56, green: 0.81, blue: 0.63), Color(red: 0.00, green: 0.71, blue: 0.89)],
                                             startPoint: .leading, endPoint: .trailing))
             .accessibilityLabel("TMDB")
+
+        }
     }
 }
 
@@ -314,11 +331,14 @@ extension View {
 struct TMDBCastRow: View {
     let cast: [TMDBMatch.Person]
     var body: some View {
+        WithPerceptionTracking {
         VStack(alignment: .leading, spacing: 10) {
             Text(L10n.text("Cast")).font(.headline)
             ScrollView(.horizontal) {
                 LazyHStack(alignment: .top, spacing: TMDBMetrics.spacing) {
+                    WithPerceptionTracking {
                     ForEach(Array(cast.enumerated()), id: \.offset) { _, person in
+                        WithPerceptionTracking {
                         VStack(spacing: 6) {
                             PosterImage(url: person.profile, symbol: "person.fill")
                                 .frame(width: TMDBMetrics.castPhoto, height: TMDBMetrics.castPhoto)
@@ -328,10 +348,16 @@ struct TMDBCastRow: View {
                         }
                         .frame(width: TMDBMetrics.castPhoto + 16)
                         .accessibilityElement(children: .combine)
+
+                        }
+                    }
+
                     }
                 }
             }
-            .scrollIndicators(.never)
+            .tvScrollIndicators(.never)
+        }
+
         }
     }
 }
@@ -342,19 +368,28 @@ struct TMDBRelatedRow: View {
     let titles: [TMDBMatch.Candidate]
     let search: (String) -> Void
     var body: some View {
+        WithPerceptionTracking {
         VStack(alignment: .leading, spacing: 10) {
             Text(L10n.text("You May Like")).font(.headline)
             ScrollView(.horizontal) {
                 LazyHStack(alignment: .top, spacing: TMDBMetrics.spacing) {
+                    WithPerceptionTracking {
                     ForEach(titles, id: \.key) { title in
+                        WithPerceptionTracking {
                         Button { search(title.name) } label: { TMDBCandidateTile(candidate: title) }
                             .tmdbCardButton()
+
+                        }
+                    }
+
                     }
                 }
                 .padding(.vertical, TMDBMetrics.focusRoom)
             }
-            .scrollIndicators(.never)
-            .scrollClipDisabled()
+            .tvScrollIndicators(.never)
+            .tvScrollClipDisabled()
+        }
+
         }
     }
 }
@@ -374,19 +409,28 @@ struct TMDBInfoGrid: View {
         return rows
     }
     var body: some View {
+        WithPerceptionTracking {
         let rows = rows
         if !rows.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
                 Text(L10n.text("Information")).font(.headline)
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 16, alignment: .topLeading)], alignment: .leading, spacing: 12) {
+                    WithPerceptionTracking {
                     ForEach(rows, id: \.0) { row in
+                        WithPerceptionTracking {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(row.0).font(.caption).foregroundStyle(.secondary)
                             Text(row.1).font(.subheadline).fixedSize(horizontal: false, vertical: true).selectable()
                         }
+
+                        }
+                    }
+
                     }
                 }
             }
+        }
+
         }
     }
 }
@@ -397,6 +441,7 @@ struct TMDBFooter: View {
     let title: String
     @State private var choosing = false
     var body: some View {
+        WithPerceptionTracking {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 TMDBBadge()
@@ -418,10 +463,20 @@ struct TMDBFooter: View {
         #endif
         #if os(tvOS)
         // A page of posters: a sheet with a list was a small box in the middle of the screen.
-        .fullScreenCover(isPresented: $choosing) { TMDBTVPicker(lookup: lookup, title: title) }
+        .fullScreenCover(isPresented: $choosing) {
+            WithPerceptionTracking {
+ TMDBTVPicker(lookup: lookup, title: title)
+            }
+        }
         #else
-        .sheet(isPresented: $choosing) { TMDBPicker(lookup: lookup, title: title) }
+        .sheet(isPresented: $choosing) {
+            WithPerceptionTracking {
+ TMDBPicker(lookup: lookup, title: title)
+            }
+        }
         #endif
+
+        }
     }
 }
 
@@ -439,13 +494,18 @@ struct TMDBPicker: View {
     }
 
     var body: some View {
-        NavigationStack {
+        WithPerceptionTracking {
+        NBNavigationStack {
+            WithPerceptionTracking {
             List {
                 if !lookup.candidates.isEmpty && results.isEmpty {
                     Section(L10n.text("Suggestions")) {
                         ForEach(lookup.candidates) { candidate in
+                            WithPerceptionTracking {
                             row(name: candidate.name, year: candidate.year, type: candidate.mediaType, poster: candidate.poster) {
                                 await lookup.choose(candidate.mediaType, id: candidate.id, season: nil)
+                            }
+
                             }
                         }
                     }
@@ -453,8 +513,11 @@ struct TMDBPicker: View {
                 if !results.isEmpty {
                     Section(L10n.text("TMDB")) {
                         ForEach(results) { result in
+                            WithPerceptionTracking {
                             row(name: result.name, year: result.year, type: result.mediaType, poster: result.poster) {
                                 await lookup.choose(result.mediaType, id: result.id, season: nil)
+                            }
+
                             }
                         }
                     }
@@ -467,17 +530,25 @@ struct TMDBPicker: View {
             .searchable(text: $query, prompt: L10n.text("Search TMDB"))
             #endif
             .onSubmit(of: .search) { Task { await search() } }
-            .overlay { if searching { ProgressView() } }
+            .overlay {
+                WithPerceptionTracking {
+ if searching { ProgressView() }
+                }
+            }
             .navigationTitle(L10n.text("Not This Title?"))
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button(L10n.text("Cancel")) { dismiss() } } }
             .task { if lookup.candidates.isEmpty { await search() } }
+
+            }
         }
         #if os(macOS)
         .frame(minWidth: 420, minHeight: 520)
         #endif
+
+        }
     }
 
     private func search() async {
@@ -518,7 +589,8 @@ struct TMDBTVPicker: View {
     }
 
     var body: some View {
-        NavigationStack {
+        WithPerceptionTracking {
+        NBNavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 40) {
                     Text(L10n.text("Not This Title?")).font(.title2.weight(.bold))
@@ -547,9 +619,11 @@ struct TMDBTVPicker: View {
         }
         // Searches as the viewer types: the inline keyboard has no reliable submit.
         .task(id: query) {
-            try? await Task.sleep(for: .milliseconds(600))
+            try? await tvSleep(for: .milliseconds(600))
             guard !Task.isCancelled else { return }
             await search()
+        }
+
         }
     }
 
@@ -558,11 +632,17 @@ struct TMDBTVPicker: View {
             Text(title).font(.headline)
             LazyVGrid(columns: [GridItem(.adaptive(minimum: TMDBMetrics.candidate), spacing: TMDBMetrics.spacing, alignment: .top)],
                       alignment: .leading, spacing: TMDBMetrics.spacing) {
+                          WithPerceptionTracking {
                 ForEach(tiles, id: \.0) { tile in
+                    WithPerceptionTracking {
                     Button { Task { await lookup.choose(tile.2, id: tile.3, season: nil); dismiss() } } label: { tile.1 }
                         .tmdbCardButton()
+
+                    }
                 }
-            }
+
+                          }
+                      }
             .tvFocusSection()
         }
     }
@@ -587,7 +667,9 @@ struct TMDBBanner<Actions: View>: View {
     @ViewBuilder let actions: Actions
     @State private var logoAspect: CGFloat?
     var body: some View {
+        WithPerceptionTracking {
         GeometryReader { proxy in
+            WithPerceptionTracking {
             let width = proxy.size.width
             ZStack(alignment: .bottomLeading) {
                 Color(white: 0.12)
@@ -609,9 +691,13 @@ struct TMDBBanner<Actions: View>: View {
                 // A narrow banner (an iPad's side-by-side window) gives the title its whole width.
                 .frame(maxWidth: width < 600 ? width : min(width * 0.62, TMDBBannerMetrics.textWidth), alignment: .leading)
             }
+
+            }
         }
         .foregroundStyle(.white).environment(\.colorScheme, .dark)
         .clipShape(RoundedRectangle(cornerRadius: TMDBBannerMetrics.corner, style: .continuous))
+
+        }
     }
 
     @ViewBuilder private func title(width: CGFloat) -> some View {
@@ -620,7 +706,11 @@ struct TMDBBanner<Actions: View>: View {
             let size = logoSize(width)
             TMDBArtwork(url: logo, maxPixels: 1000, fill: false, aspect: $logoAspect)
                 .frame(width: logoAspect == nil ? nil : size.width, height: logoAspect == nil ? nil : size.height, alignment: .leading)
-                .overlay(alignment: .leading) { if logoAspect == nil { nameText } }
+                .overlay(alignment: .leading) {
+                    WithPerceptionTracking {
+ if logoAspect == nil { nameText }
+                    }
+                }
                 .shadow(color: .black.opacity(0.35), radius: 10)
                 .accessibilityLabel(details.name)
         } else {
@@ -667,7 +757,9 @@ struct PosterBanner<Actions: View>: View {
     @Binding var aspect: CGFloat?
     @ViewBuilder let actions: Actions
     var body: some View {
+        WithPerceptionTracking {
         GeometryReader { proxy in
+            WithPerceptionTracking {
             let size = proxy.size, inset = TMDBBannerMetrics.inset
             let ratio = min(max(aspect ?? 2.0 / 3.0, 0.6), 1.8)
             // A landscape cover may take at most ~40% of the banner, so the title keeps its room.
@@ -697,9 +789,13 @@ struct PosterBanner<Actions: View>: View {
                 .padding(inset)
                 .frame(maxWidth: min(max(size.width - artWidth - inset * 2, 240), TMDBBannerMetrics.textWidth), alignment: .leading)
             }
+
+            }
         }
         .foregroundStyle(.white).environment(\.colorScheme, .dark)
         .clipShape(RoundedRectangle(cornerRadius: TMDBBannerMetrics.corner, style: .continuous))
+
+        }
     }
 }
 
@@ -708,7 +804,9 @@ struct PosterBanner<Actions: View>: View {
 struct EpisodeNumberArt: View {
     let name: String
     var body: some View {
+        WithPerceptionTracking {
         GeometryReader { proxy in
+            WithPerceptionTracking {
             let number = TMDBMatch.episodeNumber(name)
             let height = proxy.size.height
             ZStack(alignment: .bottomTrailing) {
@@ -719,8 +817,12 @@ struct EpisodeNumberArt: View {
                     .lineLimit(1).minimumScaleFactor(0.3)
                     .padding(.horizontal, height * 0.12).padding(.bottom, height * (number == nil ? 0.12 : 0.02))
             }
+
+            }
         }
         .accessibilityHidden(true)
+
+        }
     }
 }
 
@@ -734,13 +836,21 @@ struct TMDBEpisodeTile: View {
     /// nil fills the grid cell.
     var width: CGFloat? = TMDBMetrics.episodeTile
     var body: some View {
+        WithPerceptionTracking {
         VStack(alignment: .leading, spacing: 6) {
             Color.clear.aspectRatio(16.0 / 9.0, contentMode: .fit)
                 .overlay {
+                    WithPerceptionTracking {
                     if let still = info?.still {
                         PosterImage(url: still, symbol: "play.rectangle")
                     } else {
-                        EpisodeNumberArt(name: name).overlay { CoverOverlayStack() }
+                        EpisodeNumberArt(name: name).overlay {
+                            WithPerceptionTracking {
+ CoverOverlayStack()
+                            }
+                        }
+                    }
+
                     }
                 }
                 .coverOverlay(animated: true) { if loading { ProgressView().padding(8).background(.black.opacity(0.45), in: Circle()) } }
@@ -762,6 +872,8 @@ struct TMDBEpisodeTile: View {
         .frame(width: width, alignment: .leading)
         .frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)
         .contentShape(Rectangle())
+
+        }
     }
 }
 
@@ -777,6 +889,7 @@ struct TMDBArtwork: View {
     final class Box { let image: CGImage; init(_ image: CGImage) { self.image = image } }
 
     var body: some View {
+        WithPerceptionTracking {
         ZStack {
             if let image {
                 Image(decorative: image, scale: 1).resizable().aspectRatio(contentMode: fill ? .fill : .fit)
@@ -788,6 +901,8 @@ struct TMDBArtwork: View {
             if let cached = Self.cache.object(forKey: url as NSURL) { show(cached.image); return }
             guard let decoded = await Self.load(url, maxPixels: maxPixels), !Task.isCancelled else { return }
             withAnimation(.easeOut(duration: 0.3)) { show(decoded) }
+        }
+
         }
     }
 

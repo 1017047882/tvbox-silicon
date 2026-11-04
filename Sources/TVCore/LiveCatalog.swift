@@ -148,7 +148,7 @@ public enum LiveCatalog {
 
     /// The platform and room of a room channel's address.
     public static func room(_ url: URL) -> (platform: LivePlatform, id: String)? {
-        guard url.host() == "room", let platform = LivePlatform(scheme: url.scheme) else { return nil }
+        guard url.host == "room", let platform = LivePlatform(scheme: url.scheme) else { return nil }
         let id = url.lastPathComponent
         return id.isEmpty || id == "/" ? nil : (platform, id)
     }
@@ -156,11 +156,11 @@ public enum LiveCatalog {
     /// Whether the address has a live platform's shape (`<name>-live://room/<id>`), known to this copy or not:
     /// favorites keep a room by its address even before the platforms load.
     public static func isRoomAddress(_ url: URL) -> Bool {
-        url.host() == "room" && (url.scheme?.lowercased().hasSuffix("-live") ?? false) && url.pathComponents.count == 2
+        url.host == "room" && (url.scheme?.lowercased().hasSuffix("-live") ?? false) && url.pathComponents.count == 2
     }
     /// A live platform's listing address (`<name>-live://rooms`) in a subscription's `lives`.
     static func platformAddress(_ text: String) -> URL? {
-        guard let url = URL(string: text), url.host() == "rooms", url.scheme?.lowercased().hasSuffix("-live") == true else { return nil }
+        guard let url = URL(string: text), url.host == "rooms", url.scheme?.lowercased().hasSuffix("-live") == true else { return nil }
         return url
     }
 
@@ -196,7 +196,7 @@ public enum LiveCatalog {
                          }) async -> Channel {
         guard channel.url.pathExtension.lowercased() == "flv", !platforms.allSatisfy(\.relayHosts.isEmpty) else { return channel }
         func owner(_ url: URL) -> LivePlatform? {
-            let host = url.host()?.lowercased() ?? ""
+            let host = url.host?.lowercased() ?? ""
             return platforms.first { $0.relayHosts.contains { host.hasSuffix($0) } }
         }
         // A relay answers with a redirect (or a few) to the platform's own address.
@@ -215,7 +215,7 @@ public enum LiveCatalog {
             address = next
         }
         guard let (platform, flv) = found, let url = await convert(platform, flv) else { return channel }
-        Diagnostics.shared.record(.info, "player", "\(platform.id) flv as hls relay=\(channel.url.host() ?? "-") line=\(url.host() ?? "-")")
+        Diagnostics.shared.record(.info, "player", "\(platform.id) flv as hls relay=\(channel.url.host ?? "-") line=\(url.host ?? "-")")
         return Channel(name: channel.name, group: channel.group, url: url, logo: channel.logo, headers: channel.headers, skipScope: channel.skipScope,
                        historyContext: channel.historyContext, resumePosition: channel.resumePosition)
     }
@@ -224,7 +224,7 @@ public enum LiveCatalog {
 extension LiveSource {
     /// Offered with every subscription, before the subscription's own live playlists.
     public static var builtIn: [LiveSource] { LivePlatform.all.map(\.source) }
-    public var platform: LivePlatform? { url.host() == "rooms" ? LivePlatform(scheme: url.scheme) : nil }
+    public var platform: LivePlatform? { url.host == "rooms" ? LivePlatform(scheme: url.scheme) : nil }
     public var isBuiltIn: Bool { platform != nil }
 }
 

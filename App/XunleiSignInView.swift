@@ -1,3 +1,5 @@
+import Perception
+import NavigationBackport
 import SwiftUI
 import TVCore
 
@@ -14,11 +16,14 @@ struct XunleiSignInView: View {
     @FocusState private var codeFocused: Bool
 
     var body: some View {
+        WithPerceptionTracking {
         #if os(iOS)
         phoneForm
         #else
         panel
         #endif
+
+        }
     }
 
     private var title: String { L10n.text("Sign In to %@", L10n.text("Xunlei")) }
@@ -30,7 +35,8 @@ struct XunleiSignInView: View {
     #if os(iOS)
     /// A grouped form like the system's sign-in sheets: the drive's icon and the prompt, the fields, one wide button.
     private var phoneForm: some View {
-        NavigationStack {
+        NBNavigationStack {
+            WithPerceptionTracking {
             Form {
                 Section {
                     VStack(spacing: 10) {
@@ -70,7 +76,7 @@ struct XunleiSignInView: View {
                         }
                         .font(.headline).frame(maxWidth: .infinity)
                     }
-                    .settingsButton(prominent: true).controlSize(.large)
+                    .settingsButton(prominent: true).tvLargeControl()
                     .disabled(busy || (challenge == nil ? XunleiSignIn.normalized(mobile) == nil : code.trimmingCharacters(in: .whitespaces).isEmpty))
                     if challenge != nil {
                         Button(L10n.text("Send Again")) { code = ""; challenge = nil; Task { await send() } }
@@ -82,8 +88,10 @@ struct XunleiSignInView: View {
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button(L10n.text("Cancel")) { dismiss() } } }
+
+            }
         }
-        .presentationDetents([.medium, .large])
+        .tvPresentationDetents([.medium, .large])
     }
     #else
     private var panel: some View {

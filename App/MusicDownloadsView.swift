@@ -1,3 +1,4 @@
+import Perception
 import SwiftUI
 import TVCore
 
@@ -14,6 +15,7 @@ struct MusicDownloadsView: View {
     private var saved: [MusicDownload] { library.completed.sorted { ($0.finished ?? $0.created) > ($1.finished ?? $1.created) } }
 
     var body: some View {
+        WithPerceptionTracking {
         let tracks = saved.map(\.track)
         let page = list(tracks)
             .screenBackdrop()
@@ -51,6 +53,8 @@ struct MusicDownloadsView: View {
                 }
                 #endif
         }
+
+        }
     }
 
     private func list(_ tracks: [MusicTrack]) -> some View {
@@ -59,7 +63,7 @@ struct MusicDownloadsView: View {
             LazyVStack(alignment: .leading, spacing: MusicLayout.rowSpacing) {
                 header(tracks).padding(.bottom, 20)
                 if library.items.isEmpty {
-                    ContentUnavailableView(L10n.text("No Downloaded Songs"), systemImage: "arrow.down.circle",
+                    TVEmptyState(L10n.text("No Downloaded Songs"), systemImage: "arrow.down.circle",
                                            description: Text(L10n.text("Download a song, album or playlist from its menu to listen without a connection.")))
                         .frame(maxWidth: .infinity).padding(.vertical, 60)
                 }
@@ -68,7 +72,9 @@ struct MusicDownloadsView: View {
                     // and in one lazy stack its old row stayed on screen in place of the new one.
                     VStack(alignment: .leading, spacing: MusicLayout.rowSpacing) {
                         // The buttons go under the title when a phone has no room beside it.
-                        ViewThatFits(in: .horizontal) {
+                        Group {
+            if #available(iOS 16, macOS 13, tvOS 16, *) {
+                ViewThatFits(in: .horizontal) {
                             HStack(alignment: .center, spacing: 8) {
                                 SectionHeader(title: L10n.text("Downloading"))
                                 Spacer(minLength: 8)
@@ -79,6 +85,13 @@ struct MusicDownloadsView: View {
                                 MusicPendingActions(pending: pending)
                             }
                         }
+            } else {
+                VStack(alignment: .leading, spacing: 10) {
+                                SectionHeader(title: L10n.text("Downloading"))
+                                MusicPendingActions(pending: pending)
+                            }
+            }
+        }
                         .padding(.bottom, 8)
                         .tvFocusSection()
                         ForEach(pending) { MusicPendingRow(item: $0) }
@@ -91,7 +104,10 @@ struct MusicDownloadsView: View {
                         SectionHeader(title: L10n.text(library.collections.isEmpty ? "Downloaded" : "Songs")).padding(.top, 24).padding(.bottom, 8)
                     }
                     ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
+                        WithPerceptionTracking {
                         MusicTrackRow(track: track) { store.music.play(MusicQueue(tracks: tracks, start: index, source: Self.title)) }
+
+                        }
                     }
                 }
             }
@@ -118,7 +134,7 @@ struct MusicDownloadsView: View {
                         ForEach(collections) { MusicDownloadedTile(entry: $0, size: Self.tile) }
                     }
                 }
-                .scrollClipDisabled()
+                .tvScrollClipDisabled()
             }
             .padding(.top, 24)
             .tvFocusSection()
@@ -167,6 +183,7 @@ struct MusicDownloadedCollectionView: View {
     private var library: MusicDownloadLibrary { .shared }
 
     var body: some View {
+        WithPerceptionTracking {
         if let entry = library.collection(id: id) {
             let collection = entry.collection
             let items = library.items(in: entry)
@@ -191,8 +208,11 @@ struct MusicDownloadedCollectionView: View {
                     }
                     #else
                     ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
+                        WithPerceptionTracking {
                         MusicTrackRow(track: track, number: collection.kind == .album ? index + 1 : nil) {
                             store.music.play(MusicQueue(tracks: tracks, start: index, collection: collection))
+                        }
+
                         }
                     }
                     #endif
@@ -218,7 +238,9 @@ struct MusicDownloadedCollectionView: View {
                 Button(L10n.text("Remove Download"), role: .destructive) { library.remove(collection: id); dismiss() }
             }
         } else {
-            ContentUnavailableView(L10n.text("No Downloaded Songs"), systemImage: "arrow.down.circle").screenBackdrop()
+            TVEmptyState(L10n.text("No Downloaded Songs"), systemImage: "arrow.down.circle").screenBackdrop()
+        }
+
         }
     }
 
@@ -266,12 +288,17 @@ private struct MusicDownloadedTile: View {
     @State private var hovering = false
 
     var body: some View {
+        WithPerceptionTracking {
         let collection = entry.collection
         let saved = MusicDownloadLibrary.shared.items(in: entry).filter { $0.status == .completed }.count
         let link = RouteLink { MusicDownloadedCollectionView(id: entry.id) } label: {
             VStack(alignment: .leading, spacing: 7) {
                 MusicArtwork(url: collection.artwork, size: size, symbol: collection.kind == .album ? "square.stack" : "music.note.list")
-                    .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.black.opacity(hovering ? 0.12 : 0)) }
+                    .overlay {
+                        WithPerceptionTracking {
+ RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.black.opacity(hovering ? 0.12 : 0))
+                        }
+                    }
                     .shadow(color: .black.opacity(0.12), radius: 6, y: 3)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(collection.title).font(Self.titleFont).foregroundStyle(.primary).lineLimit(1)
@@ -280,7 +307,7 @@ private struct MusicDownloadedTile: View {
                 .cardCaption()
             }
             .frame(width: size, alignment: .leading)
-            .contentShape(.rect)
+            .contentShape(Rectangle())
         }
         #if os(tvOS)
         link.cardButton()
@@ -289,6 +316,8 @@ private struct MusicDownloadedTile: View {
             .onHover { hovering = $0 }
             .animation(.easeOut(duration: 0.15), value: hovering)
         #endif
+
+        }
     }
 
     #if os(tvOS)
@@ -303,6 +332,7 @@ private struct MusicPendingActions: View {
     let pending: [MusicDownload]
 
     var body: some View {
+        WithPerceptionTracking {
         let library = MusicDownloadLibrary.shared
         let paused = library.isPaused
         HStack(spacing: 8) {
@@ -328,6 +358,8 @@ private struct MusicPendingActions: View {
         .buttonStyle(.bordered).buttonBorderShape(.capsule).controlSize(.small)
         #endif
         .fixedSize()
+
+        }
     }
 }
 
@@ -338,8 +370,9 @@ private struct MusicPendingRow: View {
     @State private var choosing = false
 
     var body: some View {
+        WithPerceptionTracking {
         #if os(tvOS)
-        Button { choosing = true } label: { row.contentShape(.rect) }
+        Button { choosing = true } label: { row.contentShape(Rectangle()) }
             .glassRow()
             .confirmationDialog(item.track.title, isPresented: $choosing, titleVisibility: .visible) {
                 if item.status == .failed { Button(L10n.text("Retry")) { MusicDownloadLibrary.shared.retry(item.id) } }
@@ -348,6 +381,8 @@ private struct MusicPendingRow: View {
         #else
         row
         #endif
+
+        }
     }
 
     private var row: some View {
@@ -364,7 +399,7 @@ private struct MusicPendingRow: View {
             #else
             if item.status == .failed {
                 Button { MusicDownloadLibrary.shared.retry(item.id) } label: {
-                    Image(systemName: "arrow.clockwise").font(.body.weight(.semibold)).frame(width: 30, height: 30).contentShape(.rect)
+                    Image(systemName: "arrow.clockwise").font(.body.weight(.semibold)).frame(width: 30, height: 30).contentShape(Rectangle())
                 }
                 .buttonStyle(.borderless).help(L10n.text("Retry")).accessibilityLabel(L10n.text("Retry"))
             } else {
@@ -372,7 +407,7 @@ private struct MusicPendingRow: View {
             }
             Button { MusicDownloadLibrary.shared.remove([item.id]) } label: {
                 Image(systemName: "xmark").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
-                    .frame(width: 30, height: 30).contentShape(.rect)
+                    .frame(width: 30, height: 30).contentShape(Rectangle())
             }
             .buttonStyle(.borderless).help(L10n.text("Cancel Download")).accessibilityLabel(L10n.text("Cancel Download"))
             #endif
@@ -403,6 +438,7 @@ struct MusicDownloadsLink: View {
     var card = false
 
     var body: some View {
+        WithPerceptionTracking {
         let library = MusicDownloadLibrary.shared
         RouteLink { MusicDownloadsView() } label: {
             HStack(spacing: MusicLayout.gap) {
@@ -412,7 +448,7 @@ struct MusicDownloadsLink: View {
                 Image(systemName: AppSection.downloads.icon)
                     .font(.system(size: MusicLayout.art * 0.46, weight: .semibold)).foregroundStyle(.white)
                     .frame(width: MusicLayout.art, height: MusicLayout.art)
-                    .background(Brand.cyan.gradient, in: RoundedRectangle(cornerRadius: MusicLayout.art * 0.3, style: .continuous))
+                    .background(Brand.cyan.tvGradient, in: RoundedRectangle(cornerRadius: MusicLayout.art * 0.3, style: .continuous))
                     .accessibilityHidden(true)
                 #endif
                 VStack(alignment: .leading, spacing: 3) {
@@ -424,10 +460,16 @@ struct MusicDownloadsLink: View {
             }
             .padding(.vertical, card ? 12 : 6)
             .padding(.horizontal, card ? 14 : 0)
-            .background { if card { Color.clear.contentPanel(cornerRadius: 18) } }
+            .background {
+                WithPerceptionTracking {
+ if card { Color.clear.contentPanel(cornerRadius: 18) }
+                }
+            }
             .contentShape(Rectangle())
         }
         .glassRow()
+
+        }
     }
 
     private func details(_ library: MusicDownloadLibrary) -> String {
@@ -445,6 +487,7 @@ struct MusicDownloadMenuItems: View {
     let tracks: [MusicTrack]
 
     var body: some View {
+        WithPerceptionTracking {
         let library = MusicDownloadLibrary.shared
         let saved = tracks.compactMap { library.item(for: $0) }
         if tracks.contains(where: { $0.source != nil }) {
@@ -456,6 +499,8 @@ struct MusicDownloadMenuItems: View {
             }
         } else {
             Button { library.download(tracks) } label: { Label(L10n.text("Download"), systemImage: "arrow.down.circle") }
+        }
+
         }
     }
 }
@@ -469,6 +514,7 @@ struct MusicDownloadButton: View {
     var side: CGFloat?
 
     var body: some View {
+        WithPerceptionTracking {
         let library = MusicDownloadLibrary.shared
         let items = tracks.compactMap { library.item(for: $0) }
         // Songs saved one by one before still leave the button on until the album or playlist is kept too.
@@ -485,5 +531,7 @@ struct MusicDownloadButton: View {
         }
         .disabled(tracks.isEmpty || queued)
         .help(label).accessibilityLabel(label)
+
+        }
     }
 }

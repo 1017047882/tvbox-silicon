@@ -5,7 +5,7 @@ import Perception
 /// lists mark it, until it answers again or its cooldown ends; it stays listed and opens as usual.
 /// A source is identified by its subscription and original key, so its record survives re-imports and merges.
 @MainActor @Perceptible public final class SourceHealth {
-    public static let shared = SourceHealth(file: URL.cachesDirectory.appending(path: "source-health.json"))
+    public static let shared = SourceHealth(file: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("source-health.json"))
 
     public enum Status: Sendable {
         /// Not asked yet, or not since its record expired.
@@ -115,7 +115,7 @@ import Perception
     private func scheduleSave() {
         guard let file, saveTask == nil else { return }
         saveTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(2))
+            try? await tvSleep(for: .seconds(2))
             guard let self else { return }
             self.saveTask = nil
             let cutoff = Date().addingTimeInterval(-Self.expiry)
@@ -127,8 +127,4 @@ import Perception
             try? data.write(to: file, options: .atomic)
         }
     }
-}
-
-extension Duration {
-    var seconds: Double { Double(components.seconds) + Double(components.attoseconds) / 1e18 }
 }

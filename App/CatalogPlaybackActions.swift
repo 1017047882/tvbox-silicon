@@ -1,3 +1,4 @@
+import Perception
 #if !os(tvOS)
 import SwiftUI
 import TVCore
@@ -11,6 +12,7 @@ struct CatalogPlaybackActions: View {
     @State private var showsDanmaku = false
 
     var body: some View {
+        WithPerceptionTracking {
         if channel.historyContext != nil {
             Menu {
                 if let catalog = store.catalog(for: channel) {
@@ -18,10 +20,16 @@ struct CatalogPlaybackActions: View {
                         get: { store.autoPlayNext }, set: { store.autoPlayNext = $0 }))
                     Menu(L10n.text("Episodes")) {
                         ForEach(catalog.playlist.flags, id: \.self) { flag in
+                            WithPerceptionTracking {
                             Menu(flag) {
                                 ForEach(catalog.playlist.episodes(for: flag)) { episode in
+                                    WithPerceptionTracking {
                                     Button(catalog.labels[episode.id] ?? episode.name) { store.selectEpisode(episode, from: channel) }
+
+                                    }
                                 }
+                            }
+
                             }
                         }
                     }
@@ -61,10 +69,19 @@ struct CatalogPlaybackActions: View {
             #endif
             .accessibilityLabel(L10n.text("Playback Options"))
             .accessibilityIdentifier("player.catalogOptions")
-            .sheet(isPresented: $showsSkip) { EpisodeSkipSettingsView(session: session) }
-            .sheet(isPresented: $showsDanmaku) {
-                CatalogDanmakuSettingsView(model: session.catalogDanmaku, channelName: channel.name)
+            .sheet(isPresented: $showsSkip) {
+                WithPerceptionTracking {
+ EpisodeSkipSettingsView(session: session)
+                }
             }
+            .sheet(isPresented: $showsDanmaku) {
+                WithPerceptionTracking {
+                CatalogDanmakuSettingsView(model: session.catalogDanmaku, channelName: channel.name)
+
+                }
+            }
+        }
+
         }
     }
 }

@@ -21,7 +21,7 @@ public enum HLSRemux {
         RemuxStore.shared.add(session)
         do {
             let base = try await RemuxServer.shared.base()
-            return base.appending(path: "\(session.id)/master.m3u8")
+            return base.appendingPathComponent("\(session.id)/master.m3u8")
         } catch {
             RemuxStore.shared.remove(session.id)?.close()
             throw error
@@ -285,7 +285,7 @@ final class HLSRemuxSession: RemuxStored, @unchecked Sendable {
             throw TVError.unsupported("not HEVC in MPEG-TS: \(first.format) \(first.video)")
         }
         session.describe(first, at: probe)
-        Diagnostics.shared.record(.info, "remux", "hls open host=\(address.host() ?? "-") segments=\(segments.count) live=\(live) audio=\(first.audio ?? "-") size=\(first.width)x\(first.height) transfer=\(first.transfer) hdr=\(device.hdr) sdr=\(first.toneMapped) discontinuities=\(segments.filter(\.discontinuity).count) ms=\(Int(Date().timeIntervalSince(began) * 1000))")
+        Diagnostics.shared.record(.info, "remux", "hls open host=\(address.host ?? "-") segments=\(segments.count) live=\(live) audio=\(first.audio ?? "-") size=\(first.width)x\(first.height) transfer=\(first.transfer) hdr=\(device.hdr) sdr=\(first.toneMapped) discontinuities=\(segments.filter(\.discontinuity).count) ms=\(Int(Date().timeIntervalSince(began) * 1000))")
         return session
     }
 

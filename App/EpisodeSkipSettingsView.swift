@@ -1,3 +1,5 @@
+import Perception
+import NavigationBackport
 #if !os(tvOS)
 import SwiftUI
 import TVCore
@@ -22,7 +24,9 @@ struct EpisodeSkipSettingsView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        WithPerceptionTracking {
+        NBNavigationStack {
+            WithPerceptionTracking {
             Form {
                 Section {
                     Toggle(L10n.text("Automatically skip intro and outro"), isOn: $enabled)
@@ -67,6 +71,8 @@ struct EpisodeSkipSettingsView: View {
                     .accessibilityIdentifier("player.skip.save")
                 }
             }
+
+            }
         }
         .onAppear {
             session.beginEditingSkip()
@@ -79,8 +85,10 @@ struct EpisodeSkipSettingsView: View {
         #if os(macOS)
         .frame(width: 500, height: 570)
         #else
-        .presentationDetents([.large])
+        .tvPresentationDetents([.large])
         #endif
+
+        }
     }
 
     private func timeField(_ title: String, text: Binding<String>, identifier: String) -> some View {
@@ -90,7 +98,7 @@ struct EpisodeSkipSettingsView: View {
             #if os(iOS)
             .keyboardType(.numbersAndPunctuation)
             .textInputAutocapitalization(.never)
-            .autocorrectionDisabled()
+            .disableAutocorrection()
             #endif
     }
 }

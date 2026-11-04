@@ -1,3 +1,5 @@
+import Perception
+import NavigationBackport
 import SwiftUI
 import TVCore
 
@@ -57,7 +59,8 @@ struct GlobalSearchView: View {
     }
 
     var body: some View {
-        @Bindable var model = model
+        WithPerceptionTracking {
+        @Perception.Bindable var model = model
         #if os(tvOS)
         searchResults
             .searchable(text: $model.draft, prompt: Text(L10n.text("Search videos")))
@@ -66,18 +69,25 @@ struct GlobalSearchView: View {
                 // FongMi's TV search. A completion only fills the field; the Search button below still starts the search.
                 let past = Array(history.filter { model.draft.isEmpty || $0.localizedCaseInsensitiveContains(model.draft) }.prefix(6))
                 ForEach(past + (model.draft.isEmpty ? trending : suggested).filter { !past.contains($0) }, id: \.self) { query in
+                    WithPerceptionTracking {
                     Text(query).searchCompletion(query)
+
+                    }
                 }
             }
             .task(id: model.draft) { await suggest(model.draft) }
             .onSubmit(of: .search) { if let config = store.subscription { submit(config) } }
             .screenBackdrop()
-            .sheet(isPresented: $showFailures) { failureDetails }
+            .sheet(isPresented: $showFailures) {
+                WithPerceptionTracking {
+ failureDetails
+                }
+            }
             .onAppear { if let config = store.subscription { model.resumeSuspended(config: config) } }
             .onDisappear { endVisible = false; model.suspend() }
         #else
         searchResults
-            .scrollPosition(id: $model.scrollID)
+            .tvScrollPosition(id: $model.scrollID)
             // A hard edge: the summary, the activity and the source chips are a tall bar, and results showed through it.
             .topBar(hardEdge: true) { if let config = store.subscription, showsHeader { searchHeader(config) } }
             .screenBackdrop()
@@ -90,11 +100,15 @@ struct GlobalSearchView: View {
             .catalogSearchable(text: $model.draft, prompt: L10n.text("Search videos"))
             .searchFieldFocused($inputFocused)
             .onSubmit(of: .search) { if let config = store.subscription { submit(config) } }
-            .onChange(of: model.draft) { _, draft in if draft.isEmpty && !model.keyword.isEmpty { model.reset() } }
+            .tvOnChange(of: model.draft) { _, draft in if draft.isEmpty && !model.keyword.isEmpty { model.reset() } }
             #if os(iOS)
-            .scrollDismissesKeyboard(.interactively)
+            .tvScrollDismissesKeyboard(.interactively)
             #endif
-            .sheet(isPresented: $showFailures) { failureDetails }
+            .sheet(isPresented: $showFailures) {
+                WithPerceptionTracking {
+ failureDetails
+                }
+            }
             .onAppear {
                 // Not on iPhone and iPad: the keyboard would cover the tab bar, and a tab's root page has no back
                 // button, so there would be no way to leave without searching.
@@ -113,6 +127,8 @@ struct GlobalSearchView: View {
             }
             #endif
         #endif
+
+        }
     }
 
     /// The search field is the system's, so the bar below it waits for a search.
@@ -151,8 +167,11 @@ struct GlobalSearchView: View {
                             }
                         } else {
                             LazyVGrid(columns: Layout.posterColumns, spacing: Layout.gridRowSpacing) {
+                                WithPerceptionTracking {
                                 resultLinks(config)
-                            }.scrollTargetLayout()
+
+                                }
+                            }.tvScrollTargetLayout()
                             // Scrolling the end into view asks for the next page; while it stays in view each new page asks again.
                             if model.canLoadMore(model.selectedSource) || model.loadingMore {
                                 ProgressView().frame(maxWidth: .infinity).padding(.vertical, 24)
@@ -160,7 +179,7 @@ struct GlobalSearchView: View {
                                         endVisible = visible
                                         if visible { model.loadMore(model.selectedSource, config: config) }
                                     }
-                                    .onChange(of: model.loadingMore) { _, loading in
+                                    .tvOnChange(of: model.loadingMore) { _, loading in
                                         if !loading, endVisible { model.loadMore(model.selectedSource, config: config) }
                                     }
                             }
@@ -177,7 +196,7 @@ struct GlobalSearchView: View {
     /// Separates "nothing matched" from "most sources never answered" so the empty state does not blame the keyword.
     private func emptyResults(_ config: Subscription) -> some View {
         let mostlyFailed = model.failures.count * 2 > model.completed
-        return ContentUnavailableView {
+        return TVEmptyState {
             Label(L10n.text(mostlyFailed ? "Most Sources Unavailable" : "No Videos"),
                   systemImage: mostlyFailed ? "wifi.exclamationmark" : "magnifyingglass")
         } description: {
@@ -197,9 +216,11 @@ struct GlobalSearchView: View {
     }
 
     private func searchHeader(_ config: Subscription) -> some View {
-        @Bindable var model = model
+        @Perception.Bindable var model = model
         return VStack(alignment: .leading, spacing: 14) {
             if !model.keyword.isEmpty {
+                Group {
+            if #available(iOS 16, macOS 13, tvOS 16, *) {
                 ViewThatFits(in: .horizontal) {
                     HStack(alignment: .center, spacing: 16) {
                         searchSummary
@@ -211,6 +232,13 @@ struct GlobalSearchView: View {
                         searchActions(config)
                     }
                 }
+            } else {
+                VStack(alignment: .leading, spacing: 12) {
+                        searchSummary
+                        searchActions(config)
+                    }
+            }
+        }
                 #if os(tvOS)
                 // Stop and the unavailable sources sit at the row's far end, out of line with the suggestions above and
                 // the source chips below, so the remote passed them by. As a section, moving onto the row lands on them.
@@ -226,9 +254,12 @@ struct GlobalSearchView: View {
                     ChipRow {
                         HStack(spacing: 8) {
                             ForEach(sourceItems) { item in
+                                WithPerceptionTracking {
                                 Chip(title: item.count.map { "\(item.name) · \($0)" } ?? item.name, selected: (model.selectedSource ?? "") == item.id,
                                      mark: item.id == Bilibili.siteKey, dot: item.dot) {
                                     model.select(item.id.isEmpty ? nil : item.id)
+                                }
+
                                 }
                             }
                         }
@@ -295,7 +326,7 @@ struct GlobalSearchView: View {
         if model.busy {
             Button { model.stop() } label: { searchActionLabel(L10n.text("Stop"), symbol: "stop.fill") }.searchAction()
             let title = L10n.text(showsActivity ? "Hide Details" : "Show Details")
-            Button { withAnimation(.smooth(duration: 0.25)) { showsActivity.toggle() } } label: {
+            Button { withAnimation(.tvSmooth(duration: 0.25)) { showsActivity.toggle() } } label: {
                 Image(systemName: "chevron.down").font(.footnote.weight(.semibold))
                     .rotationEffect(.degrees(showsActivity ? 180 : 0))
             }
@@ -317,11 +348,14 @@ struct GlobalSearchView: View {
 
     @ViewBuilder private func resultLinks(_ config: Subscription) -> some View {
         ForEach(posters) { item in
+            WithPerceptionTracking {
             RouteLink {
                 CatalogDestination(video: item.video, client: CatalogClient(site: item.site, origin: config.origin, jarURL: config.spiderURL))
                     .onAppear { rememberQuery() }
             } label: { searchPoster(item) }
             .cardButton().id(item.id)
+
+            }
         }
     }
 
@@ -357,6 +391,7 @@ struct GlobalSearchView: View {
                 }
                 VStack(spacing: 0) {
                     ForEach(Array(history.enumerated()), id: \.element) { index, item in
+                        WithPerceptionTracking {
                         HStack(spacing: 0) {
                             Button { useHistory(item) } label: {
                                 HStack(spacing: 14) {
@@ -381,6 +416,8 @@ struct GlobalSearchView: View {
                             }.buttonStyle(.plain)
                         }
                         if index < history.count - 1 { Divider().padding(.leading, 56) }
+
+                        }
                     }
                 }
                 .glassSurface(.regular, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
@@ -405,21 +442,28 @@ struct GlobalSearchView: View {
     }
 
     private var failureDetails: some View {
-        NavigationStack {
+        NBNavigationStack {
+            WithPerceptionTracking {
             List {
                 ForEach(model.failures) { result in
+                    WithPerceptionTracking {
                     VStack(alignment: .leading, spacing: 6) {
                         let health = store.health(of: result.site)
                         HStack(spacing: 6) { Text(result.site.name).font(.headline); SourceHealthDot(status: health) }
                         Text(result.error ?? "").font(.caption).foregroundStyle(.secondary)
                         if health == .failing { Text(health.summary).font(.caption).foregroundStyle(Brand.rose) }
                     }
+
+                    }
                 }
                 // Sources this search left out for failing; the retry below asks them too.
                 ForEach(model.paused) { site in
+                    WithPerceptionTracking {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(spacing: 6) { Text(site.name).font(.headline); SourceHealthDot(status: .failing) }
                         Text(pauseNote(site)).font(.caption).foregroundStyle(Brand.rose)
+                    }
+
                     }
                 }
             }
@@ -427,6 +471,7 @@ struct GlobalSearchView: View {
             .screenBackdrop()
             #if os(tvOS)
             .safeAreaInset(edge: .bottom) {
+                WithPerceptionTracking {
                 HStack {
                     Button(L10n.text("Retry failed sources")) {
                         if let config = store.subscription { model.resume(config: config, retryFailures: true) }
@@ -435,6 +480,8 @@ struct GlobalSearchView: View {
                     Spacer()
                     Button(L10n.text("Done")) { showFailures = false }.controlButton()
                 }.padding(32).controlBackdrop()
+
+                }
             }
             #else
             .toolbar {
@@ -447,6 +494,8 @@ struct GlobalSearchView: View {
                 }
             }
             #endif
+
+            }
         }
         #if os(macOS)
         .frame(minWidth: 520, minHeight: 380)
@@ -480,7 +529,7 @@ struct GlobalSearchView: View {
             if trending.isEmpty { trending = await SearchSuggestions.trending() }
             return
         }
-        try? await Task.sleep(for: .milliseconds(250))
+        try? await tvSleep(for: .milliseconds(250))
         guard !Task.isCancelled else { return }
         let titles = await SearchSuggestions.titles(for: typed)
         if !Task.isCancelled { suggested = titles }
@@ -510,6 +559,7 @@ private struct SearchActivityList: View {
     /// The on-device plugin worker runs at most this many searches at once.
     private let limit = 5
     var body: some View {
+        WithPerceptionTracking {
         TimelineView(.periodic(from: .now, by: 0.5)) { timeline in
             let active = Array(PluginPreparation.active(origin: origin).prefix(limit))
             VStack(alignment: .leading, spacing: 10) {
@@ -524,8 +574,8 @@ private struct SearchActivityList: View {
                         Text(remaining).foregroundStyle(.secondary).monospacedDigit().fixedSize()
                     }
                     if let runStart {
-                        Text(Duration.seconds(max(0, Int(timeline.date.timeIntervalSince(runStart.date))))
-                                .formatted(.time(pattern: .minuteSecond)))
+                        Text(TVDelay.seconds(max(0, Int(timeline.date.timeIntervalSince(runStart.date))))
+                                .clock())
                             .foregroundStyle(.secondary).monospacedDigit().fixedSize()
                     }
                 }
@@ -534,16 +584,19 @@ private struct SearchActivityList: View {
                         .foregroundStyle(.secondary)
                 }
                 if showsSources {
-                    Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {
+                    VStack(alignment: .leading, spacing: 6) {
                         ForEach(active) { item in
-                            GridRow {
+                            WithPerceptionTracking {
+                            HStack(spacing: 16) {
                                 Text(item.name).fontWeight(.semibold).lineLimit(1)
                                 Text(status(item.snapshot)).foregroundStyle(.secondary).lineLimit(1)
                                     .frame(maxWidth: .infinity, alignment: .leading)
-                                Text(Duration.seconds(max(0, Int(timeline.date.timeIntervalSince(item.snapshot.started))))
-                                        .formatted(.time(pattern: .minuteSecond)))
+                                Text(TVDelay.seconds(max(0, Int(timeline.date.timeIntervalSince(item.snapshot.started))))
+                                        .clock())
                                     .monospacedDigit().foregroundStyle(.secondary)
-                                    .gridColumnAlignment(.trailing)
+                                    .multilineTextAlignment(.trailing)
+                            }
+
                             }
                         }
                     }
@@ -552,7 +605,9 @@ private struct SearchActivityList: View {
             }
             .font(.subheadline)
             .accessibilityElement(children: .combine)
-            .animation(.smooth(duration: 0.25), value: active.map(\.id))
+            .animation(.tvSmooth(duration: 0.25), value: active.map(\.id))
+        }
+
         }
     }
     /// While searching, the plugin's "loading" stage is the search itself.
@@ -579,15 +634,24 @@ private struct SearchActivityList: View {
 private struct SearchProgressBar: View {
     let fraction: Double
     var body: some View {
+        WithPerceptionTracking {
         Capsule().fill(Color.primary.opacity(0.2))
             .overlay(alignment: .leading) {
+                WithPerceptionTracking {
                 GeometryReader { proxy in
+                    WithPerceptionTracking {
                     Capsule().fill(Brand.accent).frame(width: proxy.size.width * min(1, max(0, fraction)))
+
+                    }
+                }
+
                 }
             }
             .frame(height: 6)
             .accessibilityElement()
             .accessibilityValue(Text(fraction, format: .percent.precision(.fractionLength(0))))
+
+        }
     }
 }
 #endif
@@ -668,7 +732,11 @@ struct RecommendationsView: View {
                         .lineLimit(1)
                 }
                 .glassPill()
-                .contextMenu { sourceActions(site) }
+                .contextMenu {
+                    WithPerceptionTracking {
+ sourceActions(site)
+                    }
+                }
                 .accessibilityIdentifier("recommendations.open")
                 Button {
                     // The sheet only where nothing can be pushed.
@@ -680,11 +748,13 @@ struct RecommendationsView: View {
                 .accessibilityLabel(L10n.text("Recommendation Source"))
                 .accessibilityIdentifier("recommendations.switch")
                 .sheet(isPresented: $choosingSource, onDismiss: { afterPicker?(); afterPicker = nil }) {
-                    NavigationStack {
+                    NBNavigationStack {
                         ScrollViewReader { proxy in
+                            WithPerceptionTracking {
                             ScrollView {
                                 LazyVStack(alignment: .leading, spacing: 4) {
                                     ForEach(sites) { candidate in
+                                        WithPerceptionTracking {
                                         Button { choose(candidate); choosingSource = false } label: {
                                             HStack {
                                                 Text(candidate.name).lineLimit(1)
@@ -697,6 +767,8 @@ struct RecommendationsView: View {
                                         .contextMenu { sourceActions(candidate) { afterPicker = $0; choosingSource = false } }
                                         .focused($focusedSource, equals: candidate.key)
                                         .id(candidate.key)
+
+                                        }
                                     }
                                 }
                                 .glassRowInsets()
@@ -704,6 +776,8 @@ struct RecommendationsView: View {
                             // Open on the current source rather than the top of a long list.
                             .defaultFocus($focusedSource, site.key)
                             .onAppear { proxy.scrollTo(site.key, anchor: .center) }
+
+                            }
                         }
                         .screenTitle(L10n.text("Recommendation Source"))
                         .screenBackdrop()
@@ -783,7 +857,11 @@ struct RecommendationsView: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .contextMenu { sourceActions(site) }
+        .contextMenu {
+            WithPerceptionTracking {
+ sourceActions(site)
+            }
+        }
         .accessibilityIdentifier("recommendations.open")
     }
     #endif
@@ -871,7 +949,9 @@ struct RecommendationsView: View {
                     Text(L10n.text("Choose a title to find it across your sources.")).font(.subheadline).foregroundStyle(.secondary)
                 }
                 LazyVGrid(columns: Layout.posterColumns, spacing: Layout.gridRowSpacing) {
+                    WithPerceptionTracking {
                     ForEach(model.items) { item in
+                        WithPerceptionTracking {
                         switch item.destination {
                         case .search(let keyword):
                             Button { store.searchVideos(keyword) } label: { PosterCard(recommendation: item) }.cardButton()
@@ -880,6 +960,10 @@ struct RecommendationsView: View {
                                 CatalogDestination(video: video, client: CatalogClient(site: loadedSite, origin: config.origin, jarURL: config.spiderURL))
                             } label: { PosterCard(recommendation: item) }.cardButton()
                         }
+
+                        }
+                    }
+
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -889,6 +973,7 @@ struct RecommendationsView: View {
     }
 
     var body: some View {
+        WithPerceptionTracking {
         Group {
             #if os(tvOS)
             if rails { tvRails } else { grid }
@@ -921,12 +1006,17 @@ struct RecommendationsView: View {
                                client: CatalogClient(site: loadedSite, origin: config.origin, jarURL: config.spiderURL))
         }
         .onDisappear { browser.cancel() }
-        .navigationDestination(item: $openedSource) { route in
+        .nbNavigationDestination(item: $openedSource) { route in
+            WithPerceptionTracking {
             #if os(macOS)
             route.build().musicBar()
             #else
             route.build()
             #endif
+
+            }
+        }
+
         }
     }
 
@@ -935,6 +1025,7 @@ struct RecommendationsView: View {
     /// comes on screen. See All opens the source's page.
     private var tvRails: some View {
         LazyVStack(alignment: .leading, spacing: 30) {
+            WithPerceptionTracking {
             HStack(spacing: 24) {
                 Text(L10n.text("Recommendations")).font(.system(size: DiscoverLayout.heading, weight: .semibold)).lineLimit(1)
                 recommendationControls
@@ -961,12 +1052,15 @@ struct RecommendationsView: View {
                 if !model.items.isEmpty {
                     WatchNowTVRow(seeAll: WatchNowTVSeeAll(height: WatchNowTVCover.height, route: page)) {
                             ForEach(model.items) { item in
+                                WithPerceptionTracking {
                                 let cover = WatchNowTVCover(title: item.name, detail: item.remarks, poster: item.poster?.url, headers: item.poster?.headers ?? [:])
                                 switch item.destination {
                                 case .search(let keyword):
                                     Button { store.searchVideos(keyword) } label: { cover }.cardButton()
                                 case .detail(let video):
                                     RouteLink { CatalogDestination(video: video, client: client) } label: { cover }.cardButton()
+                                }
+
                                 }
                             }
                     }
@@ -975,18 +1069,26 @@ struct RecommendationsView: View {
                         .foregroundStyle(.secondary).padding(.horizontal, DiscoverLayout.gutter)
                 }
                 ForEach(model.categories.prefix(4)) { item in
+                    WithPerceptionTracking {
                     WatchNowTVCategoryRail(title: item.name, category: item.id, client: client, seeAll: page)
+
+                    }
                 }
 
             } else if model.busy {
                 HStack(spacing: DiscoverLayout.spacing) {
                     ForEach(0..<7, id: \.self) { _ in
+                        WithPerceptionTracking {
                         SkeletonBlock(cornerRadius: 12).frame(width: WatchNowTVCover.width, height: WatchNowTVCover.height)
                             .frame(height: WatchNowTVCover.height + DiscoverLayout.captionHeight, alignment: .top)
+
+                        }
                     }
                 }
                 .padding(.horizontal, DiscoverLayout.gutter).padding(.vertical, 24)
                 .accessibilityLabel(L10n.text("Loading…"))
+            }
+
             }
         }
     }
@@ -1027,12 +1129,15 @@ struct RecommendationsView: View {
                 if !model.items.isEmpty {
                     WatchNowPhoneRow {
                         ForEach(model.items) { item in
+                            WithPerceptionTracking {
                             let cover = WatchNowPhoneCover(title: item.name, detail: item.remarks, poster: item.poster?.url, headers: item.poster?.headers ?? [:])
                             switch item.destination {
                             case .search(let keyword):
                                 Button { store.searchVideos(keyword) } label: { cover }.tmdbCardButton()
                             case .detail(let video):
                                 RouteLink { CatalogDestination(video: video, client: client) } label: { cover }.tmdbCardButton()
+                            }
+
                             }
                         }
                     }
@@ -1042,7 +1147,10 @@ struct RecommendationsView: View {
                         .font(.subheadline).foregroundStyle(.secondary).padding(.horizontal, DiscoverLayout.gutter)
                 }
                 ForEach(model.categories.prefix(4)) { item in
+                    WithPerceptionTracking {
                     WatchNowPhoneCategoryRail(title: item.name, category: item.id, client: client, seeAll: page)
+
+                    }
                 }
             } else if model.busy {
                 WatchNowPhoneSkeletonRow().padding(.top, -16)
@@ -1073,8 +1181,11 @@ struct RecommendationsView: View {
                     Chip(title: L10n.text("Recommendations"), selected: category == nil) { category = nil; categoryPage = 1 }
                 }
                 ForEach(model.categories) { item in
+                    WithPerceptionTracking {
                     Chip(title: item.name, selected: category == item.id) {
                         category = item.id; categoryPage = 1; categoryFilters = CategoryFilter.initialChoices(item.filters)
+                    }
+
                     }
                 }
             }.padding(.vertical, 4)
@@ -1094,12 +1205,18 @@ struct RecommendationsView: View {
                 Text(L10n.text("Choose a title to find it across your sources.")).font(.subheadline).foregroundStyle(.secondary)
             }
             LazyVGrid(columns: Layout.posterColumns, spacing: Layout.gridRowSpacing) {
+                WithPerceptionTracking {
                 ForEach(browser.videos) { video in
+                    WithPerceptionTracking {
                     if isIndex {
                         Button { store.searchVideos(video.name) } label: { PosterCard(video: video) }.cardButton()
                     } else {
                         RouteLink { CatalogDestination(video: video, client: client) } label: { PosterCard(video: video) }.cardButton()
                     }
+
+                    }
+                }
+
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1141,18 +1258,28 @@ struct SourceStrip: View {
     var actions: ((String) -> AnyView)? = nil
 
     var body: some View {
+        WithPerceptionTracking {
         ScrollStrip(scrollTo: selection, leftLabel: "Scroll sources left", rightLabel: "Scroll sources right") {
             HStack(spacing: 6) {
                 ForEach(items) { item in
+                    WithPerceptionTracking {
                     let chip = SourceChip(name: item.name, count: item.count, dot: item.dot, selected: item.id == selection) { select(item.id) }
                     Group {
-                        if let actions { chip.contextMenu { actions(item.id) } } else { chip }
+                        if let actions { chip.contextMenu {
+                            WithPerceptionTracking {
+ actions(item.id)
+                            }
+                        } } else { chip }
                     }
                     .id(item.id)
+
+                    }
                 }
             }
             .padding(.vertical, 4)
-            .scrollTargetLayout()
+            .tvScrollTargetLayout()
+        }
+
         }
     }
 }
@@ -1199,7 +1326,9 @@ struct ScrollStrip<Content: View>: View {
     }
 
     var body: some View {
+        WithPerceptionTracking {
         ScrollViewReader { proxy in
+            WithPerceptionTracking {
             HStack(spacing: 8) {
                 measured(
                     ScrollView(.horizontal, showsIndicators: false) {
@@ -1247,6 +1376,10 @@ struct ScrollStrip<Content: View>: View {
                 proxy.scrollTo(scrollTo, anchor: .center)
                 #endif
             }
+
+            }
+        }
+
         }
     }
 
@@ -1275,8 +1408,19 @@ struct ScrollStrip<Content: View>: View {
         if #available(iOS 18, *) {
             content
         } else {
-            content.onGeometryChange(for: Metrics.self) { geometry in
-                let visible = geometry.bounds(of: .scrollView(axis: .horizontal)) ?? .zero
+            content.tvOnGeometryChange(for: Metrics.self) { geometry in
+                let visible: CGRect
+                if #available(iOS 17, macOS 14, tvOS 17, *) {
+                    visible = geometry.bounds(of: .scrollView(axis: .horizontal)) ?? .zero
+                } else {
+                    #if os(iOS)
+                    let frame = geometry.frame(in: .global)
+                    let intersection = frame.intersection(UIScreen.main.bounds)
+                    visible = intersection.isNull ? .zero : intersection.offsetBy(dx: -frame.minX, dy: -frame.minY)
+                    #else
+                    visible = CGRect(origin: .zero, size: geometry.size)
+                    #endif
+                }
                 return Metrics(offset: visible.minX, viewport: visible.width, maximum: max(0, geometry.size.width - visible.width))
             } action: { update($0) }
         }
@@ -1295,12 +1439,12 @@ struct ScrollStrip<Content: View>: View {
             .onEnded { value in
                 let origin = tracking.dragOrigin ?? tracking.metrics.offset
                 tracking.dragOrigin = nil
-                withAnimation(.smooth(duration: 0.45)) {
+                withAnimation(.tvSmooth(duration: 0.45)) {
                     position.scrollTo(x: tracking.clamp(origin - value.predictedEndTranslation.width))
                 }
                 let drag = tracking.drag
                 Task { @MainActor in
-                    try? await Task.sleep(for: .milliseconds(120))
+                    try? await tvSleep(for: .milliseconds(120))
                     drag.active = false
                 }
             }
@@ -1311,7 +1455,7 @@ struct ScrollStrip<Content: View>: View {
         let label = L10n.text(forward ? rightLabel : leftLabel)
         return Button {
             let step = max(1, tracking.metrics.viewport * 0.8)
-            withAnimation(.smooth(duration: 0.3)) {
+            withAnimation(.tvSmooth(duration: 0.3)) {
                 position.scrollTo(x: tracking.clamp(tracking.metrics.offset + (forward ? step : -step)))
             }
         } label: {
@@ -1343,6 +1487,7 @@ private struct SourceChip: View {
     @Environment(\.glassControls) private var glass
 
     var body: some View {
+        WithPerceptionTracking {
         let label = SourceLabel(name)
         // The chip under the pointer receives the mouse-up that ends a drag.
         Button { if drag?.active != true { action() } } label: {
@@ -1361,11 +1506,13 @@ private struct SourceChip: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .animation(.smooth(duration: 0.15), value: hovering)
-        .animation(.smooth(duration: 0.2), value: selected)
+        .animation(.tvSmooth(duration: 0.15), value: hovering)
+        .animation(.tvSmooth(duration: 0.2), value: selected)
         .accessibilityLabel(label.title)
         .accessibilityAddTraits(selected ? [.isSelected] : [])
         .help(name)
+
+        }
     }
 
     private var fill: Color {

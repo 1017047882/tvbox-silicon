@@ -1,3 +1,4 @@
+import Perception
 import SwiftUI
 import TVCore
 #if os(iOS) || os(tvOS)
@@ -21,14 +22,14 @@ import AVKit
 #if os(tvOS) || os(macOS)
 /// Plays what Yingxia on another device sends (PlayOn): a catalog episode through this device's own copy
 /// of its source, so Next and the episode list work here too, else the stream as the sender had it.
-@MainActor @Observable final class PlayOnController {
+@MainActor @Perceptible final class PlayOnController {
     static let shared = PlayOnController()
     static let key = "playOnReceives"
     static var enabled: Bool { UserDefaults.standard.object(forKey: key) as? Bool ?? true }
     /// What is being opened and who sent it, shown until the player opens.
     private(set) var incoming: (title: String, sender: String)?
-    @ObservationIgnored private weak var store: Store?
-    @ObservationIgnored private var task: Task<Void, Never>?
+    @PerceptionIgnored private weak var store: Store?
+    @PerceptionIgnored private var task: Task<Void, Never>?
 
     func start(_ store: Store) {
         self.store = store
@@ -103,7 +104,7 @@ import AVKit
             guard !Task.isCancelled else { return }
             store.cancelResume()
             // Whatever plays here makes way: the player closes first so the new one starts afresh.
-            if store.playing != nil { store.playing = nil; try? await Task.sleep(for: .milliseconds(700)) }
+            if store.playing != nil { store.playing = nil; try? await tvSleep(for: .milliseconds(700)) }
             guard !Task.isCancelled else { return }
             store.playing = channel
         }
@@ -138,6 +139,7 @@ import AVKit
 /// What another device sent and from where, at the top of the window until the player opens.
 struct PlayOnIncoming: View {
     var body: some View {
+        WithPerceptionTracking {
         if let incoming = PlayOnController.shared.incoming {
             HStack(spacing: Self.spacing) {
                 ProgressView()
@@ -156,6 +158,8 @@ struct PlayOnIncoming: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .allowsHitTesting(false)
             .transition(.move(edge: .top).combined(with: .opacity))
+        }
+
         }
     }
     #if os(tvOS)
@@ -184,10 +188,14 @@ struct PlayOnButton: View {
     #endif
 
     var body: some View {
+        WithPerceptionTracking {
         Menu {
             Section(L10n.text("Play On")) {
                 ForEach(browser.receivers) { receiver in
+                    WithPerceptionTracking {
                     Button { send(to: receiver) } label: { Label(receiver.name, systemImage: Self.symbol(receiver.kind)) }
+
+                    }
                 }
             }
             #if os(iOS)
@@ -213,7 +221,11 @@ struct PlayOnButton: View {
         }
         #if os(iOS)
         // The picker AirPlay opens from, and where an iPad's popover points; all but invisible, not hidden.
-        .background { AirPlayPickerView(picker: airPlay).opacity(0.02).allowsHitTesting(false) }
+        .background {
+            WithPerceptionTracking {
+ AirPlayPickerView(picker: airPlay).opacity(0.02).allowsHitTesting(false)
+            }
+        }
         #endif
         #if os(macOS)
         .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
@@ -232,12 +244,12 @@ struct PlayOnButton: View {
         #if DEBUG
         // `-qaPlayOn <name or *>`: sends to that device once it shows up, once per launch, after
         // `-qaPlayOnDelay <seconds>` of playback.
-        .onChange(of: browser.receivers, initial: true) { _, receivers in
+        .tvOnChange(of: browser.receivers, initial: true) { _, receivers in
             guard let wanted = UserDefaults.standard.string(forKey: "qaPlayOn"), !Self.qaSent,
                   let receiver = receivers.first(where: { $0.name == wanted || wanted == "*" }) else { return }
             Self.qaSent = true
             Task {
-                try? await Task.sleep(for: .seconds(UserDefaults.standard.double(forKey: "qaPlayOnDelay")))
+                try? await tvSleep(for: .seconds(UserDefaults.standard.double(forKey: "qaPlayOnDelay")))
                 send(to: receiver)
             }
         }
@@ -245,11 +257,13 @@ struct PlayOnButton: View {
         // `-qaAirPlay 1`: opens the AirPlay picker from here a few seconds in.
         .task {
             guard UserDefaults.standard.bool(forKey: "qaAirPlay") else { return }
-            try? await Task.sleep(for: .seconds(4))
+            try? await tvSleep(for: .seconds(4))
             airPlay.present()
         }
         #endif
         #endif
+
+        }
     }
     #if DEBUG
     @MainActor private static var qaSent = false
@@ -309,6 +323,7 @@ struct PlayOnPlaceholder: View {
     let receiver: String
     let playHere: () -> Void
     var body: some View {
+        WithPerceptionTracking {
         VStack(spacing: 14) {
             Image(systemName: "play.tv").font(.system(size: 48, weight: .light))
             Text(L10n.text("Playing on %@", receiver)).font(.callout)
@@ -319,6 +334,8 @@ struct PlayOnPlaceholder: View {
         .foregroundStyle(.white.opacity(0.8))
         .multilineTextAlignment(.center)
         .padding(32)
+
+        }
     }
 }
 #endif

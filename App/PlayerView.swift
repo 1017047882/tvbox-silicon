@@ -1,3 +1,4 @@
+import Perception
 import SwiftUI
 import AVKit
 import TVCore
@@ -38,6 +39,7 @@ struct PlaybackView: View {
     }
 
     var body: some View {
+        WithPerceptionTracking {
         ZStack {
             #if os(iOS)
             Color.black.playerBleed(playerLayout != .inline)
@@ -114,10 +116,10 @@ struct PlaybackView: View {
         .frame(minWidth: 880, minHeight: 540)
         #endif
         #if !os(tvOS)
-        .onContinuousHover { _ in poke() }
+        .tvOnPointerMove { poke() }
         #if os(iOS)
         // The controls stay up while paused and start their countdown again on play.
-        .onChange(of: session.paused) { _, paused in if paused { hideTask?.cancel() } else if showsChrome { scheduleHide() } }
+        .tvOnChange(of: session.paused) { _, paused in if paused { hideTask?.cancel() } else if showsChrome { scheduleHide() } }
         #else
         .simultaneousGesture(TapGesture().onEnded { poke() })
         #endif
@@ -133,17 +135,17 @@ struct PlaybackView: View {
         .task(id: watch != nil) {
             let delay = UserDefaults.standard.double(forKey: "qaWatchFullScreen")
             guard watch?.fullScreen == false, delay > 0 else { return }
-            try? await Task.sleep(for: .seconds(delay))
+            try? await tvSleep(for: .seconds(delay))
             if !Task.isCancelled { toggleFullScreen() }
         }
         #endif
-        .onChange(of: channel) { _, channel in startCatalogPlayback(session, channel: channel, store: store); showOnStart() }
+        .tvOnChange(of: channel) { _, channel in startCatalogPlayback(session, channel: channel, store: store); showOnStart() }
         #if os(iOS)
-        .onChange(of: session.showsPicture || session.error != nil, initial: true) { _, started in watch?.started(started) }
+        .tvOnChange(of: session.showsPicture || session.error != nil, initial: true) { _, started in watch?.started(started) }
         .onAppear { watch?.opened(session) }
         #endif
-        .onChange(of: showsDanmaku) { _, value in session.catalogDanmaku.enabled = value }
-        .onChange(of: session.catalogDanmaku.enabled) { _, value in showsDanmaku = value }
+        .tvOnChange(of: showsDanmaku) { _, value in session.catalogDanmaku.enabled = value }
+        .tvOnChange(of: session.catalogDanmaku.enabled) { _, value in showsDanmaku = value }
         .onDisappear {
             hideTask?.cancel(); store.cancelEpisodeSelection(); session.stop()
             #if os(iOS)
@@ -154,10 +156,12 @@ struct PlaybackView: View {
         #if os(iOS)
         // Opening iPhone Duo moves the app to the inner display, which ignores orientations: drop a
         // landscape lock so the outer display isn't left in landscape when it closes again.
-        .onChange(of: horizontalSizeClass == .regular && verticalSizeClass == .regular) { _, large in
+        .tvOnChange(of: horizontalSizeClass == .regular && verticalSizeClass == .regular) { _, large in
             if large { PlayerOrientation.release() }
         }
         #endif
+
+        }
     }
 
     #if DEBUG
@@ -191,8 +195,11 @@ struct PlaybackView: View {
             .padding(16)
             .frame(maxHeight: .infinity, alignment: .top)
         .sheet(isPresented: $showsDanmakuList) {
+            WithPerceptionTracking {
             DanmakuListView(player: session.player, comments: session.danmaku) { showsDanmakuList = false }
                 .danmakuListPresentation()
+
+            }
         }
     }
 
@@ -292,8 +299,8 @@ struct PlaybackView: View {
         let delay = 3.5
         #endif
         hideTask = Task {
-            try? await Task.sleep(for: .seconds(delay))
-            if !Task.isCancelled { withAnimation(.smooth(duration: 0.3)) { showsChrome = false } }
+            try? await tvSleep(for: .seconds(delay))
+            if !Task.isCancelled { withAnimation(.tvSmooth(duration: 0.3)) { showsChrome = false } }
         }
     }
 
@@ -324,7 +331,7 @@ struct PlaybackView: View {
         #endif
         guard showsChrome, !quietStart else { return poke() }
         hideTask?.cancel()
-        withAnimation(.smooth(duration: 0.25)) { showsChrome = false }
+        withAnimation(.tvSmooth(duration: 0.25)) { showsChrome = false }
     }
 
     /// The seek bar is held: the controls stay until it is let go, then count down again.
@@ -379,7 +386,7 @@ struct PlaybackView: View {
                             Button { exit() } label: { Label(L10n.text("Close"), systemImage: "xmark") }.controlButton()
                         }
                     }
-                    .controlSize(.large).padding(.top, 30)
+                    .tvLargeControl().padding(.top, 30)
                 }
                 .foregroundStyle(.white)
                 .padding(32)
@@ -394,7 +401,7 @@ struct PlaybackView: View {
                         Button(L10n.text("Retry")) { startCatalogPlayback(session, channel: channel, store: store) }.controlButton(prominent: true).tint(Brand.accent)
                         Button(L10n.text("Close")) { dismiss() }.controlButton()
                     }
-                }.controlSize(.large)
+                }.tvLargeControl()
             }
             .padding(30).glassPanel(cornerRadius: 30).padding(30)
             #endif
@@ -439,6 +446,7 @@ extension PlaybackWaitContent {
 /// The player's title bar: the title, the buttons and Close share one row, the title truncating to leave the others
 /// their width; when that would leave the title less than `minimumTitle`, the buttons and Close take a row of their
 /// own, right-aligned.
+@available(iOS 16, macOS 13, tvOS 16, *)
 private struct ChromeRow: SwiftUI.Layout {
     var spacing: CGFloat = 12
     var rowSpacing: CGFloat = 10
@@ -505,6 +513,7 @@ private struct TVPlaybackFailureView: View {
     @FocusState private var retryFocused: Bool
 
     var body: some View {
+        WithPerceptionTracking {
         ZStack {
             if let backdrop { backdrop.view } else { TVStyle.background.ignoresSafeArea() }
             VStack(spacing: 0) {
@@ -556,6 +565,8 @@ private struct TVPlaybackFailureView: View {
         }
         .onAppear { retryFocused = true }
         .onExitCommand(perform: goBack)
+
+        }
     }
 }
 #endif
@@ -568,9 +579,12 @@ private struct NativePlayerView: View {
     var opacity = 0.9
     var revision = ""
     var body: some View {
+        WithPerceptionTracking {
         ZStack {
             PlayerSurface(player: player)
             if showsDanmaku && !comments.isEmpty { DanmakuOverlay(player: player, comments: comments, opacity: opacity, revision: revision).ignoresSafeArea() }
+        }
+
         }
     }
 }
@@ -599,11 +613,15 @@ private struct PlayerSurface: NSViewRepresentable {
         mask = landscape ? .landscape : holdsPortrait ? .portrait : .allButUpsideDown
         var controller = scene.keyWindow?.rootViewController
         while let next = controller?.presentedViewController { controller = next }
-        controller?.setNeedsUpdateOfSupportedInterfaceOrientations()
-        // UIKit calls the error handler on a background queue. @Sendable keeps it off the main actor;
-        // without it Swift 6 checks the closure's main-actor isolation at entry and traps (issue #247).
-        scene.requestGeometryUpdate(.iOS(interfaceOrientations: landscape ? .landscape : .portrait)) { @Sendable error in
-            Diagnostics.shared.record(.warning, "player", "Rotation refused: \(error.localizedDescription)")
+        if #available(iOS 16, *) {
+            controller?.setNeedsUpdateOfSupportedInterfaceOrientations()
+            // UIKit calls the error handler on a background queue. @Sendable keeps it off the main actor;
+            // without it Swift 6 checks the closure's main-actor isolation at entry and traps (issue #247).
+            scene.requestGeometryUpdate(.iOS(interfaceOrientations: landscape ? .landscape : .portrait)) { @Sendable error in
+                Diagnostics.shared.record(.warning, "player", "Rotation refused: \(error.localizedDescription)")
+            }
+        } else {
+            UIViewController.attemptRotationToDeviceOrientation()
         }
     }
 
@@ -846,7 +864,7 @@ private struct NativePlayerView: UIViewControllerRepresentable {
 
 /// Auto-hiding chrome driven by real pointer movement and key presses (not hover
 /// phases, which AVPlayerView's own overlay and layout passes keep re-firing).
-@MainActor @Observable private final class ChromeIdle {
+@MainActor @Perceptible private final class ChromeIdle {
     var visible = true
     private var task: Task<Void, Never>?
     private var monitor: Any?
@@ -875,12 +893,12 @@ private struct NativePlayerView: UIViewControllerRepresentable {
     }
 
     func poke() {
-        if !visible { withAnimation(.smooth(duration: 0.25)) { visible = true } }
+        if !visible { withAnimation(.tvSmooth(duration: 0.25)) { visible = true } }
         task?.cancel()
         task = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(2.5))
+            try? await tvSleep(for: .seconds(2.5))
             guard !Task.isCancelled, let self else { return }
-            withAnimation(.smooth(duration: 0.4)) { self.visible = false }
+            withAnimation(.tvSmooth(duration: 0.4)) { self.visible = false }
             NSCursor.setHiddenUntilMouseMoves(true)
         }
     }
@@ -891,13 +909,17 @@ private struct DesktopPlaybackRoot: View {
     let session: PlaybackSession
     let window: PlaybackWindow
     let store: Store
-    var body: some View { DesktopPlaybackView(channel: channel, session: session, window: window).environment(store) }
+    var body: some View {
+        WithPerceptionTracking {
+ DesktopPlaybackView(channel: channel, session: session, window: window).environment(store)
+        }
+    }
 }
 
 private struct DesktopPlaybackView: View {
     @Environment(Store.self) private var store
     let channel: Channel
-    @Bindable var session: PlaybackSession
+    @Perception.Bindable var session: PlaybackSession
     let window: PlaybackWindow
     @State private var fillsFrame = false
     @State private var floats = false
@@ -916,6 +938,7 @@ private struct DesktopPlaybackView: View {
     private var waitContent: PlaybackWaitContent? { .make(session, channel: channel, store: store, linesHint: true) }
 
     var body: some View {
+        WithPerceptionTracking {
         ZStack(alignment: .top) {
             ZStack {
                 Color.black
@@ -954,18 +977,23 @@ private struct DesktopPlaybackView: View {
         }
         .preferredColorScheme(.dark)
         .ignoresSafeArea()
-        .onChange(of: showsDanmaku) { _, value in session.catalogDanmaku.enabled = value }
-        .onChange(of: session.catalogDanmaku.enabled) { _, value in showsDanmaku = value }
-        .onChange(of: floats) { _, value in window.level = value ? .floating : .normal }
-        .onChange(of: showsChrome) { _, value in setTrafficLights(visible: value) }
+        .tvOnChange(of: showsDanmaku) { _, value in session.catalogDanmaku.enabled = value }
+        .tvOnChange(of: session.catalogDanmaku.enabled) { _, value in showsDanmaku = value }
+        .tvOnChange(of: floats) { _, value in window.level = value ? .floating : .normal }
+        .tvOnChange(of: showsChrome) { _, value in setTrafficLights(visible: value) }
         .onAppear { floats = window.level == .floating; idle.attach(window); tvBrowser.start() }
         // Played here again (Space, say): the other device no longer has it to itself.
-        .onChange(of: session.paused) { _, paused in if !paused { playingOn = nil } }
+        .tvOnChange(of: session.paused) { _, paused in if !paused { playingOn = nil } }
         .sheet(isPresented: $showsDanmakuList) {
+            WithPerceptionTracking {
             DanmakuListView(player: session.player, comments: session.danmaku) { showsDanmakuList = false }
                 .danmakuListPresentation()
+
+            }
         }
         .onDisappear { idle.detach(); tvBrowser.stop() }
+
+        }
     }
 
     /// Title on the left (beside the traffic lights), actions on the right, over a soft scrim.
@@ -1007,8 +1035,11 @@ private struct DesktopPlaybackView: View {
         }
         .padding(.top, 10).padding(.trailing, 16).padding(.bottom, 36)
         .background(alignment: .top) {
+            WithPerceptionTracking {
             LinearGradient(colors: [.black.opacity(0.6), .clear], startPoint: .top, endPoint: .bottom)
                 .allowsHitTesting(false)
+
+            }
         }
     }
 
@@ -1129,11 +1160,14 @@ private final class PassthroughHostingView<Content: View>: NSHostingView<Content
 struct QualityPicker: View {
     let session: PlaybackSession
     var body: some View {
+        WithPerceptionTracking {
         Picker(L10n.text("Quality"), selection: Binding(get: { session.quality ?? 0 }, set: { session.choose(quality: $0 == 0 ? nil : $0) })) {
             Text(L10n.text("Auto")).tag(0)
             ForEach(session.qualities) { Text($0.label).tag($0.id) }
         }
         .pickerStyle(.inline)
+
+        }
     }
 }
 #endif
@@ -1201,13 +1235,17 @@ struct PlaybackInfoPanel: View {
     private struct Row: Identifiable { let id: String; let text: String }
 
     var body: some View {
+        WithPerceptionTracking {
         let rows = [Row(id: "film", text: info.video ?? ""), Row(id: "waveform", text: info.audio ?? ""),
                     Row(id: "speedometer", text: info.network() ?? "")].filter { !$0.text.isEmpty }
         VStack(alignment: .leading, spacing: Metrics.spacing) {
             ForEach(rows) { row in
+                WithPerceptionTracking {
                 HStack(spacing: Metrics.spacing * 2.5) {
                     Image(systemName: row.id).foregroundStyle(.white.opacity(0.55)).frame(width: Metrics.icon)
                     Text(row.text).lineLimit(1)
+                }
+
                 }
             }
         }
@@ -1216,9 +1254,13 @@ struct PlaybackInfoPanel: View {
         .padding(.horizontal, Metrics.padding * 1.3).padding(.vertical, Metrics.padding)
         // A plain tint, not a material: it sits over moving video, where a blur would redraw every frame.
         .background(.black.opacity(0.5), in: RoundedRectangle(cornerRadius: Metrics.corner, style: .continuous))
-        .overlay { RoundedRectangle(cornerRadius: Metrics.corner, style: .continuous).strokeBorder(.white.opacity(0.12), lineWidth: 1) }
+        .overlay {
+            WithPerceptionTracking {
+ RoundedRectangle(cornerRadius: Metrics.corner, style: .continuous).strokeBorder(.white.opacity(0.12), lineWidth: 1)
+            }
+        }
         .opacity(rows.isEmpty ? 0 : 1)
-        .animation(.smooth(duration: 0.25), value: rows.map(\.id))
+        .animation(.tvSmooth(duration: 0.25), value: rows.map(\.id))
         .environment(\.colorScheme, .dark)
         .allowsHitTesting(false)
         .accessibilityElement(children: .combine)
@@ -1226,8 +1268,10 @@ struct PlaybackInfoPanel: View {
         .task {
             while !Task.isCancelled {
                 await refresh()
-                try? await Task.sleep(for: .seconds(1))
+                try? await tvSleep(for: .seconds(1))
             }
+        }
+
         }
     }
 

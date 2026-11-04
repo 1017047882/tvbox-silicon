@@ -121,7 +121,7 @@ actor HongguoRangeReader {
         defer { task.cancel() }
         let httpResponse = response as? HTTPURLResponse
         if range.lowerBound == 0 || httpResponse?.statusCode != 206 {
-            Diagnostics.shared.record(.debug, "hongguo.stream", "range host=\(response.url?.host() ?? "-") requested=\(range.lowerBound)-\(range.upperBound - 1) status=\(httpResponse?.statusCode ?? 0) referer=\(retry) contentRange=\(httpResponse?.value(forHTTPHeaderField: "Content-Range") ?? "-") contentLength=\(response.expectedContentLength)")
+            Diagnostics.shared.record(.debug, "hongguo.stream", "range host=\(response.url?.host ?? "-") requested=\(range.lowerBound)-\(range.upperBound - 1) status=\(httpResponse?.statusCode ?? 0) referer=\(retry) contentRange=\(httpResponse?.value(forHTTPHeaderField: "Content-Range") ?? "-") contentLength=\(response.expectedContentLength)")
         }
         // App CDN nodes have different Referer policies. Match the upstream client: omit it
         // first, add the app's Referer only after 403, and reuse that choice for later ranges.
@@ -139,8 +139,8 @@ actor HongguoRangeReader {
         }
         guard let response = response as? HTTPURLResponse, response.statusCode == 206,
               let value = response.value(forHTTPHeaderField: "Content-Range"),
-              let match = value.firstMatch(of: /^bytes (\d+)-(\d+)\/(\d+)$/),
-              let first = Int(match.1), let last = Int(match.2), let length = Int(match.3),
+              let match = value.tvFirstMatch(#"^bytes (\d+)-(\d+)/(\d+)$"#),
+              let first = Int(match[1]), let last = Int(match[2]), let length = Int(match[3]),
               (1...512 << 20).contains(length), first == range.lowerBound,
               last == min(range.upperBound, length) - 1, last >= first,
               response.expectedContentLength == -1 || response.expectedContentLength == Int64(last - first + 1) else {
@@ -272,7 +272,7 @@ actor HongguoByteStream {
         let covered = index.samples(in: requested)
         if bounded, let time = covered.map(\.time).min() {
             while time > position + HongguoStreams.forwardBufferDuration {
-                try await Task.sleep(for: .milliseconds(200))
+                try await tvSleep(for: .milliseconds(200))
             }
         }
         try Task.checkCancellation()

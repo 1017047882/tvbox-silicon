@@ -1,3 +1,4 @@
+import Perception
 import SwiftUI
 import TVCore
 
@@ -19,13 +20,18 @@ struct HomeView: View {
     @State private var settled = false
 
     var body: some View {
+        WithPerceptionTracking {
         #if os(tvOS)
         if let config = store.subscription, settled {
             WatchNowTVPage(config: config, sections: shownSections)
                 .historyDetailsDestination()
                 // The tab sidebar already names this page; a second heading just repeats it.
-                .toolbar(.hidden, for: .navigationBar)
-                .overlay { if shownSections.isEmpty { allHidden } }
+                .tvToolbar(.hidden, for: .navigationBar)
+                .overlay {
+                    WithPerceptionTracking {
+ if shownSections.isEmpty { allHidden }
+                    }
+                }
         } else {
             classic
         }
@@ -34,7 +40,11 @@ struct HomeView: View {
         if let config = store.subscription, settled, sizeClass == .compact {
             WatchNowPhonePage(config: config, sections: shownSections)
                 .historyDetailsDestination()
-                .overlay { if shownSections.isEmpty { allHidden } }
+                .overlay {
+                    WithPerceptionTracking {
+ if shownSections.isEmpty { allHidden }
+                    }
+                }
         } else {
             classic
         }
@@ -42,11 +52,17 @@ struct HomeView: View {
         if let config = store.subscription, settled {
             WatchNowPhonePage(config: config, sections: shownSections)
                 .historyDetailsDestination()
-                .overlay { if shownSections.isEmpty { allHidden } }
+                .overlay {
+                    WithPerceptionTracking {
+ if shownSections.isEmpty { allHidden }
+                    }
+                }
         } else {
             classic
         }
         #endif
+
+        }
     }
 
     private var shownSections: Set<HomeSection> {
@@ -66,7 +82,9 @@ struct HomeView: View {
         // The column width, not the placeholders' own width. A row of fixed cards is wider than the
         // detail column and NavigationSplitView then gives it that width, crushing the sidebar.
         GeometryReader { proxy in
+            WithPerceptionTracking {
             ScrollViewReader { reader in
+                WithPerceptionTracking {
                 ScrollView {
                     Group {
                         if let config = store.subscription, !settled, showsPlaceholder(config) {
@@ -79,8 +97,12 @@ struct HomeView: View {
                     .frame(width: proxy.size.width, alignment: .top)
                 }
                 #if DEBUG
-                .task { if let target = QALaunch.scrollTarget { try? await Task.sleep(for: .seconds(8)); reader.scrollTo(target, anchor: .bottom) } }
+                .task { if let target = QALaunch.scrollTarget { try? await tvSleep(for: .seconds(8)); reader.scrollTo(target, anchor: .bottom) } }
                 #endif
+
+                }
+            }
+
             }
         }
         .screenBackdrop()
@@ -93,7 +115,7 @@ struct HomeView: View {
         }
         #if os(tvOS)
         // The tab sidebar already names this page; a second heading just repeats it.
-        .toolbar(.hidden, for: .navigationBar)
+        .tvToolbar(.hidden, for: .navigationBar)
         #else
         .screenTitle(L10n.text("Watch Now"))
         #endif
@@ -163,9 +185,12 @@ struct HomeView: View {
     private var cardRow: some View {
         HStack(spacing: Layout.cardSpacing) {
             ForEach(0..<4, id: \.self) { _ in
+                WithPerceptionTracking {
                 SkeletonBlock(cornerRadius: 16)
                     .frame(maxWidth: .infinity)
                     .frame(height: 92)
+
+                }
             }
         }
         .accessibilityHidden(true)
@@ -183,7 +208,7 @@ struct HomeView: View {
             }
         }
         .padding(.horizontal, welcomeInset)
-        .containerRelativeFrame(.vertical, alignment: .center) { height, _ in height * 0.82 }
+        .tvContainerRelativeFrame(.vertical, alignment: .center) { height, _ in height * 0.82 }
         #if os(tvOS)
         // Moving right out of the sidebar lands on the primary action, not the secondary one.
         .defaultFocus($primaryFocused, true, priority: .userInitiated)
@@ -229,15 +254,21 @@ struct HomeView: View {
                 #else
                 // Side by side when both fit on one line each, else stacked: on an iPad in portrait the copy
                 // column is about 430 pt and "Sign In to Cloud Drive" wrapped onto two lines.
+                Group {
+            if #available(iOS 16, macOS 13, tvOS 16, *) {
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 16) { welcomeButtons }
                     VStack(alignment: .leading, spacing: 12) { welcomeButtons }
                 }
+            } else {
+                VStack(alignment: .leading, spacing: 12) { welcomeButtons }
+            }
+        }
                 #endif
             }
-            .controlSize(.large)
+            .tvLargeControl()
             if store.importing {
-                LoadingCard { .server(URL(string: store.subscriptionAddress)?.host(), title: L10n.text("Importing…")) }
+                LoadingCard { .server(URL(string: store.subscriptionAddress)?.host, title: L10n.text("Importing…")) }
                     .frame(maxWidth: heroTitle * 9)
                     .padding(.top, 24)
             }
@@ -272,7 +303,7 @@ struct HomeView: View {
 
     /// Every section switched off in Settings: say so, rather than leave a blank page.
     private var allHidden: some View {
-        ContentUnavailableView {
+        TVEmptyState {
             Label(L10n.text("Watch Now"), systemImage: AppSection.home.icon)
         } description: {
             Text(L10n.text("Choose what Watch Now shows in Settings."))
@@ -287,9 +318,16 @@ struct HomeView: View {
             SectionHeader(title: L10n.text("Pinned Sources")) { store.section = .sites }
             LazyVGrid(columns: Layout.cardColumns, spacing: Layout.cardSpacing) {
                 ForEach(store.orderedSites(config).filter { store.pinnedSources.contains($0, origin: config.origin) }) { site in
+                    WithPerceptionTracking {
                     RouteLink { SiteView(site: site, origin: config.origin, jarURL: config.spiderURL) } label: { SiteCard(site: site, marksPinned: false) }
-                        .tileButton().contextMenu { PinSourceButton(site: site, origin: config.origin) }
+                        .tileButton().contextMenu {
+                            WithPerceptionTracking {
+ PinSourceButton(site: site, origin: config.origin)
+                            }
+                        }
                         .accessibilityIdentifier("home.pinned." + site.key)
+
+                    }
                 }
             }
         }.accessibilityIdentifier("home.pinnedSources")
@@ -312,7 +350,10 @@ struct HomeView: View {
             ChipRow {
                 HStack(spacing: Layout.cardSpacing) {
                     ForEach(Array(store.favorites.items.prefix(12))) { item in
+                        WithPerceptionTracking {
                         HomeFavoriteCard(item: item).frame(width: Layout.cardMin)
+
+                        }
                     }
                 }.padding(.vertical, 6)
             }
@@ -336,12 +377,19 @@ private struct FavoriteTile<Content: View>: View {
     @Environment(\.isFocused) private var focused
     @ViewBuilder let content: Content
     var body: some View {
+        WithPerceptionTracking {
         content
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background { TileSurface(focused: focused, radius: 16) }
+        .background {
+            WithPerceptionTracking {
+ TileSurface(focused: focused, radius: 16)
+            }
+        }
         // Primary and secondary text turn dark on the white plate.
         .environment(\.colorScheme, focused ? .light : .dark)
+
+        }
     }
 }
 #endif
@@ -359,11 +407,14 @@ private struct HomeFavoriteCard: View {
     private static let posterWidth = thumb * 2 / 3
 
     var body: some View {
+        WithPerceptionTracking {
         #if os(tvOS)
         tvBody
         #else
         cardBody
         #endif
+
+        }
     }
 
     #if os(tvOS)
@@ -380,7 +431,11 @@ private struct HomeFavoriteCard: View {
             if let listing = video.listingVideo(), let client = store.catalogClient(for: video) {
                 RouteLink { VideoDetailView(video: listing, client: client) } label: { FavoriteTile { label } }
                     .tileButton()
-                    .contextMenu { FavoriteMenuButton(item: item, name: video.videoName) }
+                    .contextMenu {
+                        WithPerceptionTracking {
+ FavoriteMenuButton(item: item, name: video.videoName)
+                        }
+                    }
             } else {
                 tvButton(name: video.videoName) { store.reportMissingFavoriteSource() } label: { label }
             }
@@ -404,7 +459,11 @@ private struct HomeFavoriteCard: View {
     private func tvButton<Label: View>(name: String, action: @escaping () -> Void, @ViewBuilder label: () -> Label) -> some View {
         Button(action: action) { FavoriteTile { label() } }
             .tileButton()
-            .contextMenu { FavoriteMenuButton(item: item, name: name) }
+            .contextMenu {
+                WithPerceptionTracking {
+ FavoriteMenuButton(item: item, name: name)
+                }
+            }
     }
     #endif
 
@@ -509,10 +568,13 @@ private struct HomeFavoriteCard: View {
 struct AppMark: View {
     var size: CGFloat
     var body: some View {
+        WithPerceptionTracking {
         Image("YingxiaLogo").resizable().interpolation(.high).scaledToFill()
             .frame(width: size, height: size)
             .clipShape(RoundedRectangle(cornerRadius: size * 0.225, style: .continuous))
             .shadow(color: Color(red: 0.1, green: 0.55, blue: 1).opacity(0.35), radius: size * 0.22, y: size * 0.06)
+
+        }
     }
 }
 
@@ -521,22 +583,39 @@ private struct PosterWall: View {
     private static let hues: [Color] = [Brand.cyan, Brand.indigo, Brand.teal, Brand.cyan.opacity(0.6)]
     private static let symbols = ["film", "sparkles.tv", "theatermasks", "music.note.tv", "popcorn", "star"]
     var body: some View {
+        WithPerceptionTracking {
         GeometryReader { proxy in
+            WithPerceptionTracking {
             let spacing = proxy.size.width * 0.045
             let width = (proxy.size.width - spacing * 2) / 3
             HStack(alignment: .top, spacing: spacing) {
                 ForEach(0..<3, id: \.self) { column in
+                    WithPerceptionTracking {
                     VStack(spacing: spacing) {
-                        ForEach(0..<4, id: \.self) { row in tile(column * 4 + row, width: width) }
+                        ForEach(0..<4, id: \.self) { row in
+                            WithPerceptionTracking {
+ tile(column * 4 + row, width: width)
+                            }
+                        }
                     }
                     .offset(y: column == 1 ? -width * 0.55 : column == 2 ? -width * 0.15 : 0)
+
+                    }
                 }
             }
             .rotationEffect(.degrees(-6))
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .center)
-            .background { EllipticalGradient(colors: [Brand.cyan.opacity(0.3), .clear], endRadiusFraction: 0.5) }
+            .background {
+                WithPerceptionTracking {
+ EllipticalGradient(colors: [Brand.cyan.opacity(0.3), .clear], endRadiusFraction: 0.5)
+                }
+            }
             // An ellipse that reaches clear at the frame's edges, so no tile meets a hard clip.
             .mask { EllipticalGradient(stops: [.init(color: .black, location: 0), .init(color: .black.opacity(0.75), location: 0.45), .init(color: .clear, location: 1)], endRadiusFraction: 0.5) }
+
+            }
+        }
+
         }
     }
 
@@ -547,17 +626,23 @@ private struct PosterWall: View {
             .fill(LinearGradient(colors: lit ? [hue.opacity(0.7), hue.opacity(0.28)] : [PosterSurface.raised, PosterSurface.base],
                                  startPoint: .topLeading, endPoint: .bottomTrailing))
             .overlay {
+                WithPerceptionTracking {
                 Image(systemName: Self.symbols[index % Self.symbols.count])
                     .font(.system(size: width * 0.26, weight: .semibold))
                     .foregroundStyle(.white.opacity(lit ? 0.55 : 0.18))
+
+                }
             }
             .overlay(alignment: .bottomLeading) {
+                WithPerceptionTracking {
                 VStack(alignment: .leading, spacing: width * 0.04) {
                     Capsule().frame(width: width * 0.55, height: width * 0.05)
                     Capsule().frame(width: width * 0.32, height: width * 0.05)
                 }
                 .foregroundStyle(.white.opacity(lit ? 0.35 : 0.12))
                 .padding(width * 0.09)
+
+                }
             }
             .frame(width: width, height: width * 1.45)
     }
@@ -612,11 +697,14 @@ enum HomeSection: String, CaseIterable, Identifiable {
 /// Settings → Watch Now: which sections the page shows.
 struct WatchNowSettingsView: View {
     var body: some View {
+        WithPerceptionTracking {
         SettingsPage(title: L10n.text("Watch Now"), symbol: AppSection.home.icon) {
             SettingsGroup(title: L10n.text("Show on Watch Now"),
                           footer: L10n.text("A section you switch off only leaves Watch Now: Playback History, Favorites, Sources and Live TV still have everything.")) {
                 ForEach(HomeSection.available) { HomeSectionToggle(section: $0) }
             }
+        }
+
         }
     }
 }
@@ -630,6 +718,7 @@ private struct HomeSectionToggle: View {
         _shown = AppStorage(wrappedValue: true, section.key)
     }
     var body: some View {
+        WithPerceptionTracking {
         Group {
             #if os(tvOS)
             TVSettingsToggle(title: section.title, isOn: $shown)
@@ -639,5 +728,7 @@ private struct HomeSectionToggle: View {
             #endif
         }
         .accessibilityIdentifier("settings.home." + section.rawValue)
+
+        }
     }
 }

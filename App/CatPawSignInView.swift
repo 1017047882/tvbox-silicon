@@ -1,3 +1,5 @@
+import Perception
+import NavigationBackport
 #if !os(tvOS)
 import ImageIO
 import SwiftUI
@@ -19,12 +21,20 @@ struct CatPawSignInView: View {
     @State private var attempt = 0
 
     var body: some View {
-        NavigationStack {
+        WithPerceptionTracking {
+        NBNavigationStack {
+            WithPerceptionTracking {
             // Side by side on an iPad or Mac; stacked on a phone.
-            ViewThatFits(in: .horizontal) {
+            Group {
+            if #available(iOS 16, macOS 13, tvOS 16, *) {
+                ViewThatFits(in: .horizontal) {
                 HStack(alignment: .center, spacing: 32) { code; details }
                 ScrollView { VStack(alignment: .leading, spacing: 32) { code; details } }
             }
+            } else {
+                ScrollView { VStack(alignment: .leading, spacing: 32) { code; details } }
+            }
+        }
             .padding(32)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             #if os(iOS)
@@ -35,11 +45,15 @@ struct CatPawSignInView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button(L10n.text("Cancel")) { dismiss() } }
             }
+
+            }
         }
         #if os(macOS)
         .frame(minWidth: 640, minHeight: 380)
         #endif
         .task(id: attempt) { await run() }
+
+        }
     }
 
     private var details: some View {
@@ -126,7 +140,7 @@ struct CatPawSignInView: View {
             started = signIn
             self.signIn = signIn
             while true {
-                try await Task.sleep(for: .seconds(2))
+                try await tvSleep(for: .seconds(2))
                 try await signIn.poll()
                 switch signIn.status {
                 case .waiting: continue

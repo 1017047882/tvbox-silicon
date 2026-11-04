@@ -4,7 +4,9 @@ Yingxia's original code is licensed under GPL-3.0-only; see the root [LICENSE](.
 
 ## Observation compatibility
 
-[Perception](https://github.com/pointfreeco/swift-perception) 1.6.0 (MIT, with Swift-derived sources under Apache-2.0 with Runtime Library Exception) backports state observation to iOS 15. SwiftPM resolves the unmodified upstream dependency. Preserve its license and source-file notices when distributing the app. The shared core uses its observation macros; the iOS 15 view-tracking migration is still in progress.
+[Perception](https://github.com/pointfreeco/swift-perception) 1.6.0 (MIT, with Swift-derived sources under Apache-2.0 with Runtime Library Exception) backports state observation to iOS 15. SwiftPM resolves the unmodified upstream dependency. Preserve its license and source-file notices when distributing the app. The shared core and app use its observation macros and view-tracking scopes.
+
+[NavigationBackport](https://github.com/johnpatrickmorgan/NavigationBackport) 0.9.0 (MIT, copyright 2022 johnpatrickmorgan) provides value-based navigation on iOS 15. SwiftPM resolves the unmodified upstream dependency. Its license is included in `App/Resources/ThirdPartyNotices.txt`.
 
 ## Shared DEX interpreter
 

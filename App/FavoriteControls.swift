@@ -1,3 +1,4 @@
+import Perception
 import SwiftUI
 import TVCore
 
@@ -10,13 +11,14 @@ struct FavoriteHeartButton: View {
     /// An empty artwork heart stays hidden until this is true. A saved heart ignores it.
     var revealed = true
     var body: some View {
+        WithPerceptionTracking {
         let on = store.favorites.contains(item)
         let shown = on || !onArtwork || revealed
         Button { store.favorites.toggle(item) } label: {
             Image(systemName: on ? "heart.fill" : "heart")
                 .font(onArtwork ? .system(size: 13, weight: .semibold) : .title3)
                 .foregroundStyle(on ? Brand.rose : (onArtwork ? Color.white : Color.secondary))
-                .contentTransition(.symbolEffect(.replace))
+                .tvContentTransition(.symbolEffect(.replace))
                 .artworkBadge(onArtwork)
         }
         .buttonStyle(.plain)
@@ -24,6 +26,8 @@ struct FavoriteHeartButton: View {
         .allowsHitTesting(shown)
         .accessibilityHidden(!shown)
         .accessibilityLabel(on ? L10n.text("Remove %@ from favorites", name) : L10n.text("Add %@ to favorites", name))
+
+        }
     }
 }
 
@@ -45,7 +49,11 @@ extension View {
     /// favorites lists show none there. Elsewhere the heart stays and this does nothing.
     @ViewBuilder func favoriteMenu(_ item: FavoriteItem, name: String) -> some View {
         #if os(tvOS)
-        contextMenu { FavoriteMenuButton(item: item, name: name) }
+        contextMenu {
+            WithPerceptionTracking {
+ FavoriteMenuButton(item: item, name: name)
+            }
+        }
         #else
         self
         #endif
@@ -57,12 +65,15 @@ struct FavoriteMenuButton: View {
     let item: FavoriteItem
     let name: String
     var body: some View {
+        WithPerceptionTracking {
         let on = store.favorites.contains(item)
         // A menu row is short: the title is already on the card it was opened from.
         Button(L10n.text(on ? "Unlike" : "Like"), systemImage: on ? "heart.slash" : "heart") {
             store.favorites.toggle(item)
         }
         .accessibilityLabel(on ? L10n.text("Remove %@ from favorites", name) : L10n.text("Add %@ to favorites", name))
+
+        }
     }
 }
 
@@ -75,6 +86,7 @@ struct ArtworkBadgeButton: View {
     let action: () -> Void
     @State private var hovering = false
     var body: some View {
+        WithPerceptionTracking {
         Button(action: action) {
             Image(systemName: symbol).font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
                 .artworkBadge(fill: destructive && hovering ? Brand.rose : nil)
@@ -83,7 +95,9 @@ struct ArtworkBadgeButton: View {
         #if !os(tvOS)
         .onHover { hovering = $0 }
         #endif
-        .animation(.smooth(duration: 0.12), value: hovering)
+        .animation(.tvSmooth(duration: 0.12), value: hovering)
         .accessibilityLabel(label).help(label)
+
+        }
     }
 }

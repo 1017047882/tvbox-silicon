@@ -1,3 +1,5 @@
+import Perception
+import NavigationBackport
 import SwiftUI
 import TVCore
 
@@ -15,12 +17,16 @@ struct CloudFilesView: View {
     private var servers: [AListServer] { drives.compactMap { if case .alist(let server) = $0 { server } else { nil } } }
 
     var body: some View {
+        WithPerceptionTracking {
         FilesList {
             FilesSection(title: L10n.text("Cloud Drives"),
                          footer: signedIn.count < 3 ? L10n.text("Sign in to Quark, UC or 115 under Cloud Drive Accounts to browse their files here.") : nil) {
                 ForEach(signedIn) { drive in
+                    WithPerceptionTracking {
                     FolderLink(drive: drive, folder: drive.root, name: drive.name) {
                         FileRowLabel(symbol: drive.symbol, tint: drive.tint, title: drive.name, chevron: true)
+                    }
+
                     }
                 }
                 if signedIn.count < 3 {
@@ -32,13 +38,17 @@ struct CloudFilesView: View {
             }
             FilesSection(title: "AList · WebDAV · Emby", footer: L10n.text("Add an AList or OpenList server, a NAS's WebDAV share, or an Emby or Jellyfin server, by the address you open it at. Pasting an AList address, or a TVBox AList configuration, in Add Subscription adds servers too.")) {
                 ForEach(servers) { server in
+                    WithPerceptionTracking {
                     FolderLink(drive: .alist(server), folder: server.root, name: server.name) {
                         FileRowLabel(symbol: CloudFilesDrive.alist(server).symbol, tint: .teal, title: server.name,
                                      subtitle: server.address + (server.root == "/" ? "" : server.root), chevron: true)
                     }
                     .contextMenu {
+                        WithPerceptionTracking {
                         Button(L10n.text("Edit Server"), systemImage: "pencil") { editing = server }
                         Button(L10n.text("Remove Server"), systemImage: "trash", role: .destructive) { removing = server }
+
+                        }
                     }
                     #if os(iOS)
                     .swipeActions {
@@ -46,6 +56,8 @@ struct CloudFilesView: View {
                         Button(L10n.text("Edit Server"), systemImage: "pencil") { editing = server }
                     }
                     #endif
+
+                    }
                 }
                 Button { editing = AListServer(name: "", address: "") } label: {
                     FileRowLabel(symbol: "plus", tint: .green, title: L10n.text("Add Server"))
@@ -69,6 +81,8 @@ struct CloudFilesView: View {
                 reload()
             }
         }
+
+        }
     }
 
     private func reload() { drives = CloudFiles.drives() }
@@ -90,6 +104,7 @@ struct CloudFolderView: View {
     @State private var password = ""
 
     var body: some View {
+        WithPerceptionTracking {
         Group {
             if let files, !files.isEmpty {
                 FilesList {
@@ -117,7 +132,7 @@ struct CloudFolderView: View {
                     }
                 }
             } else {
-                ProgressView().controlSize(.large).frame(maxWidth: .infinity, maxHeight: .infinity)
+                ProgressView().tvLargeControl().frame(maxWidth: .infinity, maxHeight: .infinity)
                     #if os(tvOS)
                     .focusable()
                     #endif
@@ -134,6 +149,8 @@ struct CloudFolderView: View {
             Button(L10n.text("Cancel"), role: .cancel) {}
             Button(L10n.text("Open")) { Task { await load(password: password) } }
         } message: { Text(L10n.text("Enter the password for %@.", name)) }
+
+        }
     }
 
     @ViewBuilder private func row(_ file: CloudFile, in files: [CloudFile]) -> some View {
@@ -151,7 +168,11 @@ struct CloudFolderView: View {
                 }
             }
             .glassRow()
-            .contextMenu { FavoriteMenuButton(item: item, name: file.name) }
+            .contextMenu {
+                WithPerceptionTracking {
+ FavoriteMenuButton(item: item, name: file.name)
+                }
+            }
             .accessibilityIdentifier("files.play." + file.name)
         } else {
             // Focusable on Apple TV all the same, or the remote couldn't scroll past these rows.
@@ -209,6 +230,7 @@ struct AListServerForm: View {
     }
 
     var body: some View {
+        WithPerceptionTracking {
         #if os(tvOS)
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
@@ -224,9 +246,14 @@ struct AListServerForm: View {
             .padding(60)
             .frame(maxWidth: .infinity)
         }
-        .background { Backdrop() }
+        .background {
+            WithPerceptionTracking {
+ Backdrop()
+            }
+        }
         #else
-        NavigationStack {
+        NBNavigationStack {
+            WithPerceptionTracking {
             Form {
                 Section {
                     fields
@@ -235,7 +262,7 @@ struct AListServerForm: View {
                 }
                 if let error { Section { Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(Brand.amber) } }
             }
-            .formStyle(.grouped)
+            .tvGroupedForm()
             .navigationTitle(title)
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
@@ -246,11 +273,15 @@ struct AListServerForm: View {
                     if checking { ProgressView() } else { Button(L10n.text("Save")) { save() }.disabled(!canSave) }
                 }
             }
+
+            }
         }
         #if os(macOS)
         .frame(width: 520, height: 420)
         #endif
         #endif
+
+        }
     }
 
     private var title: String { isNew ? L10n.text("Add Server") : L10n.text("Edit Server") }
@@ -258,14 +289,14 @@ struct AListServerForm: View {
 
     @ViewBuilder private var fields: some View {
         TextField(L10n.text("Address"), text: $address, prompt: Text(verbatim: "http://192.168.1.10:5244"))
-            .autocorrectionDisabled()
+            .disableAutocorrection()
             #if os(iOS)
             .keyboardType(.URL).textInputAutocapitalization(.never)
             #endif
             .accessibilityIdentifier("alist.address")
         TextField(L10n.text("Name (Optional)"), text: $server.name)
         TextField(L10n.text("User Name (Optional)"), text: $server.username)
-            .autocorrectionDisabled()
+            .disableAutocorrection()
             #if os(iOS)
             .textInputAutocapitalization(.never)
             #endif
@@ -316,9 +347,12 @@ private struct FolderLink<Label: View>: View {
     let name: String
     @ViewBuilder var label: Label
     var body: some View {
+        WithPerceptionTracking {
         RouteLink { CloudFolderView(drive: drive, folder: folder, name: name) } label: { label }
             .glassRow()
             .accessibilityIdentifier("files.open." + name)
+
+        }
     }
 }
 
@@ -327,19 +361,26 @@ private struct FolderLink<Label: View>: View {
 private struct FilesList<Content: View>: View {
     @ViewBuilder var content: Content
     var body: some View {
+        WithPerceptionTracking {
         #if os(tvOS)
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 4) { content }
+            LazyVStack(alignment: .leading, spacing: 4) {
+                WithPerceptionTracking {
+ content
+                }
+            }
                 .glassRowInsets()
                 .frame(maxWidth: Layout.settingsWidth).frame(maxWidth: .infinity)
         }
         #elseif os(iOS)
         List { content.listRowBackground(SettingsStyle.rowFill) }
             .listStyle(.insetGrouped)
-            .scrollContentBackground(.hidden)
+            .tvScrollContentBackground(.hidden)
         #else
         List { content }.listStyle(.inset(alternatesRowBackgrounds: false))
         #endif
+
+        }
     }
 }
 
@@ -348,6 +389,7 @@ private struct FilesSection<Content: View>: View {
     let footer: String?
     @ViewBuilder var content: Content
     var body: some View {
+        WithPerceptionTracking {
         #if os(tvOS)
         VStack(alignment: .leading, spacing: 4) {
             if let title { Text(title).font(.system(size: 30, weight: .semibold)).foregroundStyle(.secondary).padding(.leading, 28).padding(.top, 24) }
@@ -363,6 +405,8 @@ private struct FilesSection<Content: View>: View {
             if let footer { Text(footer) }
         }
         #endif
+
+        }
     }
 }
 
@@ -382,6 +426,7 @@ struct FileRowLabel: View {
     private let tile: CGFloat = 32, glyph: CGFloat = 15, titleFont = Font.body, detailFont = Font.caption
     #endif
     var body: some View {
+        WithPerceptionTracking {
         HStack(spacing: 12) {
             if let artwork {
                 PosterImage(url: artwork, symbol: symbol)
@@ -392,7 +437,7 @@ struct FileRowLabel: View {
                 Image(systemName: symbol)
                     .font(.system(size: glyph, weight: .semibold)).foregroundStyle(.white)
                     .frame(width: tile, height: tile)
-                    .background(tint.gradient, in: RoundedRectangle(cornerRadius: tile * 0.26, style: .continuous))
+                    .background(tint.tvGradient, in: RoundedRectangle(cornerRadius: tile * 0.26, style: .continuous))
                     .accessibilityHidden(true)
             }
             VStack(alignment: .leading, spacing: 2) {
@@ -407,6 +452,8 @@ struct FileRowLabel: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
+
+        }
     }
 }
 
@@ -417,6 +464,7 @@ private struct FilesMessage<Actions: View>: View {
     var message: String? = nil
     @ViewBuilder var actions: Actions
     var body: some View {
+        WithPerceptionTracking {
         VStack(spacing: 14) {
             Image(systemName: symbol).font(.system(size: 44, weight: .semibold)).foregroundStyle(.secondary)
             Text(title).font(.title3.weight(.semibold))
@@ -425,6 +473,8 @@ private struct FilesMessage<Actions: View>: View {
         }
         .padding(Layout.gutter)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+        }
     }
 }
 

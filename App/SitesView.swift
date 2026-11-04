@@ -1,3 +1,5 @@
+import Perception
+import NavigationBackport
 import SwiftUI
 import TVCore
 
@@ -21,11 +23,13 @@ struct SitesView: View {
     @State private var arranging = false
     @State private var choosingHidden = false
     var body: some View {
+        WithPerceptionTracking {
         Group {
             if let config = store.subscription {
                 let groups = store.sourceGroups(includeHidden: false).filtered(by: query).limited(to: pick == nil ? nil : Set(pickable.map(\.key)))
                 let sites = store.orderedSites(config)
                 ScrollViewReader { proxy in
+                    WithPerceptionTracking {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: Layout.cardSpacing) {
                         if pick == nil, query.isEmpty && sites.count > 1 {
@@ -35,10 +39,13 @@ struct SitesView: View {
                             }.tvFocusSection()
                         }
                         ForEach(groups) { group in
+                            WithPerceptionTracking {
                             groupHeader(group)
                             if !collapsed.contains(group.id) {
                                 LazyVGrid(columns: Layout.cardColumns, spacing: Layout.cardSpacing) {
+                                    WithPerceptionTracking {
                                     ForEach(group.sites) { site in
+                                        WithPerceptionTracking {
                                         if let pick {
                                             Button { pick(site); dismiss() } label: { SiteCard(site: site, chosen: site.key == picked) }.tileButton()
                                                 .accessibilityAddTraits(site.key == picked ? .isSelected : [])
@@ -47,15 +54,24 @@ struct SitesView: View {
                                         } else {
                                         RouteLink { SiteView(site: site, origin: config.origin, jarURL: config.spiderURL) } label: { SiteCard(site: site, dimmed: group.kind == .hidden) }.tileButton()
                                             .contextMenu {
+                                                WithPerceptionTracking {
                                                 PinSourceButton(site: site, origin: config.origin)
                                                 HideSourceButton(site: site, origin: config.origin)
                                                 if store.sourceOrder.enabled { MoveSourceButtons(site: site, sites: sites) }
+
+                                                }
                                             }
                                         }
+
+                                        }
+                                    }
+
                                     }
                                 }
                                 // Unfolds from under its header; folding only fades, as the groups below slide up.
                                 .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: -16)), removal: .opacity))
+                            }
+
                             }
                         }
                     }.pageContainer()
@@ -63,20 +79,30 @@ struct SitesView: View {
                 // Picking opens on the current choice rather than the top of a long page.
                 .defaultFocus($focusedSite, picked)
                 .onAppear { if pick != nil, let picked { proxy.scrollTo(picked, anchor: .center) } }
+
+                    }
                 }
-                .sheet(isPresented: $arranging) { SourceOrderEditor(sites: sites, automatic: store.automaticSites(config)) }
-                .sheet(isPresented: $choosingHidden) { HiddenSourcesEditor() }
+                .sheet(isPresented: $arranging) {
+                    WithPerceptionTracking {
+ SourceOrderEditor(sites: sites, automatic: store.automaticSites(config))
+                    }
+                }
+                .sheet(isPresented: $choosingHidden) {
+                    WithPerceptionTracking {
+ HiddenSourcesEditor()
+                    }
+                }
                 #if DEBUG
                 // `-qaArrangeSources 1` opens the editor for screenshots.
                 .task {
                     guard UserDefaults.standard.bool(forKey: "qaArrangeSources") else { return }
                     store.setCustomSourceOrder(true)
                     // Let launch settle first: on tvOS a sheet asked for straight away never appeared.
-                    try? await Task.sleep(for: .seconds(2))
+                    try? await tvSleep(for: .seconds(2))
                     arranging = true
                 }
                 #endif
-            } else { ContentUnavailableView(L10n.text("No Sources Yet"), systemImage: "square.grid.2x2", description: Text(L10n.text("Add a TVBox subscription in Settings."))) }
+            } else { TVEmptyState(L10n.text("No Sources Yet"), systemImage: "square.grid.2x2", description: Text(L10n.text("Add a TVBox subscription in Settings."))) }
         }
         .screenBackdrop()
         .catalogSearchable(text: $query, prompt: L10n.text("Find a source"))
@@ -87,10 +113,10 @@ struct SitesView: View {
                 prepared = true
             }
         }
-        .onChange(of: store.section) { _, new in
+        .tvOnChange(of: store.section) { _, new in
             if new != .sites { prepared = false }
         }
-        .onChange(of: query) { old, new in
+        .tvOnChange(of: query) { old, new in
             if old.isEmpty && !new.isEmpty {
                 foldBeforeSearch = collapsed
                 collapsed = []
@@ -99,13 +125,15 @@ struct SitesView: View {
                 foldBeforeSearch = nil
             }
         }
+
+        }
     }
 
     @ViewBuilder
     private func groupHeader(_ group: SourceGroup) -> some View {
         let open = !collapsed.contains(group.id)
         let header = Button {
-            withAnimation(.snappy(duration: 0.3)) {
+            withAnimation(.tvSnappy(duration: 0.3)) {
                 if open { collapsed.insert(group.id) } else { collapsed.remove(group.id) }
             }
         } label: {
@@ -150,7 +178,10 @@ struct SitesView: View {
 private struct SitesTitle: ViewModifier {
     let picking: Bool
     func body(content: Content) -> some View {
+        WithPerceptionTracking {
         if picking { content.screenTitle(L10n.text("Recommendation Source")) } else { content.tabTitle(L10n.text("Sources")) }
+
+        }
     }
 }
 
@@ -214,8 +245,11 @@ struct SourceHealthDot: View {
     private let size: CGFloat = 8
     #endif
     var body: some View {
+        WithPerceptionTracking {
         if let tint = status.tint {
             Image(systemName: "circle.fill").font(.system(size: size)).foregroundStyle(tint).accessibilityLabel(status.summary)
+        }
+
         }
     }
 }
@@ -242,6 +276,7 @@ struct SiteCard: View {
     private let focused = false
     #endif
     var body: some View {
+        WithPerceptionTracking {
         let label = SourceLabel(site.name)
         let pinned = marksPinned && (store.subscription.map { store.pinnedSources.contains(site, origin: $0.origin) } ?? false)
         let runs = site.isBuiltIn || site.canBrowse(jarURL: store.subscription?.spiderURL)
@@ -251,12 +286,19 @@ struct SiteCard: View {
                 .opacity(runs ? 1 : 0.45)
                 // A badge on the icon, not another line, so pinned cards keep the grid's height.
                 .overlay(alignment: .bottomTrailing) {
+                    WithPerceptionTracking {
                     if pinned {
                         Image(systemName: "pin.fill").font(.system(size: icon * 0.18, weight: .bold)).foregroundStyle(Brand.onAccent)
                             .frame(width: icon * 0.36, height: icon * 0.36).background(Brand.accent, in: Circle())
-                            .overlay { Circle().strokeBorder(.black.opacity(0.35), lineWidth: 1) }
+                            .overlay {
+                                WithPerceptionTracking {
+ Circle().strokeBorder(.black.opacity(0.35), lineWidth: 1)
+                                }
+                            }
                             .offset(x: icon * 0.1, y: icon * 0.1)
                             .accessibilityLabel(L10n.text("Pinned"))
+                    }
+
                     }
                 }
             VStack(alignment: .leading, spacing: 4) {
@@ -281,9 +323,15 @@ struct SiteCard: View {
             #endif
         }
         .padding(padding).frame(maxWidth: .infinity, alignment: .leading)
-        .background { TileSurface(focused: focused, radius: radius) }
+        .background {
+            WithPerceptionTracking {
+ TileSurface(focused: focused, radius: radius)
+            }
+        }
         .accessibilityElement(children: .combine)
         .opacity(dimmed ? 0.45 : 1)
+
+        }
     }
 
     /// Which engine runs a source is an implementation detail; only built-in sources say so.
@@ -295,14 +343,21 @@ struct TileSurface: View {
     var focused: Bool
     var radius: CGFloat
     var body: some View {
+        WithPerceptionTracking {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         #if os(tvOS)
         // Like the system's focused buttons: a quiet tile at rest, a bright plate under focus.
         shape.fill(focused ? Color.white : Color.white.opacity(0.07))
-            .overlay { shape.strokeBorder(.white.opacity(focused ? 0 : 0.06), lineWidth: 1) }
+            .overlay {
+                WithPerceptionTracking {
+ shape.strokeBorder(.white.opacity(focused ? 0 : 0.06), lineWidth: 1)
+                }
+            }
         #else
         Color.clear.contentPanel(cornerRadius: radius)
         #endif
+
+        }
     }
 }
 
@@ -312,8 +367,11 @@ struct SourceIcon: View {
     let label: SourceLabel
     var size: CGFloat
     var body: some View {
+        WithPerceptionTracking {
         if site.isBilibili { BilibiliMark(size: size) } else {
             MonogramIcon(seed: site.name, label: label, size: size, systemImage: site.symbol)
+        }
+
         }
     }
 }
@@ -331,6 +389,7 @@ struct MonogramIcon: View {
         Color(red: 0.62, green: 0.48, blue: 0.88), Color(red: 0.52, green: 0.72, blue: 0.38),
     ]
     var body: some View {
+        WithPerceptionTracking {
         // A stable hash: `hashValue` changes every launch.
         let tint = Self.tints[seed.unicodeScalars.reduce(0) { ($0 &* 31 &+ Int($1.value)) & 0xFFFF } % Self.tints.count]
         let shape = RoundedRectangle(cornerRadius: size * 0.26, style: .continuous)
@@ -347,8 +406,14 @@ struct MonogramIcon: View {
         }
         .frame(width: size, height: size, alignment: .center)
         .background(LinearGradient(colors: [tint.opacity(0.85), tint.opacity(0.45)], startPoint: .topLeading, endPoint: .bottomTrailing), in: shape)
-        .overlay { shape.strokeBorder(.white.opacity(0.12), lineWidth: 1) }
+        .overlay {
+            WithPerceptionTracking {
+ shape.strokeBorder(.white.opacity(0.12), lineWidth: 1)
+            }
+        }
         .accessibilityHidden(true)
+
+        }
     }
 }
 
@@ -357,10 +422,13 @@ struct PinSourceButton: View {
     let site: Site
     let origin: URL
     var body: some View {
+        WithPerceptionTracking {
         let pinned = store.pinnedSources.contains(site, origin: origin)
         Button { store.pinnedSources.toggle(site, origin: origin) } label: {
             Label(L10n.text(pinned ? "Unpin source" : "Pin source"), systemImage: pinned ? "pin.slash" : "pin")
         }.accessibilityIdentifier("source.pin." + site.key)
+
+        }
     }
 }
 
@@ -369,10 +437,13 @@ struct HideSourceButton: View {
     let site: Site
     let origin: URL
     var body: some View {
+        WithPerceptionTracking {
         let hidden = store.hiddenSources.contains(site, origin: origin)
         Button { store.hiddenSources.toggle(site, origin: origin) } label: {
             Label(L10n.text(hidden ? "Unhide Source" : "Hide Source"), systemImage: hidden ? "eye" : "eye.slash")
         }.accessibilityIdentifier("source.hide." + site.key)
+
+        }
     }
 }
 
@@ -382,6 +453,7 @@ struct MoveSourceButtons: View {
     let site: Site
     let sites: [Site]
     var body: some View {
+        WithPerceptionTracking {
         if let index = sites.firstIndex(where: { $0.id == site.id }) {
             if index > 0 {
                 Button { store.moveSource(site, to: 0) } label: { Label(L10n.text("Move to Top"), systemImage: "arrow.up.to.line") }
@@ -389,6 +461,8 @@ struct MoveSourceButtons: View {
             if index < sites.count - 1 {
                 Button { store.moveSource(site, to: sites.count) } label: { Label(L10n.text("Move to Bottom"), systemImage: "arrow.down.to.line") }
             }
+        }
+
         }
     }
 }
@@ -400,13 +474,14 @@ struct SourceOrderCard: View {
     let sites: [Site]
     let arrange: () -> Void
     private var enabled: Binding<Bool> {
-        Binding { store.sourceOrder.enabled } set: { on in withAnimation(.smooth) { store.setCustomSourceOrder(on) } }
+        Binding { store.sourceOrder.enabled } set: { on in withAnimation(.tvSmooth) { store.setCustomSourceOrder(on) } }
     }
     private var detail: String {
         L10n.text(store.sourceOrder.enabled ? "Sources at the top are searched first, and their results are listed first."
                                             : "Yingxia searches quick, reliable sources first.")
     }
     var body: some View {
+        WithPerceptionTracking {
         #if os(tvOS)
         VStack(alignment: .leading, spacing: 8) {
             TVSettingsToggle(title: L10n.text("Custom Search Order"), detail: detail, isOn: enabled)
@@ -435,11 +510,17 @@ struct SourceOrderCard: View {
                 Divider()
                 HStack(spacing: 12) {
                     // As many icons as fit beside the button.
-                    ViewThatFits(in: .horizontal) {
+                    Group {
+            if #available(iOS 16, macOS 13, tvOS 16, *) {
+                ViewThatFits(in: .horizontal) {
                         SourceOrderPreview(sites: sites, limit: 5)
                         SourceOrderPreview(sites: sites, limit: 4)
                         SourceOrderPreview(sites: sites, limit: 3)
                     }
+            } else {
+                SourceOrderPreview(sites: sites, limit: 3)
+            }
+        }
                     Spacer(minLength: 8)
                     Button(action: arrange) {
                         Label(L10n.text("Arrange"), systemImage: "arrow.up.arrow.down")
@@ -456,6 +537,8 @@ struct SourceOrderCard: View {
         .padding(16)
         .contentPanel(cornerRadius: 22)
         #endif
+
+        }
     }
 }
 
@@ -469,13 +552,20 @@ struct SourceOrderPreview: View {
     private let size: CGFloat = 30
     #endif
     var body: some View {
+        WithPerceptionTracking {
         let shown = Array(sites.prefix(limit))
         HStack(spacing: size * 0.32) {
             ForEach(Array(shown.enumerated()), id: \.element.id) { index, site in
+                WithPerceptionTracking {
                 SourceIcon(site: site, label: SourceLabel(site.name), size: size)
                     .overlay(alignment: .topLeading) {
+                        WithPerceptionTracking {
                         SourceRankBadge(rank: index + 1, size: size * 0.52).offset(x: -size * 0.18, y: -size * 0.18)
+
+                        }
                     }
+
+                }
             }
             if sites.count > shown.count {
                 Text(verbatim: "+\(sites.count - shown.count)").font(.subheadline.weight(.semibold)).monospacedDigit().foregroundStyle(.secondary)
@@ -484,6 +574,8 @@ struct SourceOrderPreview: View {
         // Room for the badges that stick out.
         .padding(.top, size * 0.18).padding(.leading, size * 0.18)
         .accessibilityHidden(true)
+
+        }
     }
 }
 
@@ -491,12 +583,19 @@ struct SourceRankBadge: View {
     let rank: Int
     var size: CGFloat
     var body: some View {
+        WithPerceptionTracking {
         Text(rank, format: .number).font(.system(size: size * 0.62, weight: .bold, design: .rounded)).monospacedDigit()
             .foregroundStyle(Brand.onAccent)
             .padding(.horizontal, size * 0.2)
             .frame(minWidth: size, minHeight: size)
             .background(Brand.accent, in: Capsule())
-            .overlay { Capsule().strokeBorder(.black.opacity(0.25), lineWidth: 1) }
+            .overlay {
+                WithPerceptionTracking {
+ Capsule().strokeBorder(.black.opacity(0.25), lineWidth: 1)
+                }
+            }
+
+        }
     }
 }
 
@@ -513,6 +612,7 @@ private struct SourceOrderRow: View {
     private let title = Font.body.weight(.medium), caption = Font.caption
     #endif
     var body: some View {
+        WithPerceptionTracking {
         let label = SourceLabel(site.name)
         let detail = (label.parts.dropFirst() + [site.isBuiltIn ? L10n.text("Built-in") : nil].compactMap { $0 }).joined(separator: " · ")
         HStack(spacing: 12) {
@@ -535,6 +635,8 @@ private struct SourceOrderRow: View {
         }
         .padding(.vertical, 3)
         .accessibilityElement(children: .combine)
+
+        }
     }
 }
 
@@ -562,23 +664,30 @@ struct SourceOrderEditor: View {
     }
 
     var body: some View {
+        WithPerceptionTracking {
         #if os(tvOS)
-        NavigationStack {
+        NBNavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 4) {
+                    WithPerceptionTracking {
                     Text(L10n.text("Choose a source to move it. Sources at the top are searched first, and their results are listed first."))
                         .font(.system(size: 24)).foregroundStyle(.secondary).padding(.bottom, 12)
                     ForEach(Array(sites.enumerated()), id: \.element.id) { index, site in
+                        WithPerceptionTracking {
                         Button { moving = site } label: { SourceOrderRow(site: site, rank: index + 1).frame(maxWidth: .infinity) }
                             .glassRow()
                             .accessibilityIdentifier("sources.order.row." + site.key)
+
+                        }
                     }
                     TVSettingsAction(title: L10n.text("Reset"), destructive: true) {
-                        withAnimation(.smooth) { sites = automatic }
+                        withAnimation(.tvSmooth) { sites = automatic }
                         save()
                     }
                     .disabled(isAutomatic)
                     .padding(.top, 16)
+
+                    }
                 }
                 .glassRowInsets()
             }
@@ -601,15 +710,18 @@ struct SourceOrderEditor: View {
         .frame(width: 1100, height: 800)
         .onExitCommand { dismiss() }
         #else
-        NavigationStack {
+        NBNavigationStack {
             List {
                 Section {
                     ForEach(Array(sites.enumerated()), id: \.element.id) { index, site in
+                        WithPerceptionTracking {
                         SourceOrderRow(site: site, rank: index + 1)
                             #if os(iOS)
                             .listRowBackground(Surface())
                             #endif
                             .accessibilityIdentifier("sources.order.row." + site.key)
+
+                        }
                     }
                     .onMove { sites.move(fromOffsets: $0, toOffset: $1) }
                 } footer: {
@@ -618,8 +730,12 @@ struct SourceOrderEditor: View {
             }
             #if os(iOS)
             .environment(\.editMode, .constant(.active))
-            .scrollContentBackground(.hidden)
-            .background { Backdrop() }
+            .tvScrollContentBackground(.hidden)
+            .background {
+                WithPerceptionTracking {
+ Backdrop()
+                }
+            }
             .navigationBarTitleDisplayMode(.inline)
             #endif
             .navigationTitle(L10n.text("Arrange Sources"))
@@ -633,11 +749,11 @@ struct SourceOrderEditor: View {
                 }
                 #if os(iOS)
                 ToolbarItem(placement: .bottomBar) {
-                    Button(L10n.text("Reset")) { withAnimation(.smooth) { sites = automatic } }.disabled(isAutomatic)
+                    Button(L10n.text("Reset")) { withAnimation(.tvSmooth) { sites = automatic } }.disabled(isAutomatic)
                 }
                 #else
                 ToolbarItem(placement: .destructiveAction) {
-                    Button(L10n.text("Reset")) { withAnimation(.smooth) { sites = automatic } }.disabled(isAutomatic)
+                    Button(L10n.text("Reset")) { withAnimation(.tvSmooth) { sites = automatic } }.disabled(isAutomatic)
                 }
                 #endif
             }
@@ -646,12 +762,14 @@ struct SourceOrderEditor: View {
         .frame(width: 480, height: 600)
         #endif
         #endif
+
+        }
     }
 
     #if os(tvOS)
     private func move(_ site: Site, to offset: Int) {
         guard let index = sites.firstIndex(where: { $0.id == site.id }) else { return }
-        withAnimation(.smooth) { sites.move(fromOffsets: [index], toOffset: offset) }
+        withAnimation(.tvSmooth) { sites.move(fromOffsets: [index], toOffset: offset) }
         save()
     }
     #endif
@@ -663,6 +781,7 @@ struct HideSourcesCard: View {
     let open: () -> Void
     private var value: String { hidden > 0 ? L10n.text("%lld hidden", hidden) : "" }
     var body: some View {
+        WithPerceptionTracking {
         #if os(tvOS)
         Button(action: open) { TVSettingsRowLabel(title: L10n.text("Hide or Show Sources"), value: value, chevron: true) }
             .glassRow()
@@ -687,6 +806,8 @@ struct HideSourcesCard: View {
         .buttonStyle(.plain)
         .accessibilityIdentifier("sources.hidden.open")
         #endif
+
+        }
     }
 }
 
@@ -705,12 +826,15 @@ struct HiddenSourcesEditor: View {
     }
 
     var body: some View {
+        WithPerceptionTracking {
         let groups = store.sourceGroups(includeHidden: true)
         let hiddenCount = groups.flatMap(\.sites).filter(isHidden).count
         #if os(tvOS)
-        NavigationStack {
+        NBNavigationStack {
+            WithPerceptionTracking {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 4) {
+                    WithPerceptionTracking {
                     Text(L10n.text("Ticked sources are shown. Hidden sources stay out of Watch Now and search."))
                         .font(.system(size: 24)).foregroundStyle(.secondary).padding(.bottom, 12)
                     if hiddenCount > 0 {
@@ -718,6 +842,7 @@ struct HiddenSourcesEditor: View {
                             .padding(.bottom, 16)
                     }
                     ForEach(groups) { group in
+                        WithPerceptionTracking {
                         let hidden = group.sites.filter(isHidden)
                         Text(L10n.text(group.title)).font(.system(size: 31, weight: .semibold)).lineLimit(1)
                             .padding(.top, 20).padding(.bottom, 6)
@@ -728,6 +853,7 @@ struct HiddenSourcesEditor: View {
                         }
                         .focusSection()
                         ForEach(group.sites) { site in
+                            WithPerceptionTracking {
                             let shown = !isHidden(site)
                             Button { setHidden([site], shown) } label: {
                                 TVSettingsRowLabel(title: SourceLabel(site.name).parts[0], value: shown ? nil : L10n.text("Hidden")) {
@@ -737,18 +863,27 @@ struct HiddenSourcesEditor: View {
                             .glassRow()
                             .accessibilityAddTraits(shown ? [.isSelected] : [])
                             .accessibilityIdentifier("sources.hidden.row." + site.key)
+
+                            }
                         }
+
+                        }
+                    }
+
                     }
                 }
                 .glassRowInsets()
             }
             .screenTitle(L10n.text("Hide or Show Sources"))
             .screenBackdrop()
+
+            }
         }
         .frame(width: 1100, height: 800)
         .onExitCommand { dismiss() }
         #else
-        NavigationStack {
+        NBNavigationStack {
+            WithPerceptionTracking {
             List {
                 Section {
                     Text(L10n.text("Ticked sources are shown. Hidden sources stay out of Watch Now and search."))
@@ -758,9 +893,11 @@ struct HiddenSourcesEditor: View {
                         #endif
                 }
                 ForEach(groups) { group in
+                    WithPerceptionTracking {
                     let hidden = group.sites.filter(isHidden)
                     Section {
                         ForEach(group.sites) { site in
+                            WithPerceptionTracking {
                             let shown = !isHidden(site)
                             Button { setHidden([site], shown) } label: { HiddenSourceRow(site: site, shown: shown) }
                                 .buttonStyle(.plain)
@@ -769,6 +906,8 @@ struct HiddenSourcesEditor: View {
                                 #if os(iOS)
                                 .listRowBackground(Surface())
                                 #endif
+
+                            }
                         }
                     } header: {
                         HStack(spacing: 12) {
@@ -780,11 +919,17 @@ struct HiddenSourcesEditor: View {
                         .buttonStyle(.borderless)
                         .textCase(nil)
                     }
+
+                    }
                 }
             }
             #if os(iOS)
-            .scrollContentBackground(.hidden)
-            .background { Backdrop() }
+            .tvScrollContentBackground(.hidden)
+            .background {
+                WithPerceptionTracking {
+ Backdrop()
+                }
+            }
             .navigationBarTitleDisplayMode(.inline)
             #endif
             .navigationTitle(L10n.text("Hide or Show Sources"))
@@ -803,11 +948,15 @@ struct HiddenSourcesEditor: View {
                 }
                 #endif
             }
+
+            }
         }
         #if os(macOS)
         .frame(width: 480, height: 600)
         #endif
         #endif
+
+        }
     }
 }
 
@@ -817,6 +966,7 @@ private struct HiddenSourceRow: View {
     let site: Site
     let shown: Bool
     var body: some View {
+        WithPerceptionTracking {
         let label = SourceLabel(site.name)
         HStack(spacing: 12) {
             Image(systemName: shown ? "checkmark.circle.fill" : "circle").font(.title3)
@@ -830,6 +980,8 @@ private struct HiddenSourceRow: View {
         .padding(.vertical, 3)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
+
+        }
     }
 }
 #endif
@@ -864,9 +1016,10 @@ struct SiteView: View {
     }
 
     var body: some View {
+        WithPerceptionTracking {
         Group {
             if !canLoad {
-                ContentUnavailableView {
+                TVEmptyState {
                     Label(site.compatibility, systemImage: "puzzlepiece.extension")
                 } description: {
                     if site.type != 3 {
@@ -921,19 +1074,29 @@ struct SiteView: View {
                         }
                         if browser.videos.isEmpty && browser.loaded && !browser.busy && browser.error == nil { EmptyResults(symbol: "film", title: L10n.text("No Videos"), message: L10n.text("Try selecting a category or searching.")) }
                         LazyVGrid(columns: Layout.posterColumns, spacing: Layout.gridRowSpacing) {
+                            WithPerceptionTracking {
                             ForEach(browser.videos) { video in
+                                WithPerceptionTracking {
                                 // An index source (a ranking or list site) names titles; other sources play them.
                                 if isIndex {
                                     Button { store.searchVideos(video.name) } label: { PosterCard(video: video) }.cardButton()
                                 } else {
                                     RouteLink { CatalogDestination(video: video, client: client) } label: { PosterCard(video: video) }.cardButton()
                                 }
+
+                                }
+                            }
+
                             }
                         }
-                        .opacity(browser.busy && !browser.videos.isEmpty ? 0.55 : 1).animation(.smooth, value: browser.busy)
+                        .opacity(browser.busy && !browser.videos.isEmpty ? 0.55 : 1).animation(.tvSmooth, value: browser.busy)
                     }.pageContainer()
                 }
-                .safeAreaInset(edge: .bottom) { if browser.pageCount > 1 { pager } }
+                .safeAreaInset(edge: .bottom) {
+                    WithPerceptionTracking {
+ if browser.pageCount > 1 { pager }
+                    }
+                }
                 .catalogSearchable(text: Binding(get: { query }, set: { value in
                     query = value
                     if value.isEmpty && !browser.query.isEmpty { startRequest { await home() } }
@@ -972,6 +1135,8 @@ struct SiteView: View {
                 else { query = initialQuery; await search(); await browser.loadCategories(client: client) }
             }
         }
+
+        }
     }
     private var categoryBar: some View {
         ChipRow {
@@ -979,10 +1144,13 @@ struct SiteView: View {
                 HStack(spacing: 8) {
                     Chip(title: L10n.text("Recommendations"), selected: browser.query.isEmpty && browser.category.isEmpty) { query = ""; startRequest { await home() } }
                     ForEach(browser.categories) { item in
+                        WithPerceptionTracking {
                         Chip(title: item.name, selected: browser.query.isEmpty && browser.category == item.id) {
                             query = ""
                             let filters = CategoryFilter.initialChoices(item.filters)
                             startRequest { await browser.load(.list(category: item.id, query: "", page: 1, filters: filters), client: client) }
+                        }
+
                         }
                     }
                 }
@@ -999,7 +1167,7 @@ struct SiteView: View {
                 Button { startRequest { await load(page: browser.page + 1) } } label: { Image(systemName: "chevron.right").frame(width: 22) }
                     .controlButton().disabled(browser.page >= browser.pageCount || browser.busy).accessibilityLabel(L10n.text("Next"))
             }
-        }.controlSize(.large)
+        }.tvLargeControl()
         #if os(tvOS)
         .padding(.vertical, 20).frame(maxWidth: .infinity).background(TVStyle.background).focusSection()
         #else
@@ -1045,15 +1213,22 @@ struct CategoryFilterBar: View {
     private func reset() { choose(CategoryFilter.initialChoices(filters)) }
 
     var body: some View {
+        WithPerceptionTracking {
         #if os(macOS)
         DiscoverChipFlow(spacing: 8) {
             ForEach(filters) { filter in
+                WithPerceptionTracking {
                 Button { open = open == filter.key ? nil : filter.key } label: { FilterChipLabel(title: title(filter), open: open == filter.key) }
                     .buttonStyle(.plain)
                     .popover(isPresented: Binding(get: { open == filter.key }, set: { if !$0, open == filter.key { open = nil } }), arrowEdge: .bottom) {
+                        WithPerceptionTracking {
                         panel(filter)
+
+                        }
                     }
                     .accessibilityIdentifier("site.filter.\(filter.key)")
+
+                }
             }
             if anyChanged {
                 Button(action: reset) {
@@ -1065,16 +1240,19 @@ struct CategoryFilterBar: View {
         .accessibilityIdentifier("site.filters")
         #if DEBUG
         // `-qaOpenFilter <key>` opens that filter's choices, for screenshots.
-        .task { if let key = UserDefaults.standard.string(forKey: "qaOpenFilter") { try? await Task.sleep(for: .seconds(1)); open = key } }
+        .task { if let key = UserDefaults.standard.string(forKey: "qaOpenFilter") { try? await tvSleep(for: .seconds(1)); open = key } }
         #endif
         #elseif os(tvOS)
         ScrollView(.horizontal) {
             HStack(spacing: 18) {
                 ForEach(filters) { filter in
+                    WithPerceptionTracking {
                     Menu { picker(filter) } label: { Text(title(filter)) }
                         .menuStyle(.button)
                         .buttonStyle(DiscoverTVChipStyle(active: changed(filter)))
                         .accessibilityIdentifier("site.filter.\(filter.key)")
+
+                    }
                 }
                 if anyChanged {
                     Button(action: reset) { Label(L10n.text("Reset Filters"), systemImage: "xmark") }
@@ -1083,15 +1261,18 @@ struct CategoryFilterBar: View {
                 }
             }.padding(.vertical, 16)
         }
-        .scrollIndicators(.hidden).scrollClipDisabled().focusSection()
+        .tvScrollIndicators(.hidden).tvScrollClipDisabled().focusSection()
         .accessibilityIdentifier("site.filters")
         #else
         ScrollView(.horizontal) {
             GlassGroup(spacing: 8) {
                 HStack(spacing: 8) {
                     ForEach(filters) { filter in
+                        WithPerceptionTracking {
                         Menu { picker(filter) } label: { FilterChipLabel(title: title(filter)) }
                             .accessibilityIdentifier("site.filter.\(filter.key)")
+
+                        }
                     }
                     if anyChanged {
                         Button(action: reset) { Image(systemName: "xmark").frame(width: 38, height: 38).glassSurface(.regular, in: Circle()) }
@@ -1100,21 +1281,29 @@ struct CategoryFilterBar: View {
                 }
             }
         }
-        .scrollIndicators(.hidden).scrollClipDisabled().frame(height: 38)
+        .tvScrollIndicators(.hidden).tvScrollClipDisabled().frame(height: 38)
         .tint(.primary)
         .accessibilityIdentifier("site.filters")
         #endif
+
+        }
     }
 
     #if os(macOS)
     /// The filter's choices as Discover's filter popovers lay them out; a long list (years) scrolls.
     private func panel(_ filter: CategoryFilter) -> some View {
         let grid = LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
+            WithPerceptionTracking {
             ForEach(filter.options, id: \.value) { option in
+                WithPerceptionTracking {
                 FilterChoiceButton(title: option.name, selected: value(filter) == option.value) {
                     pick(filter, option.value)
                     open = nil
                 }
+
+                }
+            }
+
             }
         }.padding(14)
         return Group {
@@ -1136,8 +1325,11 @@ struct CatalogDestination: View {
     let video: Video
     let client: CatalogClient
     var body: some View {
+        WithPerceptionTracking {
         if video.isFolder { SiteView(site: client.site, origin: client.origin, jarURL: client.jarURL, folder: video) }
         else { VideoDetailView(video: video, client: client) }
+
+        }
     }
 }
 
@@ -1225,6 +1417,7 @@ struct VideoDetailView: View {
     }
 
     var body: some View {
+        WithPerceptionTracking {
         Group {
             #if os(iOS)
             if watchLayout { watchBody } else { pageBody }
@@ -1232,11 +1425,19 @@ struct VideoDetailView: View {
             pageBody
             #endif
         }
-        .safeAreaInset(edge: .bottom) { if !isWatchPage { loadingCard } }
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { containerWidth = $0 }
+        .safeAreaInset(edge: .bottom) {
+            WithPerceptionTracking {
+ if !isWatchPage { loadingCard }
+            }
+        }
+        .tvOnGeometryChange(for: CGFloat.self) { $0.size.width } action: { containerWidth = $0 }
         #if os(macOS)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background { DetailAurora(poster: video.poster, headers: video.posterHeaders) }
+        .background {
+            WithPerceptionTracking {
+ DetailAurora(poster: video.poster, headers: video.posterHeaders)
+            }
+        }
         #else
         .screenBackdrop()
         #endif
@@ -1262,20 +1463,28 @@ struct VideoDetailView: View {
         }
         .onDisappear { requestTask?.cancel() }
         .task(id: detail?.id) { await startTMDB() }
-        .onChange(of: choosingQuality) { _, open in if !open && !busy { loadingEpisode = nil } }
+        .tvOnChange(of: choosingQuality) { _, open in if !open && !busy { loadingEpisode = nil } }
         #if os(iOS)
-        .sheet(isPresented: $showsConfigCenter) { ConfigCenterView { await configCenterAddress() } }
+        .sheet(isPresented: $showsConfigCenter) {
+            WithPerceptionTracking {
+ ConfigCenterView { await configCenterAddress() }
+            }
+        }
         #endif
         // Sign in where playback failed, then resume the episode that needed the account.
         #if !os(tvOS)
         .sheet(item: $bundleSignIn) { pending in
+            WithPerceptionTracking {
             CatPawSignInView(client: client, provider: pending.provider) {
                 if let episode = playbackIssue?.episode { startRequest { await play(episode) } }
+            }
+
             }
         }
         #endif
         #if os(macOS)
         .sheet(item: $signingIn) { drive in
+            WithPerceptionTracking {
             if drive == .xunlei {
                 XunleiSignInView { if let episode = playbackIssue?.episode { startRequest { await play(episode) } } }
             } else if drive == .baidu {
@@ -1287,37 +1496,50 @@ struct VideoDetailView: View {
                     if let episode = playbackIssue?.episode { startRequest { await play(episode) } }
                 }
             }
+
+            }
         }
         #elseif os(iOS)
         // The drive's own sign-in page; the code is for signing in with another phone.
         .sheet(item: $signingIn) { drive in
+            WithPerceptionTracking {
             if drive == .xunlei { XunleiSignInView(signedIn: retryAfterSignIn) }
             else {
                 WebSignInView(service: drive.webSignIn, signedIn: retryAfterSignIn) {
                     CloudQRLoginView(drive: drive.qrDrive) { retryAfterSignIn() }
                 }
             }
+
+            }
         }
         #else
         .fullScreenCover(item: $signingIn) { drive in
+            WithPerceptionTracking {
             if drive == .xunlei { XunleiSignInView(signedIn: retryAfterSignIn) }
             else { CloudQRLoginView(drive: drive.qrDrive) { retryAfterSignIn() } }
+
+            }
         }
         #endif
         .downloadPicker(isPresented: $choosingDownloads) {
             DownloadPicker(video: video, site: client.site, flag: activeFlag,
                            episodes: activeEpisodes) { count in
                 guard count > 0 else { return }
-                withAnimation(.smooth(duration: 0.2)) { queuedNotice = count }
-                Task { try? await Task.sleep(for: .seconds(6)); withAnimation(.smooth(duration: 0.2)) { queuedNotice = nil } }
+                withAnimation(.tvSmooth(duration: 0.2)) { queuedNotice = count }
+                Task { try? await tvSleep(for: .seconds(6)); withAnimation(.tvSmooth(duration: 0.2)) { queuedNotice = nil } }
             }
         }
         .confirmationDialog(L10n.text("Choose quality"), isPresented: $choosingQuality, titleVisibility: .visible) {
             if let plan = pendingPlan, let episode = pendingEpisode {
                 ForEach(plan.choices) { choice in
+                    WithPerceptionTracking {
                     Button(choice.name) { startRequest { await resolve(plan, choice: choice, episode: episode) } }
+
+                    }
                 }
             }
+        }
+
         }
     }
 
@@ -1400,13 +1622,13 @@ struct VideoDetailView: View {
                         .settingsButton(prominent: issue.drive == nil && issue.signIn == nil)
                         #if os(tvOS)
                         // A focusable action instead of the small corner close button.
-                        Button(L10n.text("Dismiss")) { withAnimation(.smooth(duration: 0.2)) { playbackIssue = nil } }.settingsButton()
+                        Button(L10n.text("Dismiss")) { withAnimation(.tvSmooth(duration: 0.2)) { playbackIssue = nil } }.settingsButton()
                         #endif
                     }
                 }
                 Spacer(minLength: 0)
                 #if !os(tvOS)
-                Button { withAnimation(.smooth(duration: 0.2)) { playbackIssue = nil } } label: {
+                Button { withAnimation(.tvSmooth(duration: 0.2)) { playbackIssue = nil } } label: {
                     Image(systemName: "xmark").font(.system(size: 10, weight: .bold)).foregroundStyle(.secondary)
                         .frame(width: 22, height: 22)
                         .background(Color.primary.opacity(0.07), in: Circle())
@@ -1418,7 +1640,11 @@ struct VideoDetailView: View {
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay { RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Color.primary.opacity(0.08)) }
+            .overlay {
+                WithPerceptionTracking {
+ RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Color.primary.opacity(0.08))
+                }
+            }
             .transition(.opacity.combined(with: .move(edge: .top)))
         }
     }
@@ -1455,7 +1681,7 @@ struct VideoDetailView: View {
             // way to sign in to.
             if selectedFlag == nil { selectedFlag = watchedFlag ?? CloudDrive.preferredFlag(flags) }
             #if os(tvOS)
-            Task { try? await Task.sleep(for: .milliseconds(100)); playFocused = true }
+            Task { try? await tvSleep(for: .milliseconds(100)); playFocused = true }
             #endif
         } catch {
             guard !Task.isCancelled else { return }
@@ -1463,7 +1689,7 @@ struct VideoDetailView: View {
             self.error = error.localizedDescription
             #if os(tvOS)
             // The loading placeholder that held focus is gone: Retry in the hero takes it.
-            Task { try? await Task.sleep(for: .milliseconds(100)); playFocused = true }
+            Task { try? await tvSleep(for: .milliseconds(100)); playFocused = true }
             #endif
         }
     }
@@ -1540,6 +1766,7 @@ struct VideoDetailView: View {
             hero.transition(.opacity)
         }
     }
+    @available(iOS 16, macOS 13, tvOS 16, *)
     private var headerLayout: AnyLayout {
         #if os(iOS)
         if sizeClass == .compact { return AnyLayout(HStackLayout(alignment: .top, spacing: 16)) }
@@ -1560,7 +1787,7 @@ struct VideoDetailView: View {
                 Text(text).foregroundStyle(.secondary)
                     .lineLimit(synopsisExpanded ? nil : synopsisLineLimit)
                     .fixedSize(horizontal: false, vertical: true)
-                    .contentTransition(.opacity)
+                    .tvContentTransition(.opacity)
                 if text.count > 100 {
                     let toggle = Button(L10n.text(synopsisExpanded ? "Show Less" : "Show Full Synopsis")) { synopsisExpanded.toggle() }
                     #if os(tvOS)
@@ -1607,10 +1834,16 @@ struct VideoDetailView: View {
         if let detail {
             if let first = activeEpisodes.first ?? detail.episodes.first {
                 // Beside the poster on a phone there is no room for both labels: Download drops to its icon.
+                Group {
+            if #available(iOS 16, macOS 13, tvOS 16, *) {
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 10) { playButton(first); downloadButton(iconOnly: false); videoFavoriteButton }
                     HStack(spacing: 10) { playButton(first); downloadButton(iconOnly: true); videoFavoriteButton }
                 }
+            } else {
+                HStack(spacing: 10) { playButton(first); downloadButton(iconOnly: true); videoFavoriteButton }
+            }
+        }
             } else {
                 #if os(tvOS)
                 // No episodes, so no Play: without a button here nothing on the page could take focus, and Back
@@ -1628,7 +1861,7 @@ struct VideoDetailView: View {
             // so the hero offers them too; they hold focus, and Back leaves the page again.
             HStack(spacing: 10) {
                 Button { startRequest { await loadDetail() } } label: { Label(L10n.text("Retry"), systemImage: "arrow.clockwise") }
-                    .controlButton(prominent: true).tint(Brand.accent).controlSize(.large)
+                    .controlButton(prominent: true).tint(Brand.accent).tvLargeControl()
                     .disabled(busy)
                     .focused($playFocused)
                     .accessibilityIdentifier("detail.retry")
@@ -1640,7 +1873,7 @@ struct VideoDetailView: View {
     #if os(tvOS)
     private func goBackButton(prominent: Bool) -> some View {
         Button { dismiss() } label: { Label(L10n.text("Go back"), systemImage: "chevron.backward") }
-            .controlButton(prominent: prominent).controlSize(.large)
+            .controlButton(prominent: prominent).tvLargeControl()
             .accessibilityIdentifier("detail.goBack")
     }
     #endif
@@ -1652,7 +1885,7 @@ struct VideoDetailView: View {
             }
             .font(.headline).lineLimit(1).fixedSize().padding(.horizontal, 8)
         }
-        .controlButton(prominent: true).tint(Brand.accent).controlSize(.large)
+        .controlButton(prominent: true).tint(Brand.accent).tvLargeControl()
         .focused($playFocused)
     }
     private func downloadButton(iconOnly: Bool) -> some View {
@@ -1661,7 +1894,7 @@ struct VideoDetailView: View {
                 .labelStyle(DownloadLabelStyle(iconOnly: iconOnly))
                 .font(.headline).lineLimit(1).fixedSize()
         }
-        .controlButton().controlSize(.large).accessibilityLabel(L10n.text("Download"))
+        .controlButton().tvLargeControl().accessibilityLabel(L10n.text("Download"))
     }
     /// Icon-only, beside Play and Download. An empty heart keeps the control color; a saved one is rose.
     /// Set as text in their font, so the button is as tall as theirs: a bare image made a smaller one on Apple TV.
@@ -1678,7 +1911,7 @@ struct VideoDetailView: View {
             }
             .font(.headline).lineLimit(1).fixedSize()
         }
-        .controlButton().controlSize(.large)
+        .controlButton().tvLargeControl()
         .accessibilityLabel(title).help(title)
         .accessibilityIdentifier("detail.favorite")
     }
@@ -1703,10 +1936,14 @@ struct VideoDetailView: View {
             } else {
                 HStack(alignment: .top, spacing: 14) {
                     Color.clear.aspectRatio(2.0 / 3.0, contentMode: .fit).frame(width: posterWidth)
-                        .overlay { PosterImage(url: video.poster, headers: video.posterHeaders) }
+                        .overlay {
+                            WithPerceptionTracking {
+ PosterImage(url: video.poster, headers: video.posterHeaders)
+                            }
+                        }
                         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                     // As tall as the 2:3 poster, so the buttons line up with its bottom edge.
-                    MinHeightLayout(minHeight: posterWidth * 1.5) {
+                    TVMinHeight(minHeight: posterWidth * 1.5) {
                         VStack(alignment: .leading, spacing: 12) {
                             Text(video.name).font(.title3.weight(.bold)).fixedSize(horizontal: false, vertical: true)
                             if !video.remarks.isEmpty { Text(video.remarks).font(.subheadline).foregroundStyle(.secondary) }
@@ -1724,9 +1961,9 @@ struct VideoDetailView: View {
                 if let detail { synopsis(detail) }
             }
         }
-        .animation(.smooth(duration: 0.45), value: tmdb.details)
-        .animation(.smooth(duration: 0.45), value: loadedBackdrop)
-        .animation(.smooth(duration: 0.3), value: tmdb.phase)
+        .animation(.tvSmooth(duration: 0.45), value: tmdb.details)
+        .animation(.tvSmooth(duration: 0.45), value: loadedBackdrop)
+        .animation(.tvSmooth(duration: 0.3), value: tmdb.phase)
         .task(id: tmdb.details?.backdrop) {
             // Into TMDBArtwork's cache, so the banner shows it at once.
             guard let backdrop = tmdb.details?.backdrop,
@@ -1774,7 +2011,10 @@ struct VideoDetailView: View {
             ChipRow {
                 HStack(spacing: 8) {
                     ForEach(flags, id: \.self) { flag in
+                        WithPerceptionTracking {
                         Chip(title: flag.isEmpty ? L10n.text("Play") : flag, selected: flag == activeFlag) { selectedFlag = flag }
+
+                        }
                     }
                 }
             }.tvFocusSection()
@@ -1789,7 +2029,7 @@ struct VideoDetailView: View {
     private func episodeOrderButton(count: Int) -> some View {
         Button { reversesEpisodes.toggle() } label: {
             HStack(spacing: 10) {
-                Image(systemName: reversesEpisodes ? "arrow.down" : "arrow.up").contentTransition(.symbolEffect(.replace))
+                Image(systemName: reversesEpisodes ? "arrow.down" : "arrow.up").tvContentTransition(.symbolEffect(.replace))
                 Text(L10n.text("Episodes"))
                 Text("\(count)").monospacedDigit().foregroundStyle(.secondary)
             }
@@ -1836,7 +2076,9 @@ struct VideoDetailView: View {
         let columns = showsStills ? [GridItem(.adaptive(minimum: TMDBMetrics.episodeTile), spacing: TMDBMetrics.spacing, alignment: .top)]
             : longNames ? rowColumns : [GridItem(.adaptive(minimum: episodeMin), spacing: 8)]
         return LazyVGrid(columns: columns, spacing: showsStills ? TMDBMetrics.spacing : longNames ? 4 : 8) {
+            WithPerceptionTracking {
             ForEach(shownOrder(items)) { episode in
+                WithPerceptionTracking {
                 let saved = download(episode)
                 Group {
                     if showsStills {
@@ -1844,7 +2086,11 @@ struct VideoDetailView: View {
                             TMDBEpisodeTile(name: episodeTitle(episode), info: stills[episode.id], loading: loadingEpisode == episode.id, width: nil)
                         }
                         .tmdbCardButton()
-                        .overlay(alignment: .topTrailing) { if saved?.status == .completed { DownloadedBadge().padding(4) } }
+                        .overlay(alignment: .topTrailing) {
+                            WithPerceptionTracking {
+ if saved?.status == .completed { DownloadedBadge().padding(4) }
+                            }
+                        }
                         .accessibilityLabel(episode.name)
                     } else if longNames {
                         EpisodeRow(name: episode.name, label: episodeLabels[episode.id], loading: loadingEpisode == episode.id, download: saved) {
@@ -1852,10 +2098,15 @@ struct VideoDetailView: View {
                         }
                     } else {
                         Chip(title: episodeLabels[episode.id] ?? episode.name, selected: loadingEpisode == episode.id, fill: true) { startRequest { await play(episode) } }
-                            .overlay(alignment: .topTrailing) { if saved?.status == .completed { DownloadedBadge() } }
+                            .overlay(alignment: .topTrailing) {
+                                WithPerceptionTracking {
+ if saved?.status == .completed { DownloadedBadge() }
+                                }
+                            }
                     }
                 }
                 .overlay(alignment: .topLeading) {
+                    WithPerceptionTracking {
                     if store.favorites.contains(episodeFavorite(episode)) {
                         Image(systemName: "heart.fill")
                             .font(.system(size: DownloadMetrics.thumb > 60 ? 18 : 12, weight: .semibold))
@@ -1864,8 +2115,11 @@ struct VideoDetailView: View {
                             .allowsHitTesting(false)
                             .accessibilityHidden(true)
                     }
+
+                    }
                 }
                 .contextMenu {
+                    WithPerceptionTracking {
                     // The file name a label stands for: its resolution and codec can matter on a netdisk line.
                     if episodeLabels[episode.id] != nil { Text(episode.name) }
                     FavoriteMenuButton(item: episodeFavorite(episode), name: episode.name)
@@ -1879,7 +2133,13 @@ struct VideoDetailView: View {
                             DownloadLibrary.shared.remove([saved.id])
                         }
                     }
+
+                    }
                 }
+
+                }
+            }
+
             }
         }
         #if os(tvOS)
@@ -1887,7 +2147,7 @@ struct VideoDetailView: View {
         .padding(.trailing, 16).padding(.vertical, 6)
         #endif
         .tvFocusSection()
-        .animation(.smooth(duration: 0.4), value: showsStills)
+        .animation(.tvSmooth(duration: 0.4), value: showsStills)
     }
     /// Mac and iPad, under the banner: TMDB hasn't answered yet. Short-drama-length lists stay chips (see episodeList).
     private var tmdbPending: Bool {
@@ -1918,13 +2178,13 @@ struct VideoDetailView: View {
         // Cloud-drive plugins wait for an in-app login that cannot appear on this platform,
         // which surfaces only as a 60-second timeout. Ask for the account up front instead.
         if !skipAccountCheck, let drive = CloudDrive.missingLogin(forFlag: episode.flag) {
-            withAnimation(.smooth(duration: 0.25)) {
+            withAnimation(.tvSmooth(duration: 0.25)) {
                 playbackIssue = PlaybackIssue(episode: episode, message: drive.loginHint, drive: drive, blockedBeforeRequest: true)
             }
             return
         }
         busy = true; loadingEpisode = episode.id
-        withAnimation(.smooth(duration: 0.2)) { playbackIssue = nil }
+        withAnimation(.tvSmooth(duration: 0.2)) { playbackIssue = nil }
         defer { busy = false; if !choosingQuality { loadingEpisode = nil } }
         do {
             let plan = try await client.preparePlayback(episode)
@@ -1959,7 +2219,7 @@ struct VideoDetailView: View {
         if login == nil {
             Diagnostics.shared.failure("catalog", "play \(client.reportContext) flag=\(episode.flag)", error)
         }
-        withAnimation(.smooth(duration: 0.25)) {
+        withAnimation(.tvSmooth(duration: 0.25)) {
             // Plugins report a missing or expired drive login in their own words ("夸克授权失败，请扫码登录");
             // say what happened and offer the sign-in instead of echoing them.
             if let login, let drive = CloudDrive(rawValue: login.rawValue) {
@@ -2021,7 +2281,7 @@ struct VideoDetailView: View {
                 VStack(spacing: 0) {
                     Color.clear.frame(height: playerHeight)
                     ScrollView { watchDetails.padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 24) }
-                        .scrollIndicators(.never)
+                        .tvScrollIndicators(.never)
                 }
             }
             watchPlayer
@@ -2029,17 +2289,29 @@ struct VideoDetailView: View {
                 .frame(maxWidth: .infinity, maxHeight: fullScreen ? .infinity : nil, alignment: .top)
         }
         // The status bar's strip above the player is the player's black.
-        .background(alignment: .top) { Color.black.frame(height: playerHeight).ignoresSafeArea(edges: .top) }
-        .background { if fullScreen { Color.black.ignoresSafeArea() } }
+        .background(alignment: .top) {
+            WithPerceptionTracking {
+ Color.black.frame(height: playerHeight).ignoresSafeArea(edges: .top)
+            }
+        }
+        .background {
+            WithPerceptionTracking {
+ if fullScreen { Color.black.ignoresSafeArea() }
+            }
+        }
         .statusBarHidden(true)
-        .toolbar(.hidden, for: .navigationBar)
-        .background { EdgeSwipeBack(enabled: !fullScreen) }
-        .toolbar(.hidden, for: .tabBar)
+        .tvToolbar(.hidden, for: .navigationBar)
+        .background {
+            WithPerceptionTracking {
+ EdgeSwipeBack(enabled: !fullScreen)
+            }
+        }
+        .tvToolbar(.hidden, for: .tabBar)
         .onAppear {
             store.watchPageScopes.formUnion(watchScopes)
             PlayerOrientation.holdPortrait(true)
         }
-        .onChange(of: watchScopes) { old, new in
+        .tvOnChange(of: watchScopes) { old, new in
             store.watchPageScopes.subtract(old.subtracting(new)); store.watchPageScopes.formUnion(new)
         }
         .onDisappear {
@@ -2049,12 +2321,16 @@ struct VideoDetailView: View {
             if fullScreen { fullScreen = false; PlayerOrientation.set(landscape: false) }
             PlayerOrientation.holdPortrait(false)
         }
-        .onChange(of: watchChannel == nil) { _, ended in
+        .tvOnChange(of: watchChannel == nil) { _, ended in
             playerStarted = false
             if ended { playerSession = nil }
             if ended && fullScreen { setFullScreen(landscape: false) }
         }
-        .sheet(isPresented: $showsAllEpisodes) { allEpisodes }
+        .sheet(isPresented: $showsAllEpisodes) {
+            WithPerceptionTracking {
+ allEpisodes
+            }
+        }
     }
 
     @ViewBuilder private var watchPlayer: some View {
@@ -2082,7 +2358,7 @@ struct VideoDetailView: View {
 
     private func setFullScreen(landscape: Bool) {
         let entering = !fullScreen
-        withAnimation(.smooth(duration: 0.3)) { fullScreen = entering }
+        withAnimation(.tvSmooth(duration: 0.3)) { fullScreen = entering }
         // A landscape picture turns the phone; a portrait one fills the screen upright.
         if !entering { PlayerOrientation.set(landscape: false) } else if landscape { PlayerOrientation.set(landscape: true) }
     }
@@ -2104,13 +2380,14 @@ struct VideoDetailView: View {
         let poster = video.poster != nil ? video : detail ?? video
         return WatchCoverBackdrop(poster: poster.poster, headers: poster.posterHeaders, loading: starting, clear: !starting) { coverStatus($0) }
             .contentShape(Rectangle())
-            .onTapGesture { if starting { withAnimation(.smooth(duration: 0.25)) { coverBack.toggle() } } }
+            .onTapGesture { if starting { withAnimation(.tvSmooth(duration: 0.25)) { coverBack.toggle() } } }
             .task(id: coverBack) {
                 guard coverBack else { return }
-                try? await Task.sleep(for: .seconds(3))
-                if !Task.isCancelled { withAnimation(.smooth(duration: 0.3)) { coverBack = false } }
+                try? await tvSleep(for: .seconds(3))
+                if !Task.isCancelled { withAnimation(.tvSmooth(duration: 0.3)) { coverBack = false } }
             }
             .overlay {
+                WithPerceptionTracking {
                 if !starting, playable {
                     Button { playWatchCover() } label: {
                         Image(systemName: "play.fill").font(.system(size: 22, weight: .semibold))
@@ -2121,8 +2398,11 @@ struct VideoDetailView: View {
                     .accessibilityLabel(L10n.text("Play"))
                     .accessibilityIdentifier("watch.play")
                 }
+
+                }
             }
             .overlay(alignment: .topLeading) {
+                WithPerceptionTracking {
                 // While it starts by itself nothing sits on the cover until it's tapped.
                 if !starting || coverBack {
                     Button { dismiss() } label: { Image(systemName: "chevron.backward").font(.headline).frame(width: 22, height: 22) }
@@ -2130,6 +2410,8 @@ struct VideoDetailView: View {
                         .accessibilityLabel(L10n.text("Back"))
                         .padding(8)
                         .transition(.opacity)
+                }
+
                 }
             }
             .foregroundStyle(.white)
@@ -2166,8 +2448,8 @@ struct VideoDetailView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         // Its buttons are Liquid Glass, like the player's above them (#293).
         .environment(\.glassControls, true)
-        .animation(.smooth(duration: 0.45), value: tmdb.details)
-        .animation(.smooth(duration: 0.3), value: tmdb.phase)
+        .animation(.tvSmooth(duration: 0.45), value: tmdb.details)
+        .animation(.tvSmooth(duration: 0.3), value: tmdb.phase)
     }
 
     /// As in Bilibili's 选集: one row of episodes that scrolls sideways to the one playing, and All for the full list.
@@ -2209,16 +2491,16 @@ struct VideoDetailView: View {
                         // scroll view, which pushed the title under the player.
                         ScrollView(.horizontal) {
                             LazyHStack(alignment: .top, spacing: stills.isEmpty ? 8 : 12) { ForEach(shownOrder(items)) { watchEpisodeCard($0, tile: tile, info: stills[$0.id]) } }
-                                .scrollTargetLayout()
+                                .tvScrollTargetLayout()
                                 .padding(.horizontal, 16)
                         }
-                        .scrollIndicators(.never)
-                        .scrollPosition(id: $episodeScroll, anchor: .center)
+                        .tvScrollIndicators(.never)
+                        .tvScrollPosition(id: $episodeScroll, anchor: .center)
                         // Edge to edge, unclipped: the tiles' glass shadow ran past the row and was cut off in a band (#293).
-                        .scrollClipDisabled()
+                        .tvScrollClipDisabled()
                         .padding(.horizontal, -16)
                         .onAppear { episodeScroll = currentEpisodeID }
-                        .onChange(of: currentEpisodeID) { _, id in if let id { withAnimation { episodeScroll = id } } }
+                        .tvOnChange(of: currentEpisodeID) { _, id in if let id { withAnimation { episodeScroll = id } } }
                     }
                 }
             }
@@ -2236,7 +2518,7 @@ struct VideoDetailView: View {
                 if let same, same.id != currentEpisodeID { startRequest { await play(same) } }
             }
             // Edge to edge and unclipped, like the episodes, so the strip doesn't cut the chips' glass shadow (#293).
-            .contentMargins(.horizontal, 16, for: .scrollContent).scrollClipDisabled()
+            .tvContentMargins(.horizontal, 16, for: .scrollContent).tvScrollClipDisabled()
             .padding(.horizontal, -16)
         }
     }
@@ -2284,7 +2566,11 @@ struct VideoDetailView: View {
             if let info {
                 TMDBEpisodeTile(name: episodeTitle(episode), info: info, current: current, loading: loadingEpisode == episode.id,
                                 width: fill ? nil : 168)
-                    .overlay(alignment: .topTrailing) { if saved?.status == .completed { DownloadedBadge().padding(4) } }
+                    .overlay(alignment: .topTrailing) {
+                        WithPerceptionTracking {
+ if saved?.status == .completed { DownloadedBadge().padding(4) }
+                        }
+                    }
             } else {
             HStack(spacing: 6) {
                 if loadingEpisode == episode.id { ProgressView().controlSize(.small) }
@@ -2299,7 +2585,11 @@ struct VideoDetailView: View {
             .frame(maxWidth: fill ? .infinity : nil, alignment: compact ? .center : .leading)
             .glassOrFill(current ? GlassStyle.regular.tint(Brand.accent).interactive() : .regular.interactive(),
                          current ? Brand.accent : Color.primary.opacity(0.06), in: shape)
-            .overlay(alignment: .topTrailing) { if saved?.status == .completed { DownloadedBadge() } }
+            .overlay(alignment: .topTrailing) {
+                WithPerceptionTracking {
+ if saved?.status == .completed { DownloadedBadge() }
+                }
+            }
             .contentShape(shape)
             }
         }
@@ -2307,6 +2597,7 @@ struct VideoDetailView: View {
         .id(episode.id)
         .accessibilityAddTraits(current ? .isSelected : [])
         .contextMenu {
+            WithPerceptionTracking {
             if episodeLabels[episode.id] != nil { Text(episode.name) }
             if saved == nil || saved?.status == .failed {
                 Button(L10n.text("Download"), systemImage: "arrow.down.circle") {
@@ -2318,6 +2609,8 @@ struct VideoDetailView: View {
                     DownloadLibrary.shared.remove([saved.id])
                 }
             }
+
+            }
         }
     }
 
@@ -2325,7 +2618,7 @@ struct VideoDetailView: View {
         let items = activeEpisodes
         let tile = compactTileWidth(items)
         let stills = watchStills(items)
-        return NavigationStack {
+        return NBNavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     watchLines
@@ -2339,12 +2632,12 @@ struct VideoDetailView: View {
             .navigationTitle(L10n.text("Episodes"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) { episodeOrderButton }
+                ToolbarItem(placement: .navigationBarLeading) { episodeOrderButton }
                 ToolbarItem(placement: .confirmationAction) { Button(L10n.text("Done")) { showsAllEpisodes = false } }
             }
         }
         .environment(\.glassControls, true)
-        .presentationDetents([.medium, .large])
+        .tvPresentationDetents([.medium, .large])
     }
     #endif
 }
@@ -2503,7 +2796,11 @@ private struct EpisodeRow: View {
     let action: () -> Void
     @State private var hovering = false
     static func split(_ name: String) -> (title: String, detail: String?) {
-        if let match = name.firstMatch(of: /^\s*\[([^\]]+)\]\s*(.+)$/) { return (String(match.2), String(match.1)) }
+        if let expression = try? NSRegularExpression(pattern: #"^\s*\[([^\]]+)\]\s*(.+)$"#),
+           let match = expression.firstMatch(in: name, range: NSRange(name.startIndex..., in: name)),
+           let title = Range(match.range(at: 2), in: name), let detail = Range(match.range(at: 1), in: name) {
+            return (String(name[title]), String(name[detail]))
+        }
         return (name, nil)
     }
     static func title(_ name: String) -> String { split(name).title }
@@ -2522,6 +2819,7 @@ private struct EpisodeRow: View {
         return (label ?? parts.title, parts.detail)
     }
     var body: some View {
+        WithPerceptionTracking {
         let parts = parts
         let button = Button(action: action) {
             HStack(spacing: 10) {
@@ -2552,8 +2850,10 @@ private struct EpisodeRow: View {
         #else
         button.buttonStyle(.plain)
             .onHover { hovering = $0 }
-            .animation(.smooth(duration: 0.15), value: hovering)
+            .animation(.tvSmooth(duration: 0.15), value: hovering)
         #endif
+
+        }
     }
 }
 
@@ -2566,6 +2866,7 @@ private struct DownloadLabelStyle: LabelStyle {
 
 /// Gives its one subview at least `minHeight`, even in a scroll view, where `frame(minHeight:)`
 /// leaves the content at its ideal height and spacers inside it never grow.
+@available(iOS 16, macOS 13, tvOS 16, *)
 private struct MinHeightLayout: SwiftUI.Layout {
     var minHeight: CGFloat
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
@@ -2575,5 +2876,17 @@ private struct MinHeightLayout: SwiftUI.Layout {
     }
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         subviews.first?.place(at: bounds.origin, proposal: ProposedViewSize(bounds.size))
+    }
+}
+
+private struct TVMinHeight<Content: View>: View {
+    let minHeight: CGFloat
+    @ViewBuilder var content: Content
+    var body: some View {
+        if #available(iOS 16, macOS 13, tvOS 16, *) {
+            MinHeightLayout(minHeight: minHeight) { content }
+        } else {
+            content.frame(minHeight: minHeight)
+        }
     }
 }

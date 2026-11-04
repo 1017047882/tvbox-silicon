@@ -1,3 +1,4 @@
+import Perception
 #if os(iOS)
 import SwiftUI
 import AVKit
@@ -69,6 +70,7 @@ struct MobilePlayerView: View {
     @State private var brightnessBefore: CGFloat?
 
     var body: some View {
+        WithPerceptionTracking {
         ZStack {
             PlayerLayerView(player: session.player, fills: fillsScreen, pip: pip).playerBleed(!inline)
             // The enhanced picture covers the layer's own, under everything else.
@@ -120,7 +122,7 @@ struct MobilePlayerView: View {
                     .padding(inline ? 8 : 16)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .opacity(chromeVisible ? 0 : 1)
-                    .animation(.smooth(duration: 0.25), value: chromeVisible)
+                    .animation(.tvSmooth(duration: 0.25), value: chromeVisible)
             }
             controls.opacity(chromeVisible ? 1 : 0).allowsHitTesting(chromeVisible && !settling)
         }
@@ -138,21 +140,26 @@ struct MobilePlayerView: View {
             if let brightnessBefore { screen?.brightness = brightnessBefore }
         }
         // Played here again (the Lock Screen, say): the other device no longer has it to itself.
-        .onChange(of: session.paused) { _, paused in if !paused { playingOn = nil } }
-        .onChange(of: nowPlayingState, initial: true) { nowPlaying.update(title: channel.name, session: session) }
-        .onChange(of: nowPlayingArtwork, initial: true) { _, artwork in nowPlaying.show(artwork, session: session) }
+        .tvOnChange(of: session.paused) { _, paused in if !paused { playingOn = nil } }
+        .tvOnChange(of: nowPlayingState, initial: true) { nowPlaying.update(title: channel.name, session: session) }
+        .tvOnChange(of: nowPlayingArtwork, initial: true) { _, artwork in nowPlaying.show(artwork, session: session) }
         // Pausing ends the faster speed in the session; another episode or quality plays at the chosen one.
-        .onChange(of: session.boost == nil) { _, ended in if ended { boost = nil } }
-        .onChange(of: clock.item) { endBoost() }
-        .sensoryFeedback(trigger: boost) { old, new in
+        .tvOnChange(of: session.boost == nil) { _, ended in if ended { boost = nil } }
+        .tvOnChange(of: clock.item) { endBoost() }
+        .tvSensoryFeedback(trigger: boost) { old, new in
             guard let new else { return nil }
             guard let old else { return .impact(weight: .light) }
             return new.locked != old.locked ? .impact(weight: .medium) : new.rate != old.rate ? .selection : nil
         }
         .task(id: clock.item.map(ObjectIdentifier.init)) { await tracks.load(clock.item) }
         .sheet(isPresented: $showsDanmakuList) {
+            WithPerceptionTracking {
             DanmakuListView(player: session.player, comments: session.danmaku) { showsDanmakuList = false }
                 .danmakuListPresentation()
+
+            }
+        }
+
         }
     }
 
@@ -196,10 +203,10 @@ struct MobilePlayerView: View {
             hideChrome()
             session.skip(seconds)
             nowPlaying.update(title: channel.name, session: session)
-            withAnimation(.snappy(duration: 0.25)) { skipped = (seconds > 0, total) }
+            withAnimation(.tvSnappy(duration: 0.25)) { skipped = (seconds > 0, total) }
             skippedTask?.cancel()
             skippedTask = Task {
-                try? await Task.sleep(for: .seconds(PictureTaps.streak + 0.1))
+                try? await tvSleep(for: .seconds(PictureTaps.streak + 0.1))
                 if !Task.isCancelled { withAnimation(.easeOut(duration: 0.2)) { skipped = nil } }
             }
         }
@@ -210,7 +217,7 @@ struct MobilePlayerView: View {
         settling = true
         settleTask?.cancel()
         settleTask = Task {
-            try? await Task.sleep(for: .seconds(PictureTaps.interval))
+            try? await tvSleep(for: .seconds(PictureTaps.interval))
             if !Task.isCancelled { settling = false }
         }
     }
@@ -264,7 +271,7 @@ struct MobilePlayerView: View {
             if leveling {
                 leveling = false
                 levelTask = Task {
-                    try? await Task.sleep(for: .seconds(0.8))
+                    try? await tvSleep(for: .seconds(0.8))
                     guard !Task.isCancelled else { return }
                     level = nil; mountsVolume = false
                 }
@@ -279,7 +286,11 @@ struct MobilePlayerView: View {
                 Image(systemName: level.volume ? (level.value <= 0 ? "speaker.slash.fill" : "speaker.wave.2.fill") : "sun.max.fill")
                     .frame(width: 26)
                 Capsule().fill(.white.opacity(0.3)).frame(width: 150, height: 6)
-                    .overlay(alignment: .leading) { Capsule().fill(.white).frame(width: 150 * level.value, height: 6) }
+                    .overlay(alignment: .leading) {
+                        WithPerceptionTracking {
+ Capsule().fill(.white).frame(width: 150 * level.value, height: 6)
+                        }
+                    }
             }
             .font(.headline)
             .foregroundStyle(.white)
@@ -302,10 +313,10 @@ struct MobilePlayerView: View {
             VStack(spacing: 4) {
                 Image(systemName: skipped.forward ? "goforward.10" : "gobackward.10")
                     .font(.system(size: 30, weight: .medium))
-                    .symbolEffect(.bounce, value: skipped.total)
+                    .tvSymbolEffect(.bounce, value: skipped.total)
                 Text((skipped.forward ? "+" : "\u{2212}") + L10n.text("%lld s", Int(skipped.total)))
                     .font(.footnote.weight(.semibold).monospacedDigit())
-                    .contentTransition(.numericText(value: skipped.total))
+                    .tvContentTransition(.numericText(value: skipped.total))
             }
             .foregroundStyle(.white)
             .frame(width: 96, height: 96)
@@ -474,15 +485,23 @@ struct MobilePlayerView: View {
     }
 
     private var screenTopRow: some View {
-        PlayerTopBar {
-            Button(action: close) { Image(systemName: "chevron.backward").font(.headline).frame(width: 22, height: 22) }
+        let back = Button(action: close) { Image(systemName: "chevron.backward").font(.headline).frame(width: 22, height: 22) }
                 .chromeButton()
                 .accessibilityLabel(L10n.text("Back"))
                 .accessibilityIdentifier("player.close")
                 .keyboardShortcut(.cancelAction)
-            Text(channel.name).font(.headline).lineLimit(1)
+        let title = Text(channel.name).font(.headline).lineLimit(1)
                 .shadow(color: .black.opacity(0.6), radius: 4)
-            HStack(spacing: 10) { toolbar; optionsMenu }
+        let buttons = HStack(spacing: 10) { toolbar; optionsMenu }
+        return Group {
+            if #available(iOS 16, *) {
+                PlayerTopBar { back; title; buttons }
+            } else {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 12) { back; Spacer(minLength: 0); buttons }
+                    title
+                }
+            }
         }
         .simultaneousGesture(TapGesture().onEnded { poke() })
     }
@@ -608,7 +627,7 @@ struct MobilePlayerView: View {
             }
             Button { session.togglePlayback() } label: {
                 // Swapped as the music player's is.
-                Image(systemName: session.paused ? "play.fill" : "pause.fill").contentTransition(.symbolEffect(.replace))
+                Image(systemName: session.paused ? "play.fill" : "pause.fill").tvContentTransition(.symbolEffect(.replace))
             }
                 .buttonStyle(PlayerCircleStyle(size: inline ? 50 : 68))
                 .accessibilityLabel(L10n.text(session.paused ? "Play" : "Pause"))
@@ -704,6 +723,7 @@ struct WatchCoverBackdrop: View {
     var status: (@MainActor (TimeInterval) -> PlaybackWait)? = nil
     @State private var aspect: CGFloat?
     var body: some View {
+        WithPerceptionTracking {
         ZStack {
             Color.black
             PosterImage(url: poster, headers: headers)
@@ -724,6 +744,8 @@ struct WatchCoverBackdrop: View {
         }
         .animation(.easeOut(duration: 0.3), value: clear)
         .clipped()
+
+        }
     }
 }
 
@@ -733,8 +755,9 @@ struct WaitSpinner: View {
     var status: (@MainActor (TimeInterval) -> PlaybackWait)?
     @State private var started = Date()
     var body: some View {
+        WithPerceptionTracking {
         ZStack {
-            ProgressView().controlSize(.large).tint(.white)
+            ProgressView().tvLargeControl().tint(.white)
             if let status {
                 TimelineView(.periodic(from: .now, by: 0.5)) { timeline in
                     let elapsed = max(0, timeline.date.timeIntervalSince(started))
@@ -748,12 +771,14 @@ struct WaitSpinner: View {
                     }
                     .padding(.horizontal, 24).padding(.bottom, 12)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                    .animation(.smooth(duration: 0.45), value: speaks)
+                    .animation(.tvSmooth(duration: 0.45), value: speaks)
                 }
             }
         }
         .allowsHitTesting(false)
         .accessibilityElement(children: .combine)
+
+        }
     }
 }
 
@@ -785,7 +810,10 @@ struct WatchPlayback {
 struct PlayerScheme: ViewModifier {
     let ownsScreen: Bool
     func body(content: Content) -> some View {
+        WithPerceptionTracking {
         if ownsScreen { content.preferredColorScheme(.dark) } else { content.environment(\.colorScheme, .dark) }
+
+        }
     }
 }
 
@@ -819,6 +847,7 @@ private struct SeekBar<Accessory: View>: View {
     @State private var width: CGFloat = 0
 
     var body: some View {
+        WithPerceptionTracking {
         // Every display frame while it plays, as AVKit's bar does; paused, held or hidden, only when the clock changes.
         let follows = moving && clock.scrubbing == nil
         TimelineView(.animation(paused: !follows)) { _ in
@@ -827,10 +856,15 @@ private struct SeekBar<Accessory: View>: View {
         // Outside the bar, which is one accessibility element. Gone while scrubbing, when the time grows with the
         // scrubbing speed's label and the finger is there to scrub.
         .overlay(alignment: .topTrailing) {
+            WithPerceptionTracking {
             if drag == nil { accessory().frame(height: Self.timeRow).transition(.opacity) }
+
+            }
         }
         .animation(.easeOut(duration: 0.15), value: drag == nil)
-        .sensoryFeedback(.selection, trigger: fineness)
+        .tvSensoryFeedback(.selection, trigger: fineness)
+
+        }
     }
 
     private func bar(_ position: Double) -> some View {
@@ -858,11 +892,11 @@ private struct SeekBar<Accessory: View>: View {
             }
             .frame(maxWidth: .infinity, minHeight: 32)
             .contentShape(Rectangle())
-            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+            .tvOnGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
             .gesture(DragGesture(minimumDistance: 0)
                 .onChanged { changed($0, value: value, duration: duration) }
                 .onEnded { _ in ended() })
-            .animation(.spring(duration: 0.3, bounce: 0.3), value: held)
+            .animation(.tvSpring(duration: 0.3, bounce: 0.3), value: held)
         }
         // The frame at the finger, above the time, centred on the handle and kept on screen.
         .overlay(alignment: .topLeading) {
@@ -940,6 +974,7 @@ private struct SeekBar<Accessory: View>: View {
 /// The top row's three parts: Back, the title and the buttons. All in one row while the title keeps `minimumTitle`;
 /// otherwise Back and the buttons share the first row and the title has the next one to itself. On a screen too
 /// narrow even for Back beside the buttons, the buttons take the first row alone and Back goes beside the title.
+@available(iOS 16, *)
 private struct PlayerTopBar: SwiftUI.Layout {
     var spacing: CGFloat = 12
     var rowSpacing: CGFloat = 10
@@ -1135,12 +1170,12 @@ private struct PlayerLayerView: UIViewRepresentable {
 }
 
 /// Picture in Picture for the player layer: the button, and carrying on in a floating window when the app is left.
-@MainActor @Observable final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate {
+@MainActor @Perceptible final class PictureInPicture: NSObject, AVPictureInPictureControllerDelegate {
     let supported = AVPictureInPictureController.isPictureInPictureSupported()
     private(set) var possible = false
     private(set) var active = false
-    @ObservationIgnored private var controller: AVPictureInPictureController?
-    @ObservationIgnored private var observation: NSKeyValueObservation?
+    @PerceptionIgnored private var controller: AVPictureInPictureController?
+    @PerceptionIgnored private var observation: NSKeyValueObservation?
 
     func attach(_ layer: AVPlayerLayer) {
         guard supported, controller == nil else { return }
@@ -1173,15 +1208,15 @@ private struct PlayerLayerView: UIViewRepresentable {
 }
 
 /// The playing item's position and duration, four times a second while it plays.
-@MainActor @Observable final class PlayerClock {
+@MainActor @Perceptible final class PlayerClock {
     private(set) var position: Double = 0
     /// Zero until the item has a finite duration.
     private(set) var duration: Double = 0
     private(set) var item: AVPlayerItem?
     /// Where the seek bar is held, until the precise seek it ends with lands.
     private(set) var scrubbing: Double?
-    @ObservationIgnored private weak var player: AVPlayer?
-    @ObservationIgnored private var token: Any?
+    @PerceptionIgnored private weak var player: AVPlayer?
+    @PerceptionIgnored private var token: Any?
 
     func attach(_ player: AVPlayer) {
         detach()
@@ -1206,12 +1241,12 @@ private struct PlayerLayerView: UIViewRepresentable {
 
     /// The frame the seek bar shows above its handle while dragged; nil until one is made, or where none can be.
     private(set) var preview: CGImage?
-    @ObservationIgnored private var generator: AVAssetImageGenerator?
-    @ObservationIgnored private var generatorItem: ObjectIdentifier?
+    @PerceptionIgnored private var generator: AVAssetImageGenerator?
+    @PerceptionIgnored private var generatorItem: ObjectIdentifier?
     /// An item AVFoundation made no frame from (an HLS stream, say): no more tries for it.
-    @ObservationIgnored private var previewless: ObjectIdentifier?
-    @ObservationIgnored private var generating = false
-    @ObservationIgnored private var nextPreview: Double?
+    @PerceptionIgnored private var previewless: ObjectIdentifier?
+    @PerceptionIgnored private var generating = false
+    @PerceptionIgnored private var nextPreview: Double?
 
     /// While dragging, only the bar, the time and the preview follow the finger; the playing video is left alone
     /// until the finger lifts (Telegram).
@@ -1259,7 +1294,7 @@ private struct PlayerLayerView: UIViewRepresentable {
         guard let generator else { return }
         nextPreview = nil
         generating = true
-        generator.generateCGImageAsynchronously(for: CMTime(seconds: seconds, preferredTimescale: 600)) { [weak self] image, _, _ in
+        generator.generateCGImagesAsynchronously(forTimes: [NSValue(time: CMTime(seconds: seconds, preferredTimescale: 600))]) { [weak self] _, image, _, _, _ in
             nonisolated(unsafe) let frame = image
             Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -1284,7 +1319,7 @@ private struct PlayerLayerView: UIViewRepresentable {
 }
 
 /// The item's audio tracks and subtitles, for the options menu.
-@MainActor @Observable final class MediaTracks {
+@MainActor @Perceptible final class MediaTracks {
     struct Group {
         let group: AVMediaSelectionGroup
         let options: [AVMediaSelectionOption]
@@ -1293,7 +1328,7 @@ private struct PlayerLayerView: UIViewRepresentable {
     private(set) var legible: Group?
     /// Bumped by a selection, so the menus show the new choice.
     private var revision = 0
-    @ObservationIgnored private weak var item: AVPlayerItem?
+    @PerceptionIgnored private weak var item: AVPlayerItem?
 
     func load(_ item: AVPlayerItem?) async {
         self.item = item; audio = nil; legible = nil

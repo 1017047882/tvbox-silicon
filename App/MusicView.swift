@@ -1,3 +1,5 @@
+import Perception
+import NavigationBackport
 import SwiftUI
 import TVCore
 
@@ -21,9 +23,11 @@ struct MusicView: View {
     #endif
 
     var body: some View {
+        WithPerceptionTracking {
         let search = store.musicSearch
         ScrollView {
             LazyVStack(alignment: .leading, spacing: MusicLayout.rowSpacing) {
+                WithPerceptionTracking {
                 #if os(tvOS)
                 let typed = query.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !typed.isEmpty, typed != search.query {
@@ -37,13 +41,15 @@ struct MusicView: View {
                 if !search.query.isEmpty { kinds(search) }
                 #endif
                 content(search)
+
+                }
             }
             .glassRowInsets()
             .pageContainer()
         }
         .screenBackdrop()
         .catalogSearchable(text: $query, prompt: L10n.text("Song, album or playlist"))
-        .onChange(of: query) { _, text in
+        .tvOnChange(of: query) { _, text in
             if text.trimmingCharacters(in: .whitespacesAndNewlines) != autoPlayQuery { autoPlayQuery = nil }
             #if os(tvOS)
             // As in Global Search: typing only edits the query, and results change when it is
@@ -57,7 +63,7 @@ struct MusicView: View {
             autoPlayQuery = search.kind == .songs || search.kind == .top ? query.trimmingCharacters(in: .whitespacesAndNewlines) : nil
             search.search(query, kind: Self.searchKind, immediately: true); playDirectHitIfReady()
         }
-        .onChange(of: search.busy) {
+        .tvOnChange(of: search.busy) {
             playDirectHitIfReady()
             #if DEBUG
             if !search.busy, UserDefaults.standard.bool(forKey: "qaMusicOpen"), qaOpened == nil { qaOpened = search.collections.first }
@@ -71,21 +77,24 @@ struct MusicView: View {
         #if DEBUG && os(tvOS)
         // `-qaNowPlayingTab 1` (with `-qaMusicPlay 1 -qaMusicStayOnPage 1`) moves to the sidebar's
         // Now Playing once the song is loaded, for screenshots.
-        .onChange(of: store.music.track != nil) { _, loaded in
+        .tvOnChange(of: store.music.track != nil) { _, loaded in
             if loaded, UserDefaults.standard.bool(forKey: "qaNowPlayingTab") { store.section = .nowPlaying }
         }
         #endif
         #if DEBUG
-        .navigationDestination(isPresented: $qaDownloads) {
+        .nbNavigationDestination(isPresented: $qaDownloads) {
+            WithPerceptionTracking {
             #if os(macOS)
             MusicDownloadsView().musicBar()
             #else
             MusicDownloadsView()
             #endif
+
+            }
         }
         #endif
         #if DEBUG
-        .navigationDestination(item: $qaOpened) {
+        .nbNavigationDestination(item: $qaOpened) {
             #if os(macOS)
             MusicCollectionView(collection: $0).musicBar()
             #else
@@ -107,9 +116,17 @@ struct MusicView: View {
         }
         #endif
         #if os(tvOS)
-        .fullScreenCover(isPresented: $showsSettings) { MusicSettingsView() }
+        .fullScreenCover(isPresented: $showsSettings) {
+            WithPerceptionTracking {
+ MusicSettingsView()
+            }
+        }
         #else
-        .sheet(isPresented: $showsSettings) { MusicSettingsView() }
+        .sheet(isPresented: $showsSettings) {
+            WithPerceptionTracking {
+ MusicSettingsView()
+            }
+        }
         #endif
         .task {
             if query.isEmpty, !search.query.isEmpty { query = search.query }
@@ -124,6 +141,8 @@ struct MusicView: View {
             // `-qaMusicSettings 1` opens Music Settings.
             if UserDefaults.standard.bool(forKey: "qaMusicSettings") { showsSettings = true }
             #endif
+        }
+
         }
     }
 
@@ -162,7 +181,10 @@ struct MusicView: View {
             GlassGroup(spacing: 8) {
                 HStack(spacing: 8) {
                     ForEach(Self.chips, id: \.self) { kind in
+                        WithPerceptionTracking {
                         Chip(title: kind.name, selected: search.kind == kind) { search.search(query, kind: kind, immediately: true) }
+
+                        }
                     }
                 }
             }.padding(.vertical, 4)
@@ -181,22 +203,33 @@ struct MusicView: View {
                            details: failureDetails(search), retry: { search.search(query, immediately: true) }, busy: search.busy)
                 .padding(.vertical, 24).tvFocusSection()
         } else if search.empty {
-            ContentUnavailableView(L10n.text("No Matching Songs"), systemImage: "music.note",
+            TVEmptyState(L10n.text("No Matching Songs"), systemImage: "music.note",
                                    description: Text(L10n.text("Try the song's full name, or add the artist.")))
                 .frame(maxWidth: .infinity).padding(.vertical, 60)
         } else {
             ForEach(search.failures.keys.sorted { $0.rawValue < $1.rawValue }, id: \.self) { platform in
+                WithPerceptionTracking {
                 StatusNotice(text: L10n.text("%@ didn't answer, so these results are from the other catalog.", platform.name))
                     .padding(.bottom, 10)
+
+                }
             }
             if search.kind == .top {
                 #if os(macOS) || os(tvOS)
                 MusicTopResults(search: search) { playResults(from: $0) }
                 #endif
             } else if search.kind == .songs {
-                ForEach(search.results) { track in MusicTrackRow(track: track) { playResults(from: track) } }
+                ForEach(search.results) { track in
+                    WithPerceptionTracking {
+ MusicTrackRow(track: track) { playResults(from: track) }
+                    }
+                }
             } else {
-                ForEach(search.collections) { collection in MusicCollectionRow(collection: collection) }
+                ForEach(search.collections) { collection in
+                    WithPerceptionTracking {
+ MusicCollectionRow(collection: collection)
+                    }
+                }
             }
         }
     }
@@ -227,6 +260,7 @@ private struct MusicHome: View {
     let openSettings: () -> Void
 
     var body: some View {
+        WithPerceptionTracking {
         let library = store.music.library
         let browse = store.musicBrowse
         let resumable = store.music.track == nil ? library.resumePoint : nil
@@ -263,10 +297,13 @@ private struct MusicHome: View {
             .padding(.bottom, 8)
             .tvFocusSection()
             ForEach(library.history.prefix(100)) { entry in
+                WithPerceptionTracking {
                 if let collection = entry.collection {
                     MusicCollectionRow(collection: collection)
                 } else if let track = entry.track {
                     MusicTrackRow(track: track) { store.music.play(track) }
+                }
+
                 }
             }
         } else if resumable == nil && !downloads && browse.sections.isEmpty && !browse.loading {
@@ -274,6 +311,8 @@ private struct MusicHome: View {
                       message: L10n.text("Type a song's name, or its name and the artist. Yingxia finds the recording and plays it from the best channel available, lossless first."),
                       action: L10n.text("Music Settings"), actionSymbol: "slider.horizontal.3", perform: openSettings)
                 .frame(minHeight: 420)
+        }
+
         }
     }
 }
@@ -284,6 +323,7 @@ private struct MusicContinueCard: View {
     let track: MusicTrack
 
     var body: some View {
+        WithPerceptionTracking {
         Button { store.music.resume() } label: {
             HStack(spacing: MusicLayout.gap) {
                 MusicArtwork(url: track.artwork, size: MusicLayout.art * 1.4)
@@ -302,6 +342,8 @@ private struct MusicContinueCard: View {
             .contentShape(Rectangle())
         }
         .panelCardButton(cornerRadius: 20)
+
+        }
     }
 }
 
@@ -315,6 +357,7 @@ struct MusicTrackRow: View {
     let action: () -> Void
 
     var body: some View {
+        WithPerceptionTracking {
         let current = store.music.track?.id == track.id
         Button(action: action) {
             HStack(spacing: MusicLayout.gap) {
@@ -331,7 +374,11 @@ struct MusicTrackRow: View {
                         .font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer(minLength: 8)
-                ForEach(track.tags.sorted(), id: \.self) { tag in Pill(text: tag.name) }
+                ForEach(track.tags.sorted(), id: \.self) { tag in
+                    WithPerceptionTracking {
+ Pill(text: tag.name)
+                    }
+                }
                 if current { MusicActivityMark() }
                 // A slot for the download state on every row, saved or not, and lengths at least as wide
                 // as "00:00", trailing: the marks and the lengths each stay in a column.
@@ -359,13 +406,18 @@ struct MusicTrackRow: View {
         .glassRow()
         // On Apple TV, a long press.
         .contextMenu {
+            WithPerceptionTracking {
             FavoriteMenuButton(item: .music(track), name: track.title)
             Button { store.music.playNext([track]) } label: { Label(L10n.text("Play Next"), systemImage: "text.line.first.and.arrowtriangle.forward") }
             Button { store.music.addToUpNext([track]) } label: { Label(L10n.text("Add to Up Next"), systemImage: "text.line.last.and.arrowtriangle.forward") }
             Divider()
             MusicDownloadMenuItems(tracks: [track])
+
+            }
         }
         .accessibilityLabel(Text([track.title, track.artistLine].joined(separator: ", ")))
+
+        }
     }
 }
 
@@ -373,6 +425,7 @@ private struct MusicCollectionRow: View {
     let collection: MusicCollection
 
     var body: some View {
+        WithPerceptionTracking {
         RouteLink {
             MusicCollectionView(collection: collection)
         } label: {
@@ -389,6 +442,8 @@ private struct MusicCollectionRow: View {
             .contentShape(Rectangle())
         }
         .glassRow()
+
+        }
     }
 }
 
@@ -406,6 +461,7 @@ struct MusicCollectionView: View {
     }
 
     var body: some View {
+        WithPerceptionTracking {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: MusicLayout.rowSpacing) {
                 #if os(tvOS)
@@ -428,8 +484,11 @@ struct MusicCollectionView: View {
                 }
                 #else
                 ForEach(Array(tracks.enumerated()), id: \.offset) { index, track in
+                    WithPerceptionTracking {
                     MusicTrackRow(track: track, number: index + 1) {
                         store.music.play(MusicQueue(tracks: tracks, start: index, collection: collection))
+                    }
+
                     }
                 }
                 #endif
@@ -458,6 +517,8 @@ struct MusicCollectionView: View {
                 MusicDownloadLibrary.shared.download(tracks, from: collection)
             }
             #endif
+        }
+
         }
     }
 

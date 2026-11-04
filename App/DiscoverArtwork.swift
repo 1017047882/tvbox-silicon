@@ -1,3 +1,4 @@
+import Perception
 import SwiftUI
 import CoreImage
 import ImageIO
@@ -118,6 +119,7 @@ struct DiscoverBackdrop: View {
     let playsTrailer: Bool
     @State private var videoReady = false
     var body: some View {
+        WithPerceptionTracking {
         #if os(tvOS)
         ZStack(alignment: .top) {
             Color(red: 0.018, green: 0.028, blue: 0.035)
@@ -165,8 +167,10 @@ struct DiscoverBackdrop: View {
         }
         .discoverFullBleed()
         .accessibilityHidden(true)
-        .onChange(of: trailer?.key) { _, _ in videoReady = false }
-        .onChange(of: playsTrailer) { _, plays in if !plays { videoReady = false } }
+        .tvOnChange(of: trailer?.key) { _, _ in videoReady = false }
+        .tvOnChange(of: playsTrailer) { _, plays in if !plays { videoReady = false } }
         #endif
+
+        }
     }
 }

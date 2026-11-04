@@ -20,8 +20,8 @@ public enum CatPawOpen {
 
     /// A bundle's own media proxy (`http://127.0.0.1:<port>/spider/<key>/<type>/proxy/…`), which streams drive files.
     static func isMediaProxy(_ url: URL) -> Bool {
-        url.scheme == "http" && ["127.0.0.1", "localhost"].contains(url.host() ?? "")
-            && url.path().range(of: #"^/spider/[^/]+/[^/]+/proxy/"#, options: .regularExpression) != nil
+        url.scheme == "http" && ["127.0.0.1", "localhost"].contains(url.host ?? "")
+            && url.path.range(of: #"^/spider/[^/]+/[^/]+/proxy/"#, options: .regularExpression) != nil
     }
 
     /// The config center a bundle's entry sends the viewer to ("手机扫码打开：http://127.0.0.1:52380/website"). The bundle

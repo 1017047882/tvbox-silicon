@@ -1,9 +1,10 @@
+import Perception
 import SwiftUI
 import TVCore
 
 /// Messages the website publishes for the people using the app (`website/public/messages.json`), each
 /// shown once in an alert. Unlike release notes they also reach App Store and TestFlight builds.
-@MainActor @Observable final class Announcements {
+@MainActor @Perceptible final class Announcements {
     /// The first message this device hasn't shown; it waits while something else is on screen.
     var current: MessageFeed.Message? { pending.first }
     /// Messages not shown yet; they put a New badge on Messages.
@@ -69,7 +70,7 @@ import TVCore
         defaults.set(Array((seen + [message.id]).suffix(200)), forKey: Keys.seen)
         pending = []
         Task {
-            try? await Task.sleep(for: .milliseconds(600))
+            try? await tvSleep(for: .milliseconds(600))
             refresh()
         }
     }
@@ -113,6 +114,7 @@ private struct AnnouncementAlert: ViewModifier {
     @Environment(\.openURL) private var openURL
 
     func body(content: Content) -> some View {
+        WithPerceptionTracking {
         let message = announcements.current
         content.alert(message?.title.text() ?? "", isPresented: Binding(get: { settled && !blocked && message != nil }, set: { if !$0 { announcements.dismiss() } }),
                       presenting: message) { message in
@@ -129,8 +131,10 @@ private struct AnnouncementAlert: ViewModifier {
         .task(id: blocked) {
             settled = false
             guard !blocked else { return }
-            try? await Task.sleep(for: .milliseconds(700))
+            try? await tvSleep(for: .milliseconds(700))
             if !Task.isCancelled { settled = true }
+        }
+
         }
     }
 }
@@ -145,10 +149,11 @@ struct MessagesView: View {
     @State private var fresh: Set<String> = []
 
     var body: some View {
+        WithPerceptionTracking {
         let messages = announcements.all
         Group {
             if messages.isEmpty {
-                ContentUnavailableView(L10n.text("No Messages"), systemImage: "megaphone",
+                TVEmptyState(L10n.text("No Messages"), systemImage: "megaphone",
                                        description: Text(L10n.text("News and notices from Yingxia appear here.")))
             } else {
                 ScrollView {
@@ -157,7 +162,7 @@ struct MessagesView: View {
                     }
                     .pageContainer()
                 }
-                .scrollIndicators(.hidden)
+                .tvScrollIndicators(.hidden)
             }
         }
         #if os(iOS)
@@ -167,6 +172,8 @@ struct MessagesView: View {
         .screenTitle(L10n.text("Messages"))
         // Read at once, so a waiting message doesn't pop up over the page, and again after the check.
         .task { read(); await announcements.check(); read() }
+
+        }
     }
 
     private func read() {

@@ -117,7 +117,7 @@ import Perception
                         await PluginSignIn.shared.finish(file)
                     }
                 }
-                try? await Task.sleep(for: .milliseconds(400))
+                try? await tvSleep(for: .milliseconds(400))
             }
         }
         return Watch(file: file, task: task)

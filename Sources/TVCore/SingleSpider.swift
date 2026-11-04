@@ -8,14 +8,14 @@ extension Site {
         guard !data.starts(with: Data("PK".utf8)) else { return false }
         let text = String(decoding: data.prefix(512 * 1024), as: UTF8.self)
         guard let first = text.first(where: { !$0.isWhitespace && $0 != "\u{FEFF}" }), first != "<", first != "{", first != "[" else { return false }
-        return text.contains(#/__JS_SPIDER__|__jsEvalReturn|export[ \t]+default/#) && text.contains(#/\b(detail|category|homeContent|detailContent)\b/#)
+        return text.tvFirstMatch(#"__JS_SPIDER__|__jsEvalReturn|export[ \t]+default"#) != nil && text.tvFirstMatch(#"\b(detail|category|homeContent|detailContent)\b"#) != nil
     }
 
     /// The name a Python spider gives itself in `getName`, when it returns a plain string.
     static func pythonSpiderName(_ data: Data) -> String? {
         let text = String(decoding: data.prefix(512 * 1024), as: UTF8.self)
-        guard let match = text.firstMatch(of: #/def[ \t]+getName[ \t]*\([ \t]*self[ \t]*\)[ \t]*:\s*return[ \t]+["']([^"'\n]{1,40})["']/#) else { return nil }
-        let name = String(match.1).trimmingCharacters(in: .whitespaces)
+        guard let match = text.tvFirstMatch(#"def[ \t]+getName[ \t]*\([ \t]*self[ \t]*\)[ \t]*:\s*return[ \t]+["']([^"'\n]{1,40})["']"#) else { return nil }
+        let name = String(match[1]).trimmingCharacters(in: .whitespaces)
         return name.isEmpty ? nil : name
     }
 }
@@ -50,9 +50,9 @@ public enum ImportedFiles {
     static let host = "files.yingxia.invalid"
     static var directory: URL {
         #if os(tvOS)
-        URL.cachesDirectory.appending(path: "ImportedFiles", directoryHint: .isDirectory)
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("ImportedFiles", isDirectory: true)
         #else
-        URL.applicationSupportDirectory.appending(path: "ImportedFiles", directoryHint: .isDirectory)
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("ImportedFiles", isDirectory: true)
         #endif
     }
 
@@ -63,7 +63,7 @@ public enum ImportedFiles {
         let data = try Data(contentsOf: file)
         guard data.count <= 20_000_000 else { throw TVError.unsupported(L10n.text("The playlist exceeds 20 MB. Use a smaller subscription.")) }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        try data.write(to: directory.appending(path: name), options: .atomic)
+        try data.write(to: directory.appendingPathComponent(name), options: .atomic)
         return address(name)
     }
 
@@ -73,7 +73,7 @@ public enum ImportedFiles {
         try? FileManager.default.removeItem(at: file)
     }
 
-    public static func isImported(_ address: String) -> Bool { URL(string: address)?.host()?.lowercased() == host }
+    public static func isImported(_ address: String) -> Bool { URL(string: address)?.host?.lowercased() == host }
 
     static func address(_ name: String) -> URL {
         var components = URLComponents()
@@ -83,10 +83,10 @@ public enum ImportedFiles {
 
     /// The copy behind an address on the reserved host: one file, straight in the folder.
     private static func file(for url: URL) -> URL? {
-        guard url.host()?.lowercased() == host else { return nil }
+        guard url.host?.lowercased() == host else { return nil }
         let parts = url.pathComponents.filter { $0 != "/" }
-        guard parts.count == 1, let name = parts.first, !name.hasPrefix(".") else { return directory.appending(path: ".missing") }
-        return directory.appending(path: name)
+        guard parts.count == 1, let name = parts.first, !name.hasPrefix(".") else { return directory.appendingPathComponent(".missing") }
+        return directory.appendingPathComponent(name)
     }
 
     /// What an address on the reserved host holds; nil for every other address, which loads as usual.

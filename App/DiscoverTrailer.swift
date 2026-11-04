@@ -1,3 +1,4 @@
+import Perception
 import SwiftUI
 import TVCore
 @preconcurrency import AVFoundation
@@ -72,7 +73,7 @@ actor DiscoverTrailerResolver {
     private struct Format: Decodable { let url: String; let mimeType: String; let displayName: Name }
 }
 
-@MainActor @Observable private final class DiscoverTrailerPlayback {
+@MainActor @Perceptible private final class DiscoverTrailerPlayback {
     let player = AVQueuePlayer()
     var ready = false
     private var looper: AVPlayerLooper?
@@ -128,13 +129,16 @@ struct DiscoverTrailer: View {
     var readyChanged: (Bool) -> Void = { _ in }
     @State private var playback = DiscoverTrailerPlayback()
     var body: some View {
+        WithPerceptionTracking {
         DiscoverTrailerLayer(player: playback.player)
             .opacity(playback.ready ? 1 : 0)
             .animation(.easeOut(duration: 0.4), value: playback.ready)
             .accessibilityHidden(true)
-            .onChange(of: playback.ready) { _, ready in readyChanged(ready) }
+            .tvOnChange(of: playback.ready) { _, ready in readyChanged(ready) }
             .task(id: trailer) { await playback.load(trailer) }
             .onDisappear { playback.stop() }
+
+        }
     }
 }
 

@@ -26,7 +26,7 @@ import Perception
     private var generation = UUID()
     private struct Cached { var results: [MusicTrack]; var collections: [MusicCollection]; var created: Date }
     private var cache: [String: Cached] = [:]
-    static let debounce: Duration = .milliseconds(350)
+    static let debounce: TVDelay = .milliseconds(350)
     static let cacheLifetime: TimeInterval = 10 * 60
 
     public init(catalogs: [any MusicCatalogSource]? = nil, health: MusicHealth = .shared, kind: MusicSearchKind = .songs) {
@@ -86,7 +86,7 @@ import Perception
         busy = true
         task = Task {
             if !immediately {
-                try? await Task.sleep(for: Self.debounce)
+                try? await tvSleep(for: Self.debounce)
                 guard !Task.isCancelled, self.generation == run else { return }
             }
             if let collectionKind = kind.collectionKind {

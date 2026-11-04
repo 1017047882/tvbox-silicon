@@ -321,7 +321,7 @@ public struct DownloadItem: Codable, Identifiable, Hashable, Sendable {
     /// The file (or, for HLS, the loopback address) that plays a `tvbox-download://` address. An HDR MKV saved
     /// before downloads became MP4s is rewrapped first, which `progress` follows (0...1).
     public func playbackAddress(for url: URL, progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws -> URL {
-        guard url.scheme == Self.scheme, let id = url.host(), let item = item(id: id), item.status == .completed, var media = item.media else {
+        guard url.scheme == Self.scheme, let id = url.host, let item = item(id: id), item.status == .completed, var media = item.media else {
             throw TVError.unsupported(L10n.text("This download is no longer on this device."))
         }
         var file = folder(id).appendingPathComponent(media)

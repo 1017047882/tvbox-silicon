@@ -71,7 +71,7 @@ struct RemuxPlan: Sendable, Equatable {
         let first = tracks.count, unsubtitled = !tracks.contains { $0.kind == .subtitle }
         for (number, file) in files.enumerated() {
             // HLS wants a BCP 47 tag; a source's "简体" would make the playlist invalid.
-            let language = file.language.wholeMatch(of: /[A-Za-z]{2,3}(-[A-Za-z0-9]{1,8})*/) != nil ? file.language : ""
+            let language = file.language.tvFirstMatch(#"\A(?:[A-Za-z]{2,3}(-[A-Za-z0-9]{1,8})*)\z"#) != nil ? file.language : ""
             tracks.append(Track(stream: Stream(index: -1, kind: .subtitle, codec: "external", language: language, title: file.name,
                                                isDefault: unsubtitled && number == 0, isText: true)))
         }
@@ -410,8 +410,8 @@ struct RemuxPlan: Sendable, Equatable {
             let fields = String(decoding: data, as: UTF8.self).split(separator: ",", maxSplits: 8, omittingEmptySubsequences: false)
             guard fields.count == 9 else { return nil }
             text = String(fields[8])
-            if text.firstMatch(of: /\{[^}]*\\p[1-9]/) != nil { return nil }
-            text = text.replacing(/\{[^}]*\}/, with: "")
+            if text.tvFirstMatch(#"\{[^}]*\\p[1-9]"#) != nil { return nil }
+            text = text.tvReplacing(#"\{[^}]*\}"#, with: "")
                 .replacingOccurrences(of: "\\N", with: "\n").replacingOccurrences(of: "\\n", with: "\n").replacingOccurrences(of: "\\h", with: " ")
             text = escaped(text)
         case "mov_text":
@@ -423,14 +423,14 @@ struct RemuxPlan: Sendable, Equatable {
             text = String(decoding: data, as: UTF8.self)
         default:
             // SubRip and plain text: keep <i>, <b> and <u>, drop the rest (<font>, ASS-style {\an8}).
-            text = String(decoding: data, as: UTF8.self).replacing(/\{\\[^}]*\}/, with: "")
-            let kept = /<(\/?)([ibu])>/.ignoresCase()
-            text = text.replacing(kept) { "\u{1}\($0.output.1)\($0.output.2.lowercased())\u{2}" }
-            text = escaped(text.replacing(/<[^>]*>/, with: ""))
+            text = String(decoding: data, as: UTF8.self).tvReplacing(#"\{\\[^}]*\}"#, with: "")
+            text = text.tvReplacing(#"(?i)<(/?)([ibu])>"#, with: "\u{1}$1$2\u{2}")
+            for tag in ["I", "B", "U"] { text = text.replacingOccurrences(of: tag + "\u{2}", with: tag.lowercased() + "\u{2}") }
+            text = escaped(text.tvReplacing(#"<[^>]*>"#, with: ""))
                 .replacingOccurrences(of: "\u{1}", with: "<").replacingOccurrences(of: "\u{2}", with: ">")
         }
         text = text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
-            .replacing(/\n{2,}/, with: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            .tvReplacing(#"\n{2,}"#, with: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
         // "-->" would end the cue's timing line early.
         text = text.replacingOccurrences(of: "-->", with: "->")
         return text.isEmpty ? nil : text

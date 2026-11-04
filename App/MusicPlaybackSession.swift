@@ -1,3 +1,4 @@
+import Perception
 import AVFoundation
 import SwiftUI
 import TVCore
@@ -11,7 +12,7 @@ typealias MusicTrack = TVCore.MusicTrack
 /// length. A song no channel can play is skipped, until several in a row fail. Songs that play go
 /// into the history, and where listening is gets saved, to continue later.
 /// A new song, or Stop, cancels everything for the old one, so a late answer never plays.
-@MainActor @Observable final class MusicPlaybackSession {
+@MainActor @Perceptible final class MusicPlaybackSession {
     enum Phase: Equatable {
         case idle
         /// Finding a channel.
@@ -78,17 +79,17 @@ typealias MusicTrack = TVCore.MusicTrack
     private var lyricsFor: String?
     private var lastSavedPosition: Double = -10
     /// AVPlayer gets this long from a stream being set to sound playing before the stream counts as failed.
-    static let startWindow: Duration = .seconds(10)
+    static let startWindow: TVDelay = .seconds(10)
 
     // MARK: TVBox episodes (#289)
 
     /// Turns a TVBox episode into its stream through its source; set by the store, which has the subscriptions.
-    @ObservationIgnored var resolveSource: ((MusicSourceEpisode) async throws -> Channel)?
+    @PerceptionIgnored var resolveSource: ((MusicSourceEpisode) async throws -> Channel)?
     /// Opens a TVBox episode in the video player at a second: its stream has a picture (`true`), or this player
     /// can't play it and the video player, with more ways to play, might. The last is whether Now Playing was open.
-    @ObservationIgnored var handOffSource: ((Channel, Double, Bool, Bool) -> Void)?
+    @PerceptionIgnored var handOffSource: ((Channel, Double, Bool, Bool) -> Void)?
     /// Saves where a TVBox episode is under its book, as the video player saves a series.
-    @ObservationIgnored var recordSource: ((MusicSourceEpisode, Double, Double) -> Void)?
+    @PerceptionIgnored var recordSource: ((MusicSourceEpisode, Double, Double) -> Void)?
     /// The stream of the TVBox episode playing.
     private(set) var sourceStream: Channel?
     /// The first episode's stream, which the page that started the queue already resolved.
@@ -376,7 +377,7 @@ typealias MusicTrack = TVCore.MusicTrack
         let stream = selection.stream
         setItem(url: stream.url, headers: stream.headers, metadata: track ?? selection.track, at: seconds, run: run)
         loadLyrics(for: selection)
-        Diagnostics.shared.record(.info, "music", "start \(selection.candidate.provider.rawValue) host=\(stream.url.host() ?? "-") \(selection.probe.format.label)\(selection.degraded ? " degraded" : "")")
+        Diagnostics.shared.record(.info, "music", "start \(selection.candidate.provider.rawValue) host=\(stream.url.host ?? "-") \(selection.probe.format.label)\(selection.degraded ? " degraded" : "")")
     }
 
     /// Plays a stream, watching for its failure and its end, and for no sound within the start window.
@@ -410,7 +411,7 @@ typealias MusicTrack = TVCore.MusicTrack
         streamSetAt = Date()
         // Buffering, pausing and interruptions are not failures; no sound at all within the window is.
         startWatch = Task { [weak self] in
-            try? await Task.sleep(for: Self.startWindow)
+            try? await tvSleep(for: Self.startWindow)
             guard let self, !Task.isCancelled, self.generation == run, self.phase == .loading, self.player.rate > 0 else { return }
             self.playbackFailed("no sound within 10 s", run: run)
         }
@@ -446,7 +447,7 @@ typealias MusicTrack = TVCore.MusicTrack
             return
         }
         let item = setItem(url: stream.url, headers: stream.headers, metadata: track, at: seconds, run: run)
-        Diagnostics.shared.record(.info, "music", "start source host=\(stream.url.host() ?? "-")")
+        Diagnostics.shared.record(.info, "music", "start source host=\(stream.url.host ?? "-")")
         // A stream with a picture belongs in the video player. AVPlayer gives the picture's size once it has one:
         // at once for a file, and for HLS when a variant with video loads; a song's cover art has none.
         pictureObservation = item.observe(\.presentationSize, options: [.initial, .new]) { [weak self] item, _ in
@@ -513,7 +514,7 @@ typealias MusicTrack = TVCore.MusicTrack
             Diagnostics.shared.record(.warning, "music", "skipped after: \(error.detail)")
             phase = .resolving
             Task { [weak self] in
-                try? await Task.sleep(for: .seconds(1.5))
+                try? await tvSleep(for: .seconds(1.5))
                 guard let self, self.generation == run else { return }
                 self.next()
             }

@@ -1,3 +1,5 @@
+import Perception
+import NavigationBackport
 import SwiftUI
 import TVCore
 #if canImport(UIKit)
@@ -60,38 +62,52 @@ struct DiscoverPersonView: View {
         tvPage
         #else
         GeometryReader { geometry in
+            WithPerceptionTracking {
             ScrollView {
                 LazyVStack(spacing: 0) {
+                    WithPerceptionTracking {
                     header(width: geometry.size.width)
                     if loading { ProgressView().padding(30).frame(maxWidth: .infinity) }
                     emptyState
                     ForEach(Array(works.enumerated()), id: \.element.id) { index, work in
+                        WithPerceptionTracking {
                         RouteLink { DiscoverDetailView(item: work.item) } label: {
                             timeline(work, marker: index == 0 || works[index - 1].date?.prefix(7) != work.date?.prefix(7), last: index == works.count - 1)
                         }.buttonStyle(.plain).accessibilityIdentifier("discover.person.work.\(work.id)")
                         #if os(macOS)
                         .frame(maxWidth: Self.column)
                         #endif
+
+                        }
+                    }
+
                     }
                 }.padding(.bottom, 100)
                     .animation(reduceMotion ? nil : .easeInOut(duration: 0.28), value: kind)
                     .animation(reduceMotion ? nil : .easeInOut(duration: 0.28), value: contribution)
             }
-            .scrollIndicators(.hidden)
+            .tvScrollIndicators(.hidden)
             .background(color.discoverFullBleed())
             .ignoresSafeArea(edges: .top)
-            .overlay(alignment: .bottomTrailing) { filters.padding(20) }
+            .overlay(alignment: .bottomTrailing) {
+                WithPerceptionTracking {
+ filters.padding(20)
+                }
+            }
+
+            }
         }
         #endif
     }
 
     var body: some View {
+        WithPerceptionTracking {
         page
         .foregroundStyle(.white).preferredColorScheme(.dark)
         .navigationTitle("")
         #if !os(macOS)
-        .toolbar(.visible, for: .navigationBar)
-        .toolbarBackground(.hidden, for: .navigationBar)
+        .tvToolbar(.visible, for: .navigationBar)
+        .tvToolbarBackground(.hidden, for: .navigationBar)
         #endif
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -109,13 +125,21 @@ struct DiscoverPersonView: View {
         }
         #if !os(tvOS)
         .sheet(isPresented: $biographyShown) {
-            NavigationStack {
+            WithPerceptionTracking {
+            NBNavigationStack {
+                WithPerceptionTracking {
                 ScrollView { Text(person?.biography ?? "").lineSpacing(5).frame(maxWidth: .infinity, alignment: .leading).padding(24).selectable() }
                     .navigationTitle(person?.name ?? name)
                     .toolbar { ToolbarItem(placement: .confirmationAction) { Button(L10n.text("Done")) { biographyShown = false } } }
-            }.presentationDetents([.medium, .large]).discoverSheetSize(width: 560, height: 480)
+
+                }
+            }.tvPresentationDetents([.medium, .large]).discoverSheetSize(width: 560, height: 480)
+
+            }
         }
         #endif
+
+        }
     }
     private func header(width: CGFloat) -> some View {
         VStack(spacing: 0) {
@@ -139,11 +163,12 @@ struct DiscoverPersonView: View {
         #endif
         .frame(maxWidth: .infinity)
         .background(alignment: .top) {
+            WithPerceptionTracking {
             DiscoverPosterWall(urls: wallPosters, color: color)
                 .frame(height: min(width * 0.88, 430) + 270)
-                .visualEffect { view, proxy in
-                    view.offset(y: min(0, -proxy.frame(in: .scrollView).minY * 0.16))
-                }
+                .tvPosterParallax()
+
+            }
         }
     }
     private func timeline(_ work: TMDBCatalog.PersonWork, marker: Bool, last: Bool) -> some View {
@@ -171,7 +196,11 @@ struct DiscoverPersonView: View {
                     }
                 }.frame(maxWidth: .infinity, alignment: .leading).frame(height: 105, alignment: .top)
             }.padding(10).background(.white.opacity(0.075), in: RoundedRectangle(cornerRadius: 15))
-                .overlay { RoundedRectangle(cornerRadius: 15).strokeBorder(.white.opacity(0.09), lineWidth: 0.5) }
+                .overlay {
+                    WithPerceptionTracking {
+ RoundedRectangle(cornerRadius: 15).strokeBorder(.white.opacity(0.09), lineWidth: 0.5)
+                    }
+                }
                 .padding(.leading, 8).padding(.bottom, 10)
         }.padding(.horizontal, 18).fixedSize(horizontal: false, vertical: true)
     }
@@ -208,9 +237,12 @@ extension DiscoverPersonView {
     var tvPage: some View {
         // The header has nothing to focus; reaching the chips scrolls it back into view, as Up does in Rex.
         ScrollViewReader { proxy in
-            tvScroll.onChange(of: tvChip) { _, chip in
+            WithPerceptionTracking {
+            tvScroll.tvOnChange(of: tvChip) { _, chip in
                 guard chip != nil else { return }
                 withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.35)) { proxy.scrollTo("tvTop", anchor: .top) }
+            }
+
             }
         }
     }
@@ -230,10 +262,16 @@ extension DiscoverPersonView {
                 if loading { ProgressView().frame(maxWidth: .infinity).padding(60) }
                 emptyState
                 LazyVGrid(columns: Array(repeating: GridItem(.fixed(250), spacing: 50, alignment: .top), count: 6), alignment: .leading, spacing: 60) {
+                    WithPerceptionTracking {
                     ForEach(works, id: \.id) { work in
+                        WithPerceptionTracking {
                         RouteLink { DiscoverDetailView(item: work.item) } label: { tvWork(work) }
                             .cardButton()
                             .accessibilityIdentifier("discover.person.work.\(work.id)")
+
+                        }
+                    }
+
                     }
                 }
                 .padding(.horizontal, Self.tvMargin).padding(.top, 70).padding(.bottom, 120).focusSection()
@@ -241,10 +279,10 @@ extension DiscoverPersonView {
                 .animation(reduceMotion ? nil : .easeInOut(duration: 0.28), value: contribution)
             }
         }
-        .scrollClipDisabled()
+        .tvScrollClipDisabled()
         .background(color.ignoresSafeArea())
         .ignoresSafeArea(edges: .top)
-        .toolbar(.hidden, for: .navigationBar)
+        .tvToolbar(.hidden, for: .navigationBar)
     }
 
     private var tvHeader: some View {
@@ -266,7 +304,11 @@ extension DiscoverPersonView {
         }
         .padding(.horizontal, Self.tvMargin)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(alignment: .top) { DiscoverPosterWall(urls: wallPosters, color: color).frame(height: 640) }
+        .background(alignment: .top) {
+            WithPerceptionTracking {
+ DiscoverPosterWall(urls: wallPosters, color: color).frame(height: 640)
+            }
+        }
     }
 
     private func tvMenu(_ title: String, _ selection: Binding<String>, _ options: [(String, String)], identifier: String) -> some View {
@@ -312,11 +354,18 @@ private struct DiscoverPosterWall: View {
     @State private var visible = false
     private var animates: Bool { visible && scenePhase == .active && !reduceMotion && !urls.isEmpty }
     var body: some View {
+        WithPerceptionTracking {
         DiscoverNativePosterWall(urls: urls, active: animates).clipped()
-            .overlay { LinearGradient(stops: [.init(color: .clear, location: 0.45), .init(color: color.opacity(0.35), location: 0.65), .init(color: color, location: 1)], startPoint: .top, endPoint: .bottom) }
+            .overlay {
+                WithPerceptionTracking {
+ LinearGradient(stops: [.init(color: .clear, location: 0.45), .init(color: color.opacity(0.35), location: 0.65), .init(color: color, location: 1)], startPoint: .top, endPoint: .bottom)
+                }
+            }
             .accessibilityHidden(true).allowsHitTesting(false)
             .onAppear { visible = true }
             .onDisappear { visible = false }
+
+        }
     }
 }
 

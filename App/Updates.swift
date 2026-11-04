@@ -1,10 +1,11 @@
+import Perception
 import SwiftUI
 import CoreImage.CIFilterBuiltins
 import TVCore
 
 /// Tells people when a new version is out and, after they update, what it brings.
 /// Reads the release feed the website publishes; the bundled copy covers offline launches.
-@MainActor @Observable final class Updates {
+@MainActor @Perceptible final class Updates {
     enum Sheet: Identifiable {
         /// Newer releases to install, newest first.
         case available([ReleaseFeed.Release])
@@ -199,10 +200,14 @@ struct ReleaseNotesView: View {
     #endif
 
     private var releases: [ReleaseFeed.Release] {
-        switch sheet { case .available(let value), .whatsNew(let value): value }
+        switch sheet {
+        case .available(let value), .whatsNew(let value): value
+        }
     }
     private var update: ReleaseFeed.Release? {
-        if case .available(let value) = sheet { value.first } else { nil }
+        if case .available(let value) = sheet {
+            value.first
+        } else { nil }
     }
     private var features: [ReleaseFeed.Feature] {
         var seen = Set<ReleaseFeed.Feature>()
@@ -216,6 +221,7 @@ struct ReleaseNotesView: View {
     }
 
     var body: some View {
+        WithPerceptionTracking {
         ZStack(alignment: .top) {
             Color.black.ignoresSafeArea()
             ReleaseBackdrop(animated: !reduceMotion)
@@ -228,6 +234,8 @@ struct ReleaseNotesView: View {
         #if os(macOS)
         .frame(width: 780).fixedSize(horizontal: false, vertical: true)
         #endif
+
+        }
     }
 
     @ViewBuilder private var layout: some View {
@@ -240,10 +248,17 @@ struct ReleaseNotesView: View {
             }
             .padding(.top, sizeClass == .compact ? Size.top * 2 : Size.top).padding(.bottom, 24)
         }
-        .scrollIndicators(.hidden)
+        .tvScrollIndicators(.hidden)
         .safeAreaInset(edge: .bottom, spacing: 0) {
+            WithPerceptionTracking {
             actions.padding(.horizontal, Size.margin).padding(.top, 16).padding(.bottom, 12)
-                .background { LinearGradient(colors: [.black.opacity(0), .black], startPoint: .top, endPoint: .center).ignoresSafeArea() }
+                .background {
+                    WithPerceptionTracking {
+ LinearGradient(colors: [.black.opacity(0), .black], startPoint: .top, endPoint: .center).ignoresSafeArea()
+                    }
+                }
+
+            }
         }
         #else
         VStack(alignment: .leading, spacing: Size.sectionGap) {
@@ -306,8 +321,8 @@ struct ReleaseNotesView: View {
     @ViewBuilder private var shelf: some View {
         #if os(tvOS)
         ScrollView(.horizontal) { cards.padding(.horizontal, Size.margin) }
-            .scrollIndicators(.hidden)
-            .scrollClipDisabled()
+            .tvScrollIndicators(.hidden)
+            .tvScrollClipDisabled()
         #else
         // A mouse wheel can't scroll sideways, so the strip adds dragging and arrows floating at its ends.
         ScrollStrip(overlayArrows: true, arrowCenter: Size.card * 9 / 32) { cards.padding(.horizontal, Size.margin) }
@@ -317,6 +332,7 @@ struct ReleaseNotesView: View {
     private var cards: some View {
         HStack(alignment: .top, spacing: Size.cardGap) {
             ForEach(Array(features.enumerated()), id: \.element) { index, feature in
+                WithPerceptionTracking {
                 VStack(alignment: .leading, spacing: Size.captionGap) {
                     #if os(tvOS)
                     // Focusable so the remote can scroll the shelf; the card lifts like a poster.
@@ -327,11 +343,13 @@ struct ReleaseNotesView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(feature.title.text()).font(.system(size: Size.cardTitle, weight: .semibold)).lineLimit(1)
                         Text(feature.detail.text()).font(.system(size: Size.cardDetail)).foregroundStyle(.white.opacity(0.6))
-                            .lineLimit(3, reservesSpace: true)
+                            .tvLineLimit(3, reservesSpace: true)
                     }
                     .accessibilityElement(children: .combine)
                 }
                 .frame(width: Size.card)
+
+                }
             }
         }
     }
@@ -342,6 +360,7 @@ struct ReleaseNotesView: View {
     private var featureList: some View {
         VStack(alignment: .leading, spacing: 30) {
             ForEach(Array(features.enumerated()), id: \.element) { index, feature in
+                WithPerceptionTracking {
                 VStack(alignment: .leading, spacing: Size.captionGap) {
                     ReleaseArt(symbol: feature.symbol, index: index)
                     VStack(alignment: .leading, spacing: 5) {
@@ -351,6 +370,8 @@ struct ReleaseNotesView: View {
                     }
                 }
                 .accessibilityElement(children: .combine)
+
+                }
             }
         }
         .padding(.horizontal, Size.margin)
@@ -377,8 +398,7 @@ struct ReleaseNotesView: View {
     #if !os(tvOS)
     /// Get the Update opens the download page or file.
     private func linkActions(_ primary: URL?) -> some View {
-        let layout = Self.stackedButtons ? AnyLayout(VStackLayout(spacing: 10)) : AnyLayout(HStackLayout(spacing: 12))
-        return layout {
+        return TVActionLayout(stacked: Self.stackedButtons) {
             Button { if let primary { openURL(primary) }; dismiss() } label: {
                 Label(L10n.text(primary == nil ? "Continue" : testFlight ? "Open TestFlight" : "Get the Update"), systemImage: primary == nil ? "play.fill" : "arrow.down.circle.fill")
                     .frame(maxWidth: Self.stackedButtons ? .infinity : nil)
@@ -448,8 +468,10 @@ private struct ReleaseArt: View {
         [Color(red: 1.0, green: 0.45, blue: 0.62), Color(red: 0.45, green: 0.12, blue: 0.42)],
     ]
     var body: some View {
+        WithPerceptionTracking {
         let colors = Self.palettes[index % Self.palettes.count]
         GeometryReader { geometry in
+            WithPerceptionTracking {
             ZStack {
                 LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing)
                 RadialGradient(colors: [.white.opacity(0.32), .clear], center: .topLeading, startRadius: 0, endRadius: geometry.size.width * 0.9)
@@ -458,11 +480,19 @@ private struct ReleaseArt: View {
                     .symbolRenderingMode(.hierarchical).foregroundStyle(.white)
                     .shadow(color: .black.opacity(0.28), radius: geometry.size.height * 0.08, y: geometry.size.height * 0.03)
             }
+
+            }
         }
         .aspectRatio(16 / 9, contentMode: .fit)
         .clipShape(RoundedRectangle(cornerRadius: Self.radius, style: .continuous))
-        .overlay { RoundedRectangle(cornerRadius: Self.radius, style: .continuous).strokeBorder(.white.opacity(0.12)) }
+        .overlay {
+            WithPerceptionTracking {
+ RoundedRectangle(cornerRadius: Self.radius, style: .continuous).strokeBorder(.white.opacity(0.12))
+            }
+        }
         .accessibilityHidden(true)
+
+        }
     }
     static var radius: CGFloat {
         #if os(tvOS)
@@ -480,6 +510,7 @@ private struct ReleaseBackdrop: View {
     private static let top = [Color(red: 0.16, green: 0.62, blue: 0.98), Color(red: 0.10, green: 0.30, blue: 0.86), Color(red: 0.20, green: 0.12, blue: 0.56)]
     private static let middle = [Color(red: 0.04, green: 0.22, blue: 0.46), Color(red: 0.06, green: 0.12, blue: 0.38), Color(red: 0.06, green: 0.05, blue: 0.22)]
     var body: some View {
+        WithPerceptionTracking {
         TimelineView(.animation(minimumInterval: 1 / 30, paused: !animated)) { context in
             let drift = Float(sin(context.date.timeIntervalSinceReferenceDate * 0.3)) * 0.12
             if #available(iOS 18, tvOS 18, *) {
@@ -492,13 +523,23 @@ private struct ReleaseBackdrop: View {
                 // No mesh gradients before iOS 18 and tvOS 18: the top row's colours drift sideways over the middle row's.
                 LinearGradient(colors: Self.top, startPoint: UnitPoint(x: CGFloat(drift), y: 0), endPoint: UnitPoint(x: 1 + CGFloat(drift), y: 0))
                     .mask { LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.6)) }
-                    .background { LinearGradient(colors: Self.middle, startPoint: .leading, endPoint: .trailing) }
+                    .background {
+                        WithPerceptionTracking {
+ LinearGradient(colors: Self.middle, startPoint: .leading, endPoint: .trailing)
+                        }
+                    }
                     .mask { LinearGradient(colors: [.black, .black, .clear], startPoint: .top, endPoint: .bottom) }
                     .background(.black)
             }
         }
-        .overlay { LinearGradient(colors: [.black.opacity(0.1), .black.opacity(0.35), .black], startPoint: .top, endPoint: .bottom) }
+        .overlay {
+            WithPerceptionTracking {
+ LinearGradient(colors: [.black.opacity(0.1), .black.opacity(0.35), .black], startPoint: .top, endPoint: .bottom)
+            }
+        }
         .accessibilityHidden(true)
+
+        }
     }
 }
 
@@ -535,6 +576,7 @@ private struct MacInstallActions: View {
     @Environment(\.openURL) private var openURL
 
     var body: some View {
+        WithPerceptionTracking {
         switch installer.phase {
         case .idle, .ready:
             HStack(spacing: 12) {
@@ -577,6 +619,8 @@ private struct MacInstallActions: View {
             }
             .frame(minHeight: PillButtonStyle.height)
         }
+
+        }
     }
 
     private var notNow: some View {
@@ -605,10 +649,13 @@ private struct MacInstallActions: View {
 /// The small "New" capsule on the Settings entry while an update waits.
 struct NewBadge: View {
     var body: some View {
+        WithPerceptionTracking {
         Text(L10n.text("New"))
             .font(.caption2.weight(.bold)).foregroundStyle(Brand.onAccent)
             .padding(.horizontal, 7).padding(.vertical, 2)
             .background(Brand.accent, in: Capsule())
+
+        }
     }
 }
 
@@ -630,6 +677,7 @@ private struct UpdatePresentation: ViewModifier {
     #endif
 
     func body(content: Content) -> some View {
+        WithPerceptionTracking {
         let pending = updates.sheet != nil || updates.message != nil
         #if os(macOS)
         let shown = !playing && updates.presenter == id
@@ -639,10 +687,10 @@ private struct UpdatePresentation: ViewModifier {
         let item = Binding(get: { shown ? updates.sheet : nil }, set: { updates.sheet = $0 })
         #if os(macOS)
         let presented = content.sheet(item: item) { ReleaseNotesView(sheet: $0).environment(updates) }
-            .onChange(of: active && pending && updates.presenter == nil, initial: true) { _, claim in
+            .tvOnChange(of: active && pending && updates.presenter == nil, initial: true) { _, claim in
                 if claim { updates.presenter = id }
             }
-            .onChange(of: pending) { _, pending in if !pending { updates.presenter = nil } }
+            .tvOnChange(of: pending) { _, pending in if !pending { updates.presenter = nil } }
         #else
         let presented = content.fullScreenCover(item: item) { ReleaseNotesView(sheet: $0).environment(updates) }
         #endif
@@ -650,6 +698,8 @@ private struct UpdatePresentation: ViewModifier {
         .alert(L10n.text("Software Update"), isPresented: Binding(get: { shown && updates.message != nil }, set: { if !$0 { updates.message = nil } })) {
             Button(L10n.text("OK"), role: .cancel) { updates.message = nil }
         } message: { Text(updates.message ?? "") }
+
+        }
     }
 }
 

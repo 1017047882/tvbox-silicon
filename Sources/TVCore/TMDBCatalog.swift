@@ -56,7 +56,7 @@ public enum TMDBCatalog {
     }
 
     public static func collections(language: String = TMDBMatch.language, session: URLSession = .shared) async throws -> Collections {
-        var parts = URLComponents(url: TMDBMatch.base.appending(path: "catalog/collections"), resolvingAgainstBaseURL: false)!
+        var parts = URLComponents(url: TMDBMatch.base.appendingPathComponent("catalog/collections"), resolvingAgainstBaseURL: false)!
         parts.queryItems = [URLQueryItem(name: "language", value: language)]
         let (data, response) = try await session.data(from: parts.url!)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
@@ -64,7 +64,7 @@ public enum TMDBCatalog {
     }
 
     public static func page(_ feed: Feed, page: Int = 1, language: String = TMDBMatch.language, session: URLSession = .shared) async throws -> Page {
-        var parts = URLComponents(url: TMDBMatch.base.appending(path: "catalog"), resolvingAgainstBaseURL: false)!
+        var parts = URLComponents(url: TMDBMatch.base.appendingPathComponent("catalog"), resolvingAgainstBaseURL: false)!
         parts.queryItems = [URLQueryItem(name: "feed", value: feed.rawValue), URLQueryItem(name: "page", value: String(page)),
                             URLQueryItem(name: "language", value: language)]
         var request = URLRequest(url: parts.url!, timeoutInterval: 30)

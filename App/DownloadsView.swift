@@ -1,3 +1,4 @@
+import Perception
 import SwiftUI
 import TVCore
 #if !os(macOS)
@@ -17,6 +18,7 @@ struct DownloadsView: View {
     enum Kind: Hashable { case videos, music }
 
     var body: some View {
+        WithPerceptionTracking {
         let pending = library.items.filter(\.isPending)
         let shows = DownloadShow.group(library.items.filter { $0.status == .completed })
         Group {
@@ -34,7 +36,7 @@ struct DownloadsView: View {
         .screenBackdrop()
         .tabTitle(L10n.text("Downloads"))
         .task { await library.measure() }
-        .onChange(of: library.items.filter { $0.status == .completed }.count) { Task { await library.measure() } }
+        .tvOnChange(of: library.items.filter { $0.status == .completed }.count) { Task { await library.measure() } }
         #if os(macOS)
         // Space in one line under the window title, as Finder's status bar has it: beside a whole disk the
         // downloads were a sliver on a bar that was nearly all "Other".
@@ -58,6 +60,8 @@ struct DownloadsView: View {
                 if let deleting { library.remove(deleting.items.map(\.id)) }
                 deleting = nil
             }
+        }
+
         }
     }
 
@@ -86,7 +90,10 @@ struct DownloadsView: View {
                         // as tall as the screen a lazy stack had built none, so Down stopped at the queue.
                         VStack(spacing: Layout.cardSpacing) {
                             ForEach(shows) { show in
+                                WithPerceptionTracking {
                                 ShowPanel(show: show) { store.playing = library.channel(for: $0) } delete: { deleting = show }
+
+                                }
                             }
                         }
                     }.tvFocusSection()
@@ -124,12 +131,19 @@ struct DownloadsView: View {
             .padding(.horizontal, 4)
             VStack(spacing: 0) {
                 ForEach(Array(pending.enumerated()), id: \.element.id) { index, item in
+                    WithPerceptionTracking {
                     if index > 0 { Divider().padding(.leading, 70) }
                     QueueRow(item: item, rate: library.rates[item.id], position: queuePosition(item, in: pending))
+
+                    }
                 }
             }
             .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.primary.opacity(0.07)) }
+            .overlay {
+                WithPerceptionTracking {
+ RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.primary.opacity(0.07))
+                }
+            }
         }
     }
     #else
@@ -157,7 +171,10 @@ struct DownloadsView: View {
             }
             VStack(spacing: DownloadMetrics.rowSpacing) {
                 ForEach(pending) { item in
+                    WithPerceptionTracking {
                     QueueRow(item: item, rate: library.rates[item.id], position: queuePosition(item, in: pending))
+
+                    }
                 }
             }
         }.tvFocusSection()
@@ -180,6 +197,7 @@ private struct DownloadKindBar: ViewModifier {
     @Binding var kind: DownloadsView.Kind
 
     func body(content: Content) -> some View {
+        WithPerceptionTracking {
         if shown {
             #if os(macOS)
             content.toolbar {
@@ -187,6 +205,7 @@ private struct DownloadKindBar: ViewModifier {
             }
             #elseif os(tvOS)
             content.safeAreaInset(edge: .top, spacing: 0) {
+                WithPerceptionTracking {
                 GlassGroup(spacing: 8) {
                     HStack(spacing: 8) {
                         Chip(title: L10n.text("Videos"), selected: kind == .videos) { kind = .videos }
@@ -198,6 +217,8 @@ private struct DownloadKindBar: ViewModifier {
                 .padding(.horizontal, Layout.gutter)
                 .background(TVStyle.background)
                 .focusSection()
+
+                }
             }
             #else
             content.topBar {
@@ -209,6 +230,8 @@ private struct DownloadKindBar: ViewModifier {
             #endif
         } else {
             content
+        }
+
         }
     }
 
@@ -270,12 +293,15 @@ private struct EmptyDownloads: View {
     let available: Int64?
     let browse: () -> Void
     var body: some View {
+        WithPerceptionTracking {
         EmptyPage(symbol: "arrow.down", title: L10n.text("No Downloads"),
                   message: L10n.text("Choose Download on a video's page to save episodes for watching offline."),
                   action: L10n.text("Browse Sources"), actionSymbol: AppSection.sites.icon, perform: browse) {
             if let available {
                 Label(L10n.text("%@ available on this device", DownloadFormat.size(available)), systemImage: "internaldrive")
             }
+        }
+
         }
     }
 }
@@ -286,6 +312,7 @@ private struct StorageCard: View {
     /// Downloaded songs, kept apart from the episodes.
     var songs: Int64 = 0
     var body: some View {
+        WithPerceptionTracking {
         let downloads = usage.downloads + songs
         let capacity = usage.capacity ?? 0
         let free = usage.available ?? 0
@@ -305,6 +332,7 @@ private struct StorageCard: View {
             }
             if capacity > 0 {
                 GeometryReader { proxy in
+                    WithPerceptionTracking {
                     let width = proxy.size.width
                     let share = { (bytes: Int64) in width * CGFloat(Double(bytes) / Double(capacity)) }
                     HStack(spacing: 2) {
@@ -313,6 +341,8 @@ private struct StorageCard: View {
                         Rectangle().fill(Color.primary.opacity(0.08))
                     }
                     .clipShape(Capsule())
+
+                    }
                 }
                 .frame(height: DownloadMetrics.thumb > 60 ? 16 : 10)
                 .accessibilityHidden(true)
@@ -330,12 +360,18 @@ private struct StorageCard: View {
         .padding(DownloadMetrics.thumb > 60 ? 28 : 18)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay { RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Color.primary.opacity(0.06)) }
+        .overlay {
+            WithPerceptionTracking {
+ RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Color.primary.opacity(0.06))
+            }
+        }
         .accessibilityElement(children: .combine)
         #if os(tvOS)
         // Focusable so the remote can scroll back up to it.
         .focusable()
         #endif
+
+        }
     }
     private func legend(_ color: Color, _ title: String, _ bytes: Int64) -> some View {
         HStack(spacing: 6) {
@@ -353,11 +389,22 @@ private struct QueueRow: View {
     let position: Int?
     private var library: DownloadLibrary { .shared }
     var body: some View {
+        WithPerceptionTracking {
         #if os(macOS)
-        macRow.contextMenu { menu }
+        macRow.contextMenu {
+            WithPerceptionTracking {
+ menu
+            }
+        }
         #else
-        regularRow.contextMenu { menu }
+        regularRow.contextMenu {
+            WithPerceptionTracking {
+ menu
+            }
+        }
         #endif
+
+        }
     }
 
     @ViewBuilder private var menu: some View {
@@ -375,22 +422,36 @@ private struct QueueRow: View {
         let tint = item.status == .failed ? Brand.rose : item.status == .paused || item.status == .queued ? Color.secondary : Brand.accent
         return HStack(spacing: 14) {
             Color.clear.aspectRatio(2.0 / 3.0, contentMode: .fit).frame(width: 40)
-                .overlay { PosterImage(url: item.poster, headers: item.posterHeaders) }
+                .overlay {
+                    WithPerceptionTracking {
+ PosterImage(url: item.poster, headers: item.posterHeaders)
+                    }
+                }
                 .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-                .overlay { RoundedRectangle(cornerRadius: 5, style: .continuous).strokeBorder(Color.primary.opacity(0.1)) }
+                .overlay {
+                    WithPerceptionTracking {
+ RoundedRectangle(cornerRadius: 5, style: .continuous).strokeBorder(Color.primary.opacity(0.1))
+                    }
+                }
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.title).font(.body.weight(.semibold)).lineLimit(1).help(item.title)
                 if !detail.isEmpty {
                     Text(detail.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
                 GeometryReader { proxy in
+                    WithPerceptionTracking {
                     Capsule().fill(Color.primary.opacity(0.1))
                         .overlay(alignment: .leading) {
+                            WithPerceptionTracking {
                             Capsule().fill(tint).frame(width: max(item.fraction > 0 ? 4 : 0, proxy.size.width * item.fraction))
+
+                            }
                         }
+
+                    }
                 }
                 .frame(height: 4).padding(.vertical, 2)
-                .animation(.smooth, value: item.fraction)
+                .animation(.tvSmooth, value: item.fraction)
                 .accessibilityHidden(true)
                 Text(status(compact: false)).font(.caption).monospacedDigit().lineLimit(1)
                     .foregroundStyle(item.status == .failed ? AnyShapeStyle(Brand.rose) : AnyShapeStyle(.secondary))
@@ -426,7 +487,11 @@ private struct QueueRow: View {
     private var regularRow: some View {
         HStack(spacing: 14) {
             Color.clear.aspectRatio(2.0 / 3.0, contentMode: .fit).frame(width: DownloadMetrics.thumb)
-                .overlay { PosterImage(url: item.poster, headers: item.posterHeaders) }
+                .overlay {
+                    WithPerceptionTracking {
+ PosterImage(url: item.poster, headers: item.posterHeaders)
+                    }
+                }
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -437,10 +502,16 @@ private struct QueueRow: View {
                 ProgressView(value: item.fraction)
                     .tint(item.status == .failed ? Brand.rose : item.status == .paused ? Color.secondary : Brand.accent)
                 // One line: drop the byte counts when the full status doesn't fit (phones).
+                Group {
+            if #available(iOS 16, macOS 13, tvOS 16, *) {
                 ViewThatFits(in: .horizontal) {
                     Text(status(compact: false)).fixedSize()
                     Text(status(compact: true)).lineLimit(item.status == .failed ? 2 : 1)
                 }
+            } else {
+                Text(status(compact: true)).lineLimit(item.status == .failed ? 2 : 1)
+            }
+        }
                 .font(.caption).monospacedDigit()
                 .foregroundStyle(item.status == .failed ? AnyShapeStyle(Brand.rose) : AnyShapeStyle(.secondary))
             }
@@ -499,9 +570,14 @@ private struct ShowPanel: View {
     let delete: () -> Void
     private var library: DownloadLibrary { .shared }
     var body: some View {
+        WithPerceptionTracking {
         HStack(alignment: .top, spacing: 16) {
             Color.clear.aspectRatio(2.0 / 3.0, contentMode: .fit).frame(width: DownloadMetrics.showPoster)
-                .overlay { PosterImage(url: show.poster, headers: show.posterHeaders) }
+                .overlay {
+                    WithPerceptionTracking {
+ PosterImage(url: show.poster, headers: show.posterHeaders)
+                    }
+                }
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             VStack(alignment: .leading, spacing: 10) {
                 VStack(alignment: .leading, spacing: 3) {
@@ -509,8 +585,12 @@ private struct ShowPanel: View {
                     Text([SourceLabel(show.sourceName).text, show.items.count == 1 ? L10n.text("1 episode") : L10n.text("%lld episodes", show.items.count), DownloadFormat.size(show.size)].joined(separator: " · "))
                         .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
-                EpisodeGrid(minimum: DownloadMetrics.episodeMin, spacing: 8, rowSpacing: DownloadMetrics.thumb > 60 ? 12 : 4).callAsFunction {
-                    ForEach(show.items) { item in episode(item) }
+                TVEpisodeGrid(minimum: DownloadMetrics.episodeMin, spacing: 8, rowSpacing: DownloadMetrics.thumb > 60 ? 12 : 4) {
+                    ForEach(show.items) { item in
+                        WithPerceptionTracking {
+ episode(item)
+                        }
+                    }
                 }
                 .tvFocusSection()
                 Button(role: .destructive, action: delete) {
@@ -523,6 +603,8 @@ private struct ShowPanel: View {
         .padding(DownloadMetrics.thumb > 60 ? 22 : 14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+        }
     }
 
     private func episode(_ item: DownloadItem) -> some View {
@@ -546,18 +628,22 @@ private struct ShowPanel: View {
         .glassRow()
         .accessibilityLabel(L10n.text("Play %@", item.episode))
         .contextMenu {
+            WithPerceptionTracking {
             #if os(macOS)
             if let file = library.file(for: item) {
                 Button(L10n.text("Show in Finder"), systemImage: "folder") { NSWorkspace.shared.activateFileViewerSelecting([file]) }
             }
             #endif
             Button(L10n.text("Delete Download"), systemImage: "trash", role: .destructive) { library.remove([item.id]) }
+
+            }
         }
     }
 }
 
 /// LazyVGrid's adaptive columns, built all at once, for the same reason as the list of shows: a lazy grid below
 /// the screen has no episodes yet for the remote to move to.
+@available(iOS 16, macOS 13, tvOS 16, *)
 private struct EpisodeGrid: SwiftUI.Layout {
     let minimum: CGFloat
     let spacing: CGFloat
@@ -600,11 +686,14 @@ private struct EpisodeGrid: SwiftUI.Layout {
 /// A downloaded episode's mark on a short episode chip.
 struct DownloadedBadge: View {
     var body: some View {
+        WithPerceptionTracking {
         Image(systemName: "arrow.down.circle.fill")
             .font(.system(size: DownloadMetrics.thumb > 60 ? 22 : 12, weight: .semibold))
             .foregroundStyle(Brand.onAccent, Brand.accent)
             .offset(x: 4, y: -4)
             .accessibilityLabel(L10n.text("Downloaded"))
+
+        }
     }
 }
 
@@ -616,6 +705,7 @@ struct DownloadState: View {
     init(status: DownloadItem.Status, fraction: Double) { self.status = status; self.fraction = fraction }
     static var size: CGFloat { DownloadMetrics.thumb > 60 ? 24 : 13 }
     var body: some View {
+        WithPerceptionTracking {
         let size = Self.size
         Group {
             switch status {
@@ -636,7 +726,9 @@ struct DownloadState: View {
             }
         }
         .font(.system(size: size))
-        .animation(.smooth, value: fraction)
+        .animation(.tvSmooth, value: fraction)
+
+        }
     }
 }
 
@@ -655,15 +747,27 @@ struct DownloadPicker: View {
     #if os(macOS)
     /// The checklist's natural height, so the sheet fits a few episodes instead of a fixed, mostly empty box.
     @State private var listHeight: CGFloat = 0
-    var body: some View { macBody.task { await library.measure() } }
+    var body: some View {
+        WithPerceptionTracking {
+ macBody.task { await library.measure() }
+        }
+    }
     #else
-    var body: some View { regularBody }
+    var body: some View {
+        WithPerceptionTracking {
+ regularBody
+        }
+    }
 
     private var regularBody: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(alignment: .top, spacing: 14) {
                 Color.clear.aspectRatio(2.0 / 3.0, contentMode: .fit).frame(width: DownloadMetrics.thumb * 1.2)
-                    .overlay { PosterImage(url: video.poster, headers: video.posterHeaders) }
+                    .overlay {
+                        WithPerceptionTracking {
+ PosterImage(url: video.poster, headers: video.posterHeaders)
+                        }
+                    }
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 VStack(alignment: .leading, spacing: 4) {
                     Text(L10n.text("Download Episodes")).font(.title2.weight(.bold))
@@ -687,7 +791,14 @@ struct DownloadPicker: View {
             ScrollView {
                 // One column of glass rows on the TV, as in the danmaku list; a compact grid elsewhere.
                 LazyVGrid(columns: Self.columns, spacing: DownloadMetrics.thumb > 60 ? 4 : 8) {
-                    ForEach(episodes) { episode in row(episode) }
+                    WithPerceptionTracking {
+                    ForEach(episodes) { episode in
+                        WithPerceptionTracking {
+ row(episode)
+                        }
+                    }
+
+                    }
                 }
                 .padding(.vertical, 4)
                 .glassRowInsets()
@@ -708,10 +819,14 @@ struct DownloadPicker: View {
         }
         .padding(DownloadMetrics.thumb > 60 ? 60 : 22)
         #if os(iOS)
-        .presentationDetents([.medium, .large])
+        .tvPresentationDetents([.medium, .large])
         #else
         .frame(maxWidth: 1300).frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background { Backdrop() }
+        .background {
+            WithPerceptionTracking {
+ Backdrop()
+            }
+        }
         #endif
         .task { await library.measure() }
     }
@@ -736,9 +851,17 @@ struct DownloadPicker: View {
         VStack(spacing: 0) {
             HStack(alignment: .center, spacing: 14) {
                 Color.clear.aspectRatio(2.0 / 3.0, contentMode: .fit).frame(width: 44)
-                    .overlay { PosterImage(url: video.poster, headers: video.posterHeaders) }
+                    .overlay {
+                        WithPerceptionTracking {
+ PosterImage(url: video.poster, headers: video.posterHeaders)
+                        }
+                    }
                     .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                    .overlay { RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(Color.primary.opacity(0.1)) }
+                    .overlay {
+                        WithPerceptionTracking {
+ RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(Color.primary.opacity(0.1))
+                        }
+                    }
                 VStack(alignment: .leading, spacing: 3) {
                     Text(L10n.text("Download Episodes")).font(.title3.weight(.semibold))
                     Text(video.name).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
@@ -752,7 +875,7 @@ struct DownloadPicker: View {
             ScrollView {
                 macChecklist
                     .padding(16)
-                    .onGeometryChange(for: CGFloat.self, of: \.size.height) { listHeight = $0 }
+                    .tvOnGeometryChange(for: CGFloat.self, of: \.size.height) { listHeight = $0 }
             }
             .scrollBounceBehavior(.basedOnSize)
             .frame(height: min(max(listHeight, 56), 380))
@@ -788,17 +911,31 @@ struct DownloadPicker: View {
     @ViewBuilder private var macChecklist: some View {
         if episodes.allSatisfy({ $0.name.count <= 10 }) {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 8)], spacing: 8) {
-                ForEach(episodes) { episode in macChip(episode) }
+                WithPerceptionTracking {
+                ForEach(episodes) { episode in
+                    WithPerceptionTracking {
+ macChip(episode)
+                    }
+                }
+
+                }
             }
         } else {
             VStack(spacing: 0) {
                 ForEach(Array(episodes.enumerated()), id: \.element.id) { index, episode in
+                    WithPerceptionTracking {
                     if index > 0 { Divider().padding(.leading, 40) }
                     macRow(episode)
+
+                    }
                 }
             }
             .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay { RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color.primary.opacity(0.06)) }
+            .overlay {
+                WithPerceptionTracking {
+ RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color.primary.opacity(0.06))
+                }
+            }
         }
     }
 
@@ -837,8 +974,11 @@ struct DownloadPicker: View {
             .background(selected ? Brand.accent.opacity(0.16) : Color.primary.opacity(0.05),
                         in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay {
+                WithPerceptionTracking {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .strokeBorder(selected ? Brand.accent.opacity(0.5) : Color.primary.opacity(0.06))
+
+                }
             }
             .contentShape(Rectangle())
         }
@@ -956,12 +1096,24 @@ extension View {
     /// A download started or the app came back: ask for a continued-processing task while the app is open.
     private static func started() {
         #if os(iOS)
-        if #available(iOS 26.0, *) { ContinuedDownloads.begin() }
+
+#if compiler(>=6.2)
+if #available(iOS 26.0, *) { ContinuedDownloads.begin() }
+#else
+
+#endif
+
         #endif
     }
     private static var continuing: Bool {
         #if os(iOS)
-        if #available(iOS 26.0, *) { return ContinuedDownloads.isRunning }
+
+#if compiler(>=6.2)
+if #available(iOS 26.0, *) { return ContinuedDownloads.isRunning }
+#else
+
+#endif
+
         #endif
         return false
     }
@@ -980,6 +1132,8 @@ extension View {
 /// progress the system shows on the Lock Screen and in the Dynamic Island. The task can only be asked for while the
 /// app is open, so it starts with the first download and follows every download (videos and songs) until the queue
 /// is empty. When the system ends it early, the downloads stop as before and carry on when the app comes back.
+
+#if compiler(>=6.2)
 @available(iOS 26.0, *)
 @MainActor enum ContinuedDownloads {
     private static var task: BGContinuedProcessingTask?
@@ -1025,7 +1179,7 @@ extension View {
         Diagnostics.shared.record(.info, "download", "continued task started")
         follower = Task {
             while !Task.isCancelled, follow() {
-                try? await Task.sleep(for: .seconds(1))
+                try? await tvSleep(for: .seconds(1))
             }
         }
     }
@@ -1076,3 +1230,20 @@ extension View {
     }
 }
 #endif
+
+#endif
+
+/// iOS 15 retains the adaptive episode grid; newer platforms keep the eager layout.
+private struct TVEpisodeGrid<Content: View>: View {
+    let minimum: CGFloat
+    let spacing: CGFloat
+    let rowSpacing: CGFloat
+    @ViewBuilder var content: Content
+    var body: some View {
+        if #available(iOS 16, macOS 13, tvOS 16, *) {
+            EpisodeGrid(minimum: minimum, spacing: spacing, rowSpacing: rowSpacing) { content }
+        } else {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: minimum), spacing: spacing)], spacing: rowSpacing) { content }
+        }
+    }
+}

@@ -1,3 +1,4 @@
+import Perception
 #if !os(tvOS)
 import SwiftUI
 import TVCore
@@ -17,11 +18,14 @@ struct MusicNowPlayingLyrics: View {
     #endif
 
     var body: some View {
+        WithPerceptionTracking {
         let music = store.music
         if let lyrics = music.lyrics {
             ScrollView(showsIndicators: false) {
                 LazyVStack(alignment: .leading, spacing: spacing) {
+                    WithPerceptionTracking {
                     ForEach(Array(lyrics.lines.enumerated()), id: \.offset) { index, line in
+                        WithPerceptionTracking {
                         let faded = lyrics.synced && index != music.currentLyric
                         VStack(alignment: .leading, spacing: 4) {
                             Text(line.text.isEmpty ? "♪" : line.text).font(.system(size: size, weight: .bold))
@@ -32,32 +36,38 @@ struct MusicNowPlayingLyrics: View {
                         .foregroundStyle(.white.opacity(faded ? 0.32 : 1))
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .animation(.easeOut(duration: 0.3), value: faded)
-                        .contentShape(.rect)
+                        .contentShape(Rectangle())
                         .onTapGesture { if lyrics.synced { music.seek(toLyric: line) } }
                         .id(index)
+
+                        }
                     }
                     Text(L10n.text("Lyrics from %@", lyrics.platform.name)).font(.caption).foregroundStyle(.secondary).padding(.top, 8)
+
+                    }
                 }
-                .scrollTargetLayout()
+                .tvScrollTargetLayout()
                 .padding(.vertical, 28)
             }
-            .scrollPosition(id: $scrolled, anchor: UnitPoint(x: 0.5, y: 0.3))
+            .tvScrollPosition(id: $scrolled, anchor: UnitPoint(x: 0.5, y: 0.3))
             // The lines fade in and out at the panel's edges instead of being cut.
             .mask(LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.07),
                                          .init(color: .black, location: 0.9), .init(color: .clear, location: 1)],
                                  startPoint: .top, endPoint: .bottom))
             // Once the lines are laid out: set as the panel appeared, the position was dropped, and
             // reopening the player left the lyrics at the top until the next line.
-            .task { try? await Task.sleep(for: .milliseconds(60)); scrolled = music.currentLyric }
-            .onChange(of: music.currentLyric) { _, index in
+            .task { try? await tvSleep(for: .milliseconds(60)); scrolled = music.currentLyric }
+            .tvOnChange(of: music.currentLyric) { _, index in
                 guard let index else { return }
-                withAnimation(.smooth(duration: 0.5)) { scrolled = index }
+                withAnimation(.tvSmooth(duration: 0.5)) { scrolled = index }
             }
         } else if music.lyricsLoading || music.busy {
             ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            ContentUnavailableView(L10n.text("No Lyrics"), systemImage: "quote.bubble",
+            TVEmptyState(L10n.text("No Lyrics"), systemImage: "quote.bubble",
                                    description: Text(L10n.text("None of the catalogs has lyrics for this song.")))
+        }
+
         }
     }
 }
@@ -67,17 +77,20 @@ struct MusicUpNext: View {
     @Environment(Store.self) private var store
 
     var body: some View {
+        WithPerceptionTracking {
         let music = store.music
         let queue = music.queue
         let upcoming = queue.map { queue in Array(queue.tracks.enumerated()).filter { $0.offset > queue.index } } ?? []
         if upcoming.isEmpty {
-            ContentUnavailableView(L10n.text("Nothing Up Next"), systemImage: "list.bullet",
+            TVEmptyState(L10n.text("Nothing Up Next"), systemImage: "list.bullet",
                                    description: Text(L10n.text("Play a song from search results, an album or a playlist, and the songs after it play next.")))
         } else {
             ScrollView(showsIndicators: false) {
                 LazyVStack(alignment: .leading, spacing: 2) {
+                    WithPerceptionTracking {
                     Text(L10n.text("Up Next")).font(.headline).padding(.bottom, 6)
                     ForEach(upcoming, id: \.offset) { index, track in
+                        WithPerceptionTracking {
                         Button { music.jump(to: index) } label: {
                             HStack(spacing: 12) {
                                 MusicArtwork(url: track.artwork, size: 44)
@@ -91,13 +104,19 @@ struct MusicUpNext: View {
                                 }
                             }
                             .padding(.vertical, 6)
-                            .contentShape(.rect)
+                            .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+
+                        }
+                    }
+
                     }
                 }
                 .padding(.vertical, 12)
             }
+        }
+
         }
     }
 }

@@ -56,7 +56,7 @@ extension TMDBCatalog {
     public static func search(query: String = "", kind: SearchKind = .movie, page: Int = 1, feed: SearchFeed = .week,
                               filter: Filter? = nil, personID: Int? = nil, keywords: Bool = false,
                               language: String = TMDBMatch.language, session: URLSession = .shared) async throws -> SearchPage {
-        var parts = URLComponents(url: TMDBMatch.base.appending(path: "catalog/search"), resolvingAgainstBaseURL: false)!
+        var parts = URLComponents(url: TMDBMatch.base.appendingPathComponent("catalog/search"), resolvingAgainstBaseURL: false)!
         let mode = personID != nil ? "person" : keywords ? "keywords" : filter != nil ? "discover" : query.isEmpty ? "recommend" : "search"
         var params = filter?.parameters ?? [:]
         params.merge(["mode": mode, "kind": (filter?.kind ?? kind).rawValue, "q": query, "page": String(page),
@@ -91,7 +91,7 @@ extension TMDBCatalog {
         public let works: [PersonWork]
     }
     public static func person(_ id: Int, language: String = TMDBMatch.language, session: URLSession = .shared) async throws -> PersonProfile {
-        var parts = URLComponents(url: TMDBMatch.base.appending(path: "catalog/search"), resolvingAgainstBaseURL: false)!
+        var parts = URLComponents(url: TMDBMatch.base.appendingPathComponent("catalog/search"), resolvingAgainstBaseURL: false)!
         parts.queryItems = [URLQueryItem(name: "mode", value: "profile"), URLQueryItem(name: "id", value: String(id)), URLQueryItem(name: "language", value: language)]
         let (data, response) = try await session.data(for: URLRequest(url: parts.url!, timeoutInterval: 30))
         guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }

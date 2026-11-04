@@ -1,3 +1,4 @@
+import Perception
 import SwiftUI
 import TVCore
 
@@ -12,6 +13,7 @@ struct MusicTopResults: View {
     let play: (MusicTrack) -> Void
 
     var body: some View {
+        WithPerceptionTracking {
         let albums = search.collections.filter { $0.kind == .album }
         let playlists = search.collections.filter { $0.kind == .playlist }
         VStack(alignment: .leading, spacing: MusicBrowseMetrics.sectionSpacing) {
@@ -30,6 +32,8 @@ struct MusicTopResults: View {
             if search.busy { ProgressView().frame(maxWidth: .infinity) }
         }
         .padding(.top, 4)
+
+        }
     }
 
     private func collections(_ title: String, _ items: [MusicCollection]) -> some View {
@@ -74,15 +78,18 @@ private struct MusicSectionLink<Destination: View>: View {
     let title: String
     @ViewBuilder let destination: () -> Destination
     var body: some View {
+        WithPerceptionTracking {
         RouteLink(destination: destination) {
             HStack(spacing: 5) {
                 Text(title).font(.title3.weight(.bold)).foregroundStyle(.primary)
                 Image(systemName: "chevron.right").font(.subheadline.weight(.bold)).foregroundStyle(.secondary)
             }
-            .contentShape(.rect)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(.isHeader)
+
+        }
     }
 }
 #endif
@@ -94,10 +101,15 @@ struct MusicCollectionTile: View {
     @State private var hovering = false
 
     var body: some View {
+        WithPerceptionTracking {
         let link = RouteLink { MusicCollectionView(collection: collection) } label: {
             VStack(alignment: .leading, spacing: 7) {
                 MusicArtwork(url: collection.artwork, size: size, symbol: collection.kind == .album ? "square.stack" : "music.note.list")
-                    .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.black.opacity(hovering ? 0.12 : 0)) }
+                    .overlay {
+                        WithPerceptionTracking {
+ RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.black.opacity(hovering ? 0.12 : 0))
+                        }
+                    }
                     .shadow(color: .black.opacity(0.12), radius: 6, y: 3)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(collection.title).font(Self.titleFont).foregroundStyle(.primary).lineLimit(1)
@@ -105,7 +117,7 @@ struct MusicCollectionTile: View {
                 }
             }
             .frame(width: size, alignment: .leading)
-            .contentShape(.rect)
+            .contentShape(Rectangle())
         }
         #if os(tvOS)
         link.cardButton()
@@ -114,6 +126,8 @@ struct MusicCollectionTile: View {
             .onHover { hovering = $0 }
             .animation(.easeOut(duration: 0.15), value: hovering)
         #endif
+
+        }
     }
 
     #if os(tvOS)
@@ -132,8 +146,10 @@ struct MusicBrowseShelves: View {
     let sections: [MusicBrowseSection]
 
     var body: some View {
+        WithPerceptionTracking {
         VStack(alignment: .leading, spacing: MusicBrowseMetrics.sectionSpacing) {
             ForEach(sections) { section in
+                WithPerceptionTracking {
                 VStack(alignment: .leading, spacing: MusicBrowseMetrics.headerSpacing) {
                     #if os(tvOS)
                     SectionHeader(title: section.title)
@@ -143,7 +159,11 @@ struct MusicBrowseShelves: View {
                     ScrollStrip(overlayArrows: true, arrowCenter: MusicBrowseMetrics.cover / 2) { tiles(section.collections) }
                     #endif
                 }
+
+                }
             }
+        }
+
         }
     }
 
@@ -160,6 +180,7 @@ struct MusicCollectionsPage: View {
     let title: String
     let collections: [MusicCollection]
     var body: some View {
+        WithPerceptionTracking {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 #if os(macOS)
@@ -180,6 +201,8 @@ struct MusicCollectionsPage: View {
         .screenTitle(title)
         .musicPlayerInset()
         #endif
+
+        }
     }
 }
 #endif
@@ -191,13 +214,17 @@ private struct MusicSongGrid: View {
     let play: (MusicTrack) -> Void
 
     var body: some View {
+        WithPerceptionTracking {
         let rows = MusicBrowseMetrics.songRows
         let columns = stride(from: 0, to: tracks.count, by: rows).map { Array(tracks[$0..<min($0 + rows, tracks.count)]) }
         #if os(macOS)
         ScrollStrip(overlayArrows: true) {
             HStack(alignment: .top, spacing: 26) {
                 ForEach(columns.indices, id: \.self) { column in
+                    WithPerceptionTracking {
                     self.column(columns[column]).containerRelativeFrame(.horizontal, count: 3, spacing: 26)
+
+                    }
                 }
             }
         }
@@ -205,18 +232,26 @@ private struct MusicSongGrid: View {
         ChipRow {
             HStack(alignment: .top, spacing: 40) {
                 ForEach(columns.indices, id: \.self) { column in
+                    WithPerceptionTracking {
                     self.column(columns[column]).frame(width: MusicBrowseMetrics.songColumn)
+
+                    }
                 }
             }
         }
         .tvFocusSection()
         #endif
+
+        }
     }
 
     private func column(_ tracks: [MusicTrack]) -> some View {
         VStack(spacing: 0) {
             ForEach(Array(tracks.enumerated()), id: \.offset) { row, track in
+                WithPerceptionTracking {
                 MusicSongCell(track: track, divider: row < tracks.count - 1) { play(track) }
+
+                }
             }
         }
     }
@@ -231,39 +266,57 @@ private struct MusicSongCell: View {
     @State private var hovering = false
 
     var body: some View {
+        WithPerceptionTracking {
         let current = store.music.track?.id == track.id
         #if os(tvOS)
         Button(action: action) {
             HStack(spacing: 18) {
                 MusicArtwork(url: track.artwork, size: MusicBrowseMetrics.songArt)
-                    .overlay { if current { MusicPlayingBadge(current: true) } }
+                    .overlay {
+                        WithPerceptionTracking {
+ if current { MusicPlayingBadge(current: true) }
+                        }
+                    }
                 labels(current: current, title: 26, artist: 21)
             }
             .padding(.vertical, 6)
         }
         .glassRow()
         .contextMenu {
+            WithPerceptionTracking {
             Button { store.music.playNext([track]) } label: { Label(L10n.text("Play Next"), systemImage: "text.line.first.and.arrowtriangle.forward") }
             Button { store.music.addToUpNext([track]) } label: { Label(L10n.text("Add to Up Next"), systemImage: "text.line.last.and.arrowtriangle.forward") }
             Divider()
             MusicDownloadMenuItems(tracks: [track])
+
+            }
         }
         #else
         HStack(spacing: 10) {
             MusicArtwork(url: track.artwork, size: MusicBrowseMetrics.songArt)
-                .overlay { if current || hovering { MusicPlayingBadge(current: current) } }
+                .overlay {
+                    WithPerceptionTracking {
+ if current || hovering { MusicPlayingBadge(current: current) }
+                    }
+                }
             labels(current: current, title: 12.5, artist: 11.5)
             MusicTrackMenu(tracks: [track])
         }
         .padding(.vertical, 7)
-        .overlay(alignment: .bottom) { if divider { Divider().padding(.leading, 50) } }
-        .contentShape(.rect)
+        .overlay(alignment: .bottom) {
+            WithPerceptionTracking {
+ if divider { Divider().padding(.leading, 50) }
+            }
+        }
+        .contentShape(Rectangle())
         .onTapGesture(perform: action)
         .onHover { hovering = $0 }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
         .accessibilityAction(.default, action)
         #endif
+
+        }
     }
 
     private func labels(current: Bool, title: CGFloat, artist: CGFloat) -> some View {
@@ -280,13 +333,16 @@ private struct MusicSongCell: View {
 private struct MusicPlayingBadge: View {
     let current: Bool
     var body: some View {
+        WithPerceptionTracking {
         ZStack {
             RoundedRectangle(cornerRadius: 5, style: .continuous).fill(.black.opacity(0.42))
             Image(systemName: current ? "waveform" : "play.fill")
                 .font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
-                .symbolEffect(.variableColor.iterative, isActive: current)
+                .tvSymbolEffect(.variableColor.iterative, isActive: current)
         }
         .accessibilityHidden(true)
+
+        }
     }
 }
 
@@ -296,6 +352,7 @@ struct MusicTrackMenu: View {
     @Environment(Store.self) private var store
     let tracks: [MusicTrack]
     var body: some View {
+        WithPerceptionTracking {
         Menu {
             Button { store.music.playNext(tracks) } label: { Label(L10n.text("Play Next"), systemImage: "text.line.first.and.arrowtriangle.forward") }
             Button { store.music.addToUpNext(tracks) } label: { Label(L10n.text("Add to Up Next"), systemImage: "text.line.last.and.arrowtriangle.forward") }
@@ -303,11 +360,13 @@ struct MusicTrackMenu: View {
             MusicDownloadMenuItems(tracks: tracks)
         } label: {
             Image(systemName: "ellipsis").font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
-                .frame(width: 26, height: 26).contentShape(.rect)
+                .frame(width: 26, height: 26).contentShape(Rectangle())
         }
         .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
         .fixedSize()
         .accessibilityLabel(L10n.text("More"))
+
+        }
     }
 }
 
@@ -320,8 +379,10 @@ struct MusicSongTable: View {
     @State private var width: CGFloat = 800
 
     var body: some View {
+        WithPerceptionTracking {
         let artist = max(110, width * 0.2), album = max(120, width * 0.24)
         LazyVStack(spacing: 0) {
+            WithPerceptionTracking {
             if !numbered {
                 HStack(spacing: 12) {
                     Text(L10n.text("Song")).frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 48)
@@ -332,13 +393,24 @@ struct MusicSongTable: View {
                 }
                 .font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
                 .padding(.horizontal, 10).padding(.bottom, 6)
-                .overlay(alignment: .bottom) { Divider() }
+                .overlay(alignment: .bottom) {
+                    WithPerceptionTracking {
+ Divider()
+                    }
+                }
             }
             ForEach(Array(tracks.enumerated()), id: \.offset) { index, track in
+                WithPerceptionTracking {
                 MusicSongTableRow(index: index, track: track, numbered: numbered, artist: artist, album: album) { play(index) }
+
+                }
+            }
+
             }
         }
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        .tvOnGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+
+        }
     }
 }
 
@@ -353,6 +425,7 @@ private struct MusicSongTableRow: View {
     @State private var hovering = false
 
     var body: some View {
+        WithPerceptionTracking {
         let current = store.music.track?.id == track.id
         HStack(spacing: 12) {
             if numbered {
@@ -365,7 +438,11 @@ private struct MusicSongTableRow: View {
                 .frame(width: 24, alignment: .trailing)
             } else {
                 MusicArtwork(url: track.artwork, size: 36)
-                    .overlay { if current || hovering { MusicPlayingBadge(current: current) } }
+                    .overlay {
+                        WithPerceptionTracking {
+ if current || hovering { MusicPlayingBadge(current: current) }
+                        }
+                    }
             }
             HStack(spacing: 6) {
                 Text(track.title).lineLimit(1)
@@ -384,13 +461,19 @@ private struct MusicSongTableRow: View {
         .font(.system(size: 13))
         .padding(.horizontal, 10).padding(.vertical, numbered ? 9 : 6)
         .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(hovering ? 0.05 : 0)))
-        .overlay(alignment: .bottom) { Divider().padding(.leading, numbered ? 46 : 58) }
-        .contentShape(.rect)
+        .overlay(alignment: .bottom) {
+            WithPerceptionTracking {
+ Divider().padding(.leading, numbered ? 46 : 58)
+            }
+        }
+        .contentShape(Rectangle())
         .onTapGesture(perform: action)
         .onHover { hovering = $0 }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(current ? [.isButton, .isSelected] : .isButton)
         .accessibilityAction(.default, action)
+
+        }
     }
 }
 
@@ -400,6 +483,7 @@ struct MusicSongsPage: View {
     let title: String
     let tracks: [MusicTrack]
     var body: some View {
+        WithPerceptionTracking {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 Text(title).font(.largeTitle.weight(.bold))
@@ -410,6 +494,8 @@ struct MusicSongsPage: View {
         .screenBackdrop()
         .navigationTitle(title)
         .toolbar(removing: .title)
+
+        }
     }
 }
 
@@ -421,6 +507,7 @@ struct MusicCollectionHeader: View {
     let tracks: [MusicTrack]
 
     var body: some View {
+        WithPerceptionTracking {
         HStack(alignment: .bottom, spacing: 28) {
             MusicArtwork(url: collection.artwork, size: 236, symbol: collection.kind == .album ? "square.stack" : "music.note.list")
                 .shadow(color: .black.opacity(0.18), radius: 16, y: 8)
@@ -451,6 +538,8 @@ struct MusicCollectionHeader: View {
             }
             .frame(height: 236, alignment: .topLeading)
             .padding(.vertical, 6)
+        }
+
         }
     }
 

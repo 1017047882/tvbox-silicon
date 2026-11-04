@@ -1,3 +1,5 @@
+import Perception
+import NavigationBackport
 import SwiftUI
 import TVCore
 import AVKit
@@ -28,17 +30,20 @@ struct DiscoverDetailView: View {
     private var seasons: [TMDBMatch.SeasonSummary] { details?.seasons.filter { $0.number > 0 } ?? [] }
 
     var body: some View {
+        WithPerceptionTracking {
         page
         .modifier(DiscoverSearchPresentation(isPresented: $searchShown))
         .onAppear { onScreen = true }
         .onDisappear { onScreen = false }
         .task(id: item.key) { await model.load(item) }
-        .onChange(of: details?.id) { _, _ in
+        .tvOnChange(of: details?.id) { _, _ in
             if seasonNumber == nil { seasonNumber = seasons.first?.number }
         }
         .task(id: seasonNumber) { await loadSeason() }
         .sheet(isPresented: $overviewShown) {
-            NavigationStack {
+            WithPerceptionTracking {
+            NBNavigationStack {
+                WithPerceptionTracking {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
                         Text(details?.name ?? item.name).font(.title2.bold())
@@ -47,17 +52,30 @@ struct DiscoverDetailView: View {
                     }.padding(24)
                 }.navigationTitle(L10n.text("Overview"))
                     .toolbar { ToolbarItem(placement: .confirmationAction) { Button(L10n.text("Done")) { overviewShown = false } } }
-            }.presentationDetents([.medium, .large]).discoverSheetSize(width: 560, height: 480)
+
+                }
+            }.tvPresentationDetents([.medium, .large]).discoverSheetSize(width: 560, height: 480)
+
+            }
         }
         #if os(tvOS)
         // Full-screen pages, as the TV presents things: the iPhone's sheets froze the TV app when they opened.
-        .fullScreenCover(item: $episode) { selection in tvEpisodeScreen(selection.value) }
+        .fullScreenCover(item: $episode) { selection in
+            WithPerceptionTracking {
+ tvEpisodeScreen(selection.value)
+            }
+        }
         .fullScreenCover(item: $still) { selection in
+            WithPerceptionTracking {
             ZStack { Color.black; TMDBArtwork(url: selection.url, maxPixels: 2400, fill: false) }.ignoresSafeArea()
+
+            }
         }
         #else
         .sheet(item: $episode) { selection in
-            NavigationStack {
+            WithPerceptionTracking {
+            NBNavigationStack {
+                WithPerceptionTracking {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
                         PosterImage(url: selection.value.still ?? details?.backdrop).aspectRatio(16.0 / 9, contentMode: .fit).clipShape(RoundedRectangle(cornerRadius: 16))
@@ -67,32 +85,57 @@ struct DiscoverDetailView: View {
                     }.padding(20)
                 }.navigationTitle(selection.value.name)
                     .toolbar { ToolbarItem(placement: .confirmationAction) { Button(L10n.text("Done")) { episode = nil } } }
-            }.presentationDetents([.medium, .large]).discoverSheetSize(width: 600, height: 640)
+
+                }
+            }.tvPresentationDetents([.medium, .large]).discoverSheetSize(width: 600, height: 640)
+
+            }
         }
         .sheet(item: $still) { selection in
-            NavigationStack {
+            WithPerceptionTracking {
+            NBNavigationStack {
+                WithPerceptionTracking {
                 TMDBArtwork(url: selection.url, maxPixels: 2400, fill: false)
                     .background(.black).ignoresSafeArea(edges: .bottom)
                     .toolbar { ToolbarItem(placement: .confirmationAction) { Button(L10n.text("Done")) { still = nil } } }
+
+                }
             }.preferredColorScheme(.dark).discoverSheetSize(width: 1000, height: 640)
+
+            }
         }
         #endif
         #if os(tvOS)
         // The system player, full screen: the iPhone's sheet with SwiftUI's VideoPlayer froze the TV app.
         .fullScreenCover(isPresented: $trailerShown) {
+            WithPerceptionTracking {
             if let trailer = details?.trailer { DiscoverTVTrailerScreen(trailer: trailer) }
+
+            }
         }
-        .fullScreenCover(isPresented: $tvOverviewShown) { tvOverviewScreen }
+        .fullScreenCover(isPresented: $tvOverviewShown) {
+            WithPerceptionTracking {
+ tvOverviewScreen
+            }
+        }
         #elseif os(iOS)
         // The movie player, full screen: SwiftUI's VideoPlayer in a sheet had no full screen, Fill or speed (#300).
         .fullScreenCover(isPresented: $trailerShown) {
+            WithPerceptionTracking {
             if let trailer = details?.trailer { DiscoverMobileTrailerScreen(trailer: trailer, title: details?.name ?? item.name) }
+
+            }
         }
         #else
         .sheet(isPresented: $trailerShown) {
+            WithPerceptionTracking {
             if let trailer = details?.trailer { DiscoverTrailerScreen(trailer: trailer, title: item.name).discoverSheetSize(width: 960, height: 600) }
+
+            }
         }
         #endif
+
+        }
     }
 
     @ViewBuilder private var page: some View {
@@ -100,6 +143,7 @@ struct DiscoverDetailView: View {
         tvPage
         #else
         GeometryReader { geometry in
+            WithPerceptionTracking {
             let width = geometry.size.width
             let coverHeight = width < 600 ? width * 1.5 : min(760, width * 0.7)
             ZStack(alignment: .top) {
@@ -126,8 +170,10 @@ struct DiscoverDetailView: View {
                         }
                     }.padding(.bottom, 40)
                 }
-                .scrollIndicators(.hidden)
+                .tvScrollIndicators(.hidden)
                 .modifier(DiscoverDetailScroll(model: model))
+            }
+
             }
         }
         .foregroundStyle(dark ? Color.white : Color.black)
@@ -135,9 +181,9 @@ struct DiscoverDetailView: View {
         .ignoresSafeArea(edges: .top)
         .navigationTitle("")
         #if !os(macOS)
-        .toolbar(.visible, for: .navigationBar)
-        .toolbarBackground(.hidden, for: .navigationBar)
-        .toolbarColorScheme(dark ? .dark : .light, for: .navigationBar)
+        .tvToolbar(.visible, for: .navigationBar)
+        .tvToolbarBackground(.hidden, for: .navigationBar)
+        .tvToolbarColorScheme(dark ? .dark : .light, for: .navigationBar)
         #endif
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
@@ -145,7 +191,7 @@ struct DiscoverDetailView: View {
                     .accessibilityLabel(L10n.text("Search Catalog"))
                     .accessibilityIdentifier("discover.detail.search")
                 #if !os(tvOS)
-                ShareLink(item: details?.link ?? URL(string: "https://www.themoviedb.org/\(item.mediaType.rawValue)/\(item.id)")!) {
+                TVShareLink(item: details?.link ?? URL(string: "https://www.themoviedb.org/\(item.mediaType.rawValue)/\(item.id)")!) {
                     Image(systemName: "square.and.arrow.up")
                 }.accessibilityLabel(L10n.text("Share"))
                 #endif
@@ -226,8 +272,11 @@ struct DiscoverDetailView: View {
         VStack(alignment: .leading, spacing: 14) {
             Menu {
                 ForEach(seasons, id: \.number) { value in
+                    WithPerceptionTracking {
                     Button { seasonNumber = value.number } label: {
                         if seasonNumber == value.number { Label(value.name, systemImage: "checkmark") } else { Text(value.name) }
+                    }
+
                     }
                 }
             } label: {
@@ -241,18 +290,27 @@ struct DiscoverDetailView: View {
             else if let season {
                 DiscoverRail(arrowCenter: 73) {
                     LazyHStack(alignment: .top, spacing: 13) {
+                        WithPerceptionTracking {
                         ForEach(season.episodes, id: \.number) { value in
+                            WithPerceptionTracking {
                             DiscoverButton { episode = DiscoverEpisode(value: value) } label: {
                                 VStack(alignment: .leading, spacing: 7) {
                                     PosterImage(url: value.still ?? details?.backdrop).frame(width: 260, height: 146.25)
                                         .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
                                         .overlay(alignment: .bottomTrailing) {
+                                            WithPerceptionTracking {
                                             if let runtime = value.runtime { Text("\(Int(runtime)) " + L10n.text("min")).font(.caption2).padding(5).background(.black.opacity(0.55), in: Capsule()).padding(8).foregroundStyle(.white) }
+
+                                            }
                                         }
                                     Text("\(value.number). \(value.name)").font(.system(size: 14, weight: .semibold)).lineLimit(1)
                                     Text(value.overview).font(.system(size: 12)).lineLimit(2).opacity(0.65)
                                 }.frame(width: 260, alignment: .leading)
                             }.buttonStyle(.plain).accessibilityIdentifier("discover.detail.episode.\(value.number)")
+
+                            }
+                        }
+
                         }
                     }.padding(.horizontal, 20)
                 }
@@ -265,11 +323,17 @@ struct DiscoverDetailView: View {
             heading(title)
             DiscoverRail(arrowCenter: 41.5) {
                 LazyHStack(alignment: .top, spacing: 13) {
+                    WithPerceptionTracking {
                     ForEach(Array(people.enumerated()), id: \.offset) { _, person in
+                        WithPerceptionTracking {
                         if let id = person.id {
                             RouteLink { DiscoverPersonView(id: id, name: person.name, profile: person.profile) } label: { personCard(person) }
                                 .buttonStyle(.plain).accessibilityIdentifier("discover.detail.person.\(id)")
                         } else { personCard(person) }
+
+                        }
+                    }
+
                     }
                 }.padding(.horizontal, 20)
             }
@@ -292,10 +356,13 @@ struct DiscoverDetailView: View {
             DiscoverRail {
                 HStack(spacing: 13) {
                     ForEach(Array(studios.enumerated()), id: \.offset) { _, studio in
+                        WithPerceptionTracking {
                         if let id = studio.id {
                             RouteLink { DiscoverBrowseView(title: studio.name, filter: .studio(id, type: studio.kind == "network" ? .tv : .movie), logo: studio.logo) } label: { studioCard(studio) }
                                 .buttonStyle(.plain).accessibilityIdentifier("discover.detail.studio.\(id)")
                         } else { studioCard(studio) }
+
+                        }
                     }
                 }.padding(.horizontal, 20)
             }
@@ -318,8 +385,11 @@ struct DiscoverDetailView: View {
                 HStack(spacing: 10) {
                     if let genres = details.genreItems, !genres.isEmpty {
                         ForEach(genres) { genre in
+                            WithPerceptionTracking {
                             RouteLink { DiscoverBrowseView(title: genre.name, filter: .genre(genre.id, type: item.mediaType)) } label: { genreChip(genre.name) }
                                 .buttonStyle(.plain).accessibilityIdentifier("discover.detail.genre.\(genre.id)")
+
+                            }
                         }
                     } else {
                         ForEach(details.genres, id: \.self) { genreChip($0) }
@@ -338,10 +408,16 @@ struct DiscoverDetailView: View {
             heading(L10n.text("Stills"))
             DiscoverRail(arrowCenter: 73) {
                 LazyHStack(spacing: 13) {
+                    WithPerceptionTracking {
                     ForEach(images, id: \.self) { url in
+                        WithPerceptionTracking {
                         DiscoverButton { still = DiscoverStill(url: url) } label: {
                             PosterImage(url: url).frame(width: 260, height: 146.25).clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
                         }.buttonStyle(.plain).accessibilityIdentifier("discover.detail.still")
+
+                        }
+                    }
+
                     }
                 }.padding(.horizontal, 20)
             }
@@ -353,7 +429,11 @@ struct DiscoverDetailView: View {
             heading(L10n.text("Trailer"))
             Button { trailerShown = true } label: {
                 PosterImage(url: details?.backdrop ?? item.backdrop).frame(height: 210)
-                    .overlay { Image(systemName: "play.fill").font(.system(size: 28)).frame(width: 64, height: 64).glassSurface(.regular, in: Circle()) }
+                    .overlay {
+                        WithPerceptionTracking {
+ Image(systemName: "play.fill").font(.system(size: 28)).frame(width: 64, height: 64).glassSurface(.regular, in: Circle())
+                        }
+                    }
                     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             }.buttonStyle(.plain).padding(.horizontal, 20).accessibilityIdentifier("discover.detail.trailer")
         }
@@ -382,8 +462,14 @@ struct DiscoverDetailView: View {
             heading(L10n.text("You May Like"))
             DiscoverRail(arrowCenter: 87) {
                 LazyHStack(alignment: .top, spacing: 13) {
+                    WithPerceptionTracking {
                     ForEach(items, id: \.key) { candidate in
+                        WithPerceptionTracking {
                         RouteLink { DiscoverDetailView(item: candidate.catalogItem) } label: { DiscoverTile(item: candidate.catalogItem).frame(width: 116) }.tmdbCardButton()
+
+                        }
+                    }
+
                     }
                 }.padding(.horizontal, 20)
             }
@@ -407,7 +493,7 @@ struct DiscoverDetailView: View {
     }
 }
 
-@MainActor @Observable private final class DiscoverDetailModel {
+@MainActor @Perceptible private final class DiscoverDetailModel {
     var details: TMDBMatch.Details?
     var paint: DiscoverPaint?
     var loading = true
@@ -431,16 +517,22 @@ private struct DiscoverDetailBackground: View {
     let height: CGFloat
     let active: Bool
     var body: some View {
+        WithPerceptionTracking {
         DiscoverBackdrop(paint: model.paint, width: width, heroHeight: height, scrollY: model.scrollY,
                          trailer: model.details?.trailer, playsTrailer: active && model.scrollY < height * 0.35)
+
+        }
     }
 }
 private struct DiscoverDetailScroll: ViewModifier {
     let model: DiscoverDetailModel
     @ViewBuilder func body(content: Content) -> some View {
+        WithPerceptionTracking {
         if #available(iOS 18, macOS 15, tvOS 18, *) {
             content.onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y + $0.contentInsets.top } action: { _, value in model.scrollY = value }
         } else { content }
+
+        }
     }
 }
 private struct DiscoverStill: Identifiable { let url: URL; var id: URL { url } }
@@ -453,13 +545,17 @@ private struct DiscoverTrailerScreen: View {
     @State private var player = AVPlayer()
     @State private var failed = false
     var body: some View {
-        NavigationStack {
+        WithPerceptionTracking {
+        NBNavigationStack {
+            WithPerceptionTracking {
             ZStack {
                 Color.black.ignoresSafeArea()
                 VideoPlayer(player: player)
                 if failed { Text(L10n.text("Trailer Unavailable")).foregroundStyle(.white) }
             }.navigationTitle(title)
                 .toolbar { ToolbarItem(placement: .confirmationAction) { Button(L10n.text("Done")) { dismiss() } } }
+
+            }
         }.preferredColorScheme(.dark)
             .task {
                 guard let stream = await DiscoverTrailerResolver.shared.resolve(trailer), !Task.isCancelled else { failed = true; return }
@@ -467,6 +563,8 @@ private struct DiscoverTrailerScreen: View {
                 player.replaceCurrentItem(with: AVPlayerItem(asset: asset)); player.play()
             }
             .onDisappear { player.pause(); player.replaceCurrentItem(with: nil) }
+
+        }
     }
 }
 
@@ -480,6 +578,7 @@ private struct DiscoverMobileTrailerScreen: View {
     @State private var channel: Channel?
     @State private var failed = false
     var body: some View {
+        WithPerceptionTracking {
         if let channel {
             PlaybackView(channel: channel)
         } else {
@@ -497,6 +596,8 @@ private struct DiscoverMobileTrailerScreen: View {
                     channel = Channel(name: title, url: stream.url, headers: stream.headers)
                 }
         }
+
+        }
     }
 }
 #endif
@@ -506,15 +607,20 @@ struct DiscoverSearchPresentation: ViewModifier {
     @Environment(\.openRoute) private var openRoute
     @Environment(Store.self) private var store
     func body(content: Content) -> some View {
+        WithPerceptionTracking {
         #if os(iOS)
-        content.fullScreenCover(isPresented: $isPresented) { DiscoverSearchView() }
+        content.fullScreenCover(isPresented: $isPresented) {
+            WithPerceptionTracking {
+ DiscoverSearchView()
+            }
+        }
             // Search Sources on a detail page opened from here switches to the Search tab, which is behind this
             // full-screen sheet: close it so the source results show instead of the catalog search.
-            .onChange(of: store.section) { if isPresented { isPresented = false } }
+            .tvOnChange(of: store.section) { if isPresented { isPresented = false } }
         #else
         // A page of its own (Back returns), rather than the iPhone's full-screen sheet: on the Mac with the toolbar's
         // search field, on the TV laid out for the remote.
-        content.onChange(of: isPresented) { _, shown in
+        content.tvOnChange(of: isPresented) { _, shown in
             guard shown else { return }
             isPresented = false
             #if os(macOS)
@@ -524,6 +630,8 @@ struct DiscoverSearchPresentation: ViewModifier {
             #endif
         }
         #endif
+
+        }
     }
 }
 
@@ -571,14 +679,18 @@ extension DiscoverDetailView {
                 }
             }.padding(.bottom, 90)
         }
-        .scrollClipDisabled()
+        .tvScrollClipDisabled()
         // Only crossing the hero's edge matters. A per-frame offset re-rendered the page on every scroll step, and a
         // sheet's presentation fed back into it until the watchdog killed the app.
         .modifier(DiscoverTVScrolled(scrolled: $tvScrolled))
-        .background { tvBackdrop }
+        .background {
+            WithPerceptionTracking {
+ tvBackdrop
+            }
+        }
         .ignoresSafeArea()
         .foregroundStyle(.white).preferredColorScheme(.dark)
-        .toolbar(.hidden, for: .navigationBar)
+        .tvToolbar(.hidden, for: .navigationBar)
     }
 
     private var tvPlaysTrailer: Bool {
@@ -703,9 +815,13 @@ extension DiscoverDetailView {
         VStack(alignment: .leading, spacing: 6) {
             if let title { Text(title).font(.system(size: 34, weight: .medium)).opacity(0.6).padding(.horizontal, DiscoverLayout.gutter) }
             ScrollView(.horizontal) {
-                LazyHStack(alignment: .top, spacing: spacing) { content() }
+                LazyHStack(alignment: .top, spacing: spacing) {
+                    WithPerceptionTracking {
+ content()
+                    }
+                }
                     .padding(.horizontal, DiscoverLayout.gutter).padding(.vertical, 24)
-            }.scrollClipDisabled()
+            }.tvScrollClipDisabled()
         }.focusSection()
     }
 
@@ -713,8 +829,11 @@ extension DiscoverDetailView {
         VStack(alignment: .leading, spacing: 10) {
             Menu {
                 ForEach(seasons, id: \.number) { value in
+                    WithPerceptionTracking {
                     Button { seasonNumber = value.number } label: {
                         if seasonNumber == value.number { Label(value.name, systemImage: "checkmark") } else { Text(value.name) }
+                    }
+
                     }
                 }
             } label: {
@@ -728,6 +847,7 @@ extension DiscoverDetailView {
             else if let season {
                 tvRow(nil) {
                     ForEach(season.episodes, id: \.number) { value in
+                        WithPerceptionTracking {
                         Button { episode = DiscoverEpisode(value: value) } label: {
                             tvLandscape(value.still ?? details?.backdrop, width: 420,
                                         badge: value.runtime.map { "\(Int($0)) " + L10n.text("min") }) {
@@ -737,6 +857,8 @@ extension DiscoverDetailView {
                         }
                         .cardButton(.roundedRectangle(radius: 16))
                         .accessibilityIdentifier("discover.detail.episode.\(value.number)")
+
+                        }
                     }
                 }
             }
@@ -761,11 +883,14 @@ extension DiscoverDetailView {
     private func tvPeople(_ people: [TMDBMatch.Person], title: String) -> some View {
         tvRow(title, spacing: 36) {
             ForEach(Array(people.enumerated()), id: \.offset) { _, person in
+                WithPerceptionTracking {
                 if let id = person.id {
                     RouteLink { DiscoverPersonView(id: id, name: person.name, profile: person.profile) } label: { tvPerson(person) }
                         .cardButton(.circle)
                         .accessibilityIdentifier("discover.detail.person.\(id)")
                 } else { tvPerson(person) }
+
+                }
             }
         }
     }
@@ -784,14 +909,20 @@ extension DiscoverDetailView {
         tvRow(L10n.text("Genres"), spacing: 20) {
             if let genres = details.genreItems, !genres.isEmpty {
                 ForEach(genres) { genre in
+                    WithPerceptionTracking {
                     RouteLink { DiscoverBrowseView(title: genre.name, filter: .genre(genre.id, type: item.mediaType)) } label: { Text(genre.name) }
                         .buttonStyle(DiscoverTVChipStyle(active: false))
                         .accessibilityIdentifier("discover.detail.genre.\(genre.id)")
+
+                    }
                 }
             } else {
                 ForEach(details.genres, id: \.self) { name in
+                    WithPerceptionTracking {
                     Text(name).font(.system(size: 26, weight: .medium)).padding(.horizontal, 30).frame(height: 62)
                         .background(.white.opacity(0.14), in: Capsule())
+
+                    }
                 }
             }
         }
@@ -800,11 +931,14 @@ extension DiscoverDetailView {
     private func tvStills(_ images: [URL]) -> some View {
         tvRow(L10n.text("Stills")) {
             ForEach(images, id: \.self) { url in
+                WithPerceptionTracking {
                 Button { still = DiscoverStill(url: url) } label: {
                     PosterImage(url: url).frame(width: 560, height: 315).posterClip(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 }
                 .cardButton(.roundedRectangle(radius: 16))
                 .accessibilityIdentifier("discover.detail.still")
+
+                }
             }
         }
     }
@@ -812,6 +946,7 @@ extension DiscoverDetailView {
     private func tvRelated(_ items: [TMDBMatch.Candidate]) -> some View {
         tvRow(L10n.text("You May Like")) {
             ForEach(items, id: \.key) { candidate in
+                WithPerceptionTracking {
                 let value = candidate.catalogItem
                 RouteLink { DiscoverDetailView(item: value) } label: {
                     tvLandscape(value.backdrop ?? value.poster, width: 380) {
@@ -828,6 +963,8 @@ extension DiscoverDetailView {
                 }
                 .cardButton(.roundedRectangle(radius: 16))
                 .accessibilityIdentifier("discover.detail.related.\(value.key)")
+
+                }
             }
         }
     }
@@ -836,9 +973,12 @@ extension DiscoverDetailView {
 private struct DiscoverTVScrolled: ViewModifier {
     @Binding var scrolled: Bool
     @ViewBuilder func body(content: Content) -> some View {
+        WithPerceptionTracking {
         if #available(tvOS 18, *) {
             content.onScrollGeometryChange(for: Bool.self) { $0.contentOffset.y > 120 } action: { _, value in scrolled = value }
         } else { content }
+
+        }
     }
 }
 
@@ -847,11 +987,14 @@ private struct DiscoverTVTrailerScreen: View {
     let trailer: TMDBMatch.Trailer
     @State private var failed = false
     var body: some View {
+        WithPerceptionTracking {
         ZStack {
             Color.black
             DiscoverTVTrailerPlayer(trailer: trailer, failed: $failed)
             if failed { Text(L10n.text("Trailer Unavailable")).font(.system(size: 32)).foregroundStyle(.white) }
         }.ignoresSafeArea()
+
+        }
     }
 }
 
@@ -900,6 +1043,7 @@ struct DiscoverTVActionStyle: ButtonStyle {
         let style: DiscoverTVActionStyle
         @Environment(\.isFocused) private var focused
         var body: some View {
+            WithPerceptionTracking {
             let shape = RoundedRectangle(cornerRadius: style.corner ?? style.height / 2, style: .continuous)
             configuration.label
                 .font(.system(size: style.font, weight: .medium)).lineLimit(1)
@@ -909,6 +1053,8 @@ struct DiscoverTVActionStyle: ButtonStyle {
                 .scaleEffect(configuration.isPressed ? 0.97 : focused ? 1.06 : 1)
                 .shadow(color: .black.opacity(focused ? 0.35 : 0), radius: 16, y: 10)
                 .animation(.easeOut(duration: 0.18), value: focused)
+
+            }
         }
     }
 }

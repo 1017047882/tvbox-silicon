@@ -1,3 +1,4 @@
+import Perception
 #if os(macOS)
 import AVKit
 import SwiftUI
@@ -16,6 +17,7 @@ struct MusicMacBar: View {
     #endif
 
     var body: some View {
+        WithPerceptionTracking {
         let music = store.music
         HStack(spacing: 8) {
             HStack(spacing: 0) {
@@ -32,7 +34,11 @@ struct MusicMacBar: View {
                 MusicMacButton(symbol: "list.bullet", label: "Up Next", size: 13) { open(.queue) }
                 MusicMacRoutePicker(player: music.player).frame(width: 30, height: 30).help(L10n.text("AirPlay"))
                 MusicMacButton(symbol: MusicMacVolume.symbol(music.volume), label: "Volume", size: 13) { showsVolume.toggle() }
-                    .popover(isPresented: $showsVolume, arrowEdge: .top) { MusicMacVolume().frame(width: 200).padding(14) }
+                    .popover(isPresented: $showsVolume, arrowEdge: .top) {
+                        WithPerceptionTracking {
+ MusicMacVolume().frame(width: 200).padding(14)
+                        }
+                    }
                 MusicMacButton(symbol: "pip.enter", label: "Mini Player", size: 13) { openWindow(id: MusicMacMiniPlayer.windowID) }
             }
         }
@@ -42,7 +48,11 @@ struct MusicMacBar: View {
         .shadow(color: .black.opacity(0.12), radius: 16, y: 6)
         .frame(maxWidth: 720)
         .padding(.horizontal, Layout.gutter).padding(.bottom, 12)
-        .sheet(isPresented: $showsChannels) { MusicChannelsView() }
+        .sheet(isPresented: $showsChannels) {
+            WithPerceptionTracking {
+ MusicChannelsView()
+            }
+        }
         #if DEBUG
         // `-qaNowPlaying lyrics|queue` opens Now Playing on that panel once, for screenshots. Once:
         // every page has its own bar.
@@ -52,6 +62,8 @@ struct MusicMacBar: View {
             open(panel == "queue" ? .queue : .lyrics)
         }
         #endif
+
+        }
     }
 
     /// Now Playing on `panel`; the same button again closes it.
@@ -84,8 +96,12 @@ struct MusicMacBar: View {
             }
             .padding(.horizontal, 6)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .overlay(alignment: .bottom) { MusicMacProgressLine().padding(.horizontal, 6) }
-            .contentShape(.rect)
+            .overlay(alignment: .bottom) {
+                WithPerceptionTracking {
+ MusicMacProgressLine().padding(.horizontal, 6)
+                }
+            }
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .frame(minWidth: 160, maxWidth: 360)
@@ -104,7 +120,14 @@ extension View {
 private struct MusicBarInset: ViewModifier {
     @Environment(Store.self) private var store
     func body(content: Content) -> some View {
-        content.safeAreaInset(edge: .bottom, spacing: 0) { if store.music.showsStrip(videoPlaying: store.playing != nil) { MusicMacBar() } }
+        WithPerceptionTracking {
+        content.safeAreaInset(edge: .bottom, spacing: 0) {
+            WithPerceptionTracking {
+ if store.music.showsStrip(videoPlaying: store.playing != nil) { MusicMacBar() }
+            }
+        }
+
+        }
     }
 }
 
@@ -174,12 +197,13 @@ struct NowPlayingWindowChrome: NSViewRepresentable {
 private struct MusicMacWindowControls: View {
     @Environment(Store.self) private var store
     var body: some View {
+        WithPerceptionTracking {
         HStack(spacing: 10) {
             MusicMacRoutePicker(player: store.music.player, color: .white).frame(width: 20, height: 20).help(L10n.text("AirPlay"))
             MusicMacVolume().frame(width: 140)
             Divider().frame(height: 16)
             Button { store.music.presentsPlayer = false } label: {
-                Image(systemName: "xmark").font(.system(size: 12, weight: .semibold)).frame(width: 22, height: 22).contentShape(.rect)
+                Image(systemName: "xmark").font(.system(size: 12, weight: .semibold)).frame(width: 22, height: 22).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help(L10n.text("Close"))
@@ -190,6 +214,8 @@ private struct MusicMacWindowControls: View {
         .frame(height: 32)
         .glassSurface(.regular, in: Capsule())
         .padding(.trailing, 14).padding(.vertical, 10)
+
+        }
     }
 }
 
@@ -197,15 +223,25 @@ private struct MusicMacWindowControls: View {
 struct MusicMacProgressLine: View {
     @Environment(Store.self) private var store
     var body: some View {
+        WithPerceptionTracking {
         let music = store.music
         let total = music.duration ?? 0
         let fraction = total > 0 ? min(1, max(0, (music.seekingTo ?? music.position) / total)) : 0
         Capsule().fill(Color.primary.opacity(0.12))
             .overlay(alignment: .leading) {
-                GeometryReader { proxy in Capsule().fill(Color.primary.opacity(0.55)).frame(width: proxy.size.width * fraction) }
+                WithPerceptionTracking {
+                GeometryReader { proxy in
+                    WithPerceptionTracking {
+ Capsule().fill(Color.primary.opacity(0.55)).frame(width: proxy.size.width * fraction)
+                    }
+                }
+
+                }
             }
             .frame(height: 2)
             .accessibilityHidden(true)
+
+        }
     }
 }
 
@@ -223,6 +259,7 @@ struct MusicMacButton: View {
     @Environment(\.isEnabled) private var enabled
 
     var body: some View {
+        WithPerceptionTracking {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: size, weight: .semibold))
@@ -231,13 +268,15 @@ struct MusicMacButton: View {
                 .frame(width: frame, height: frame)
                 .background(Color.primary.opacity(on ? 0.14 : hovering && enabled ? 0.07 : 0), in: Circle())
                 .contentShape(Circle())
-                .contentTransition(.symbolEffect(.replace))
+                .tvContentTransition(.symbolEffect(.replace))
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .help(L10n.text(label))
         .accessibilityLabel(L10n.text(label))
         .accessibilityAddTraits(on ? .isSelected : [])
+
+        }
     }
 }
 
@@ -247,6 +286,7 @@ struct MusicMacPlayButton: View {
     var size: CGFloat
     var frame: CGFloat
     var body: some View {
+        WithPerceptionTracking {
         let music = store.music
         if music.failure != nil {
             MusicMacButton(symbol: "arrow.clockwise", label: "Retry", size: size * 0.8, prominent: true, frame: frame) { music.retry() }
@@ -256,6 +296,8 @@ struct MusicMacPlayButton: View {
             MusicMacButton(symbol: music.isPlaying ? "pause.fill" : "play.fill", label: music.isPlaying ? "Pause" : "Play",
                            size: size, prominent: true, frame: frame) { music.toggle() }
         }
+
+        }
     }
 }
 
@@ -264,6 +306,7 @@ private struct MusicMacMenu: View {
     @Environment(Store.self) private var store
     @Binding var showsChannels: Bool
     var body: some View {
+        WithPerceptionTracking {
         let music = store.music
         Menu {
             if let quality = MusicMacNowPlaying.quality(music) { Text(quality) }
@@ -290,6 +333,8 @@ private struct MusicMacMenu: View {
         .fixedSize()
         .help(L10n.text("More"))
         .accessibilityLabel(L10n.text("More"))
+
+        }
     }
 }
 
@@ -300,7 +345,8 @@ struct MusicMacVolume: View {
         volume <= 0 ? "speaker.slash.fill" : volume < 0.34 ? "speaker.wave.1.fill" : volume < 0.67 ? "speaker.wave.2.fill" : "speaker.wave.3.fill"
     }
     var body: some View {
-        @Bindable var music = store.music
+        WithPerceptionTracking {
+        @Perception.Bindable var music = store.music
         HStack(spacing: 8) {
             Image(systemName: "speaker.fill").font(.caption).foregroundStyle(.secondary)
             Slider(value: $music.volume, in: 0...1).controlSize(.small)
@@ -308,6 +354,8 @@ struct MusicMacVolume: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(L10n.text("Volume"))
+
+        }
     }
 }
 
@@ -335,8 +383,10 @@ struct MusicMacNowPlaying: View {
     @AppStorage("musicShowsTranslation") private var showsTranslation = true
 
     var body: some View {
+        WithPerceptionTracking {
         let music = store.music
         GeometryReader { proxy in
+            WithPerceptionTracking {
             let art = max(180, min(proxy.size.width * 0.28, proxy.size.height - 340, 400))
             HStack(spacing: max(48, proxy.size.width * 0.07)) {
                 VStack(alignment: .leading, spacing: 0) {
@@ -361,22 +411,41 @@ struct MusicMacNowPlaying: View {
             }
             .padding(.horizontal, max(56, proxy.size.width * 0.08)).padding(.top, 64).padding(.bottom, 72)
             .frame(width: proxy.size.width, height: proxy.size.height)
+
+            }
         }
         .background {
+            WithPerceptionTracking {
             // Escape closes; Close itself is in the window's toolbar (NowPlayingWindowChrome).
             Button(L10n.text("Close")) { music.presentsPlayer = false }.keyboardShortcut(.cancelAction).opacity(0).accessibilityHidden(true)
+
+            }
         }
-        .overlay(alignment: .bottomTrailing) { panelSwitch(music).padding(.trailing, 22).padding(.bottom, 20) }
+        .overlay(alignment: .bottomTrailing) {
+            WithPerceptionTracking {
+ panelSwitch(music).padding(.trailing, 22).padding(.bottom, 20)
+            }
+        }
         .foregroundStyle(.white)
         .tint(.white)
-        .background { backdrop(music) }
+        .background {
+            WithPerceptionTracking {
+ backdrop(music)
+            }
+        }
         .environment(\.colorScheme, .dark)
         .task(id: music.track?.artwork) {
             guard let url = music.track?.artwork, let color = await PosterPalette.average(url) else { return }
             withAnimation(.easeInOut(duration: 0.6)) { tint = color }
         }
-        .onChange(of: music.track == nil) { _, gone in if gone { music.presentsPlayer = false } }
-        .sheet(isPresented: $showsChannels) { MusicChannelsView() }
+        .tvOnChange(of: music.track == nil) { _, gone in if gone { music.presentsPlayer = false } }
+        .sheet(isPresented: $showsChannels) {
+            WithPerceptionTracking {
+ MusicChannelsView()
+            }
+        }
+
+        }
     }
 
     /// The cover's colour, then the cover itself blurred to a wash over it.
@@ -387,6 +456,7 @@ struct MusicMacNowPlaying: View {
                 // Blurred small and drawn once, then scaled up: a full-window blur redrawn every
                 // frame made opening the player and scrolling the lyrics stutter.
                 GeometryReader { proxy in
+                    WithPerceptionTracking {
                     PosterImage(url: artwork, symbol: "music.note")
                         .frame(width: 48, height: 48)
                         .blur(radius: 7, opaque: true)
@@ -394,6 +464,8 @@ struct MusicMacNowPlaying: View {
                         .drawingGroup()
                         .scaleEffect(max(proxy.size.width, proxy.size.height) / 48 * 1.25)
                         .frame(width: proxy.size.width, height: proxy.size.height)
+
+                    }
                 }
                 .opacity(0.8)
                 .id(artwork)
@@ -458,9 +530,12 @@ struct MusicMacNowPlaying: View {
             }
             HStack(spacing: 2) {
                 ForEach([MusicNowPlayingPanel.lyrics, .queue], id: \.self) { panel in
+                    WithPerceptionTracking {
                     MusicMacButton(symbol: panel == .lyrics ? "quote.bubble" : "list.bullet", label: panel == .lyrics ? "Lyrics" : "Up Next",
                                    size: 13, on: music.nowPlayingPanel == panel, frame: 30) {
-                        withAnimation(.smooth(duration: 0.3)) { music.nowPlayingPanel = panel }
+                        withAnimation(.tvSmooth(duration: 0.3)) { music.nowPlayingPanel = panel }
+                    }
+
                     }
                 }
             }

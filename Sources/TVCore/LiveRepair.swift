@@ -16,7 +16,7 @@ public enum LiveRepair {
 
     /// The address AVPlayer opens for one of these playlists; the server's playlists are asked for with `headers`.
     static func address(_ url: URL, headers: [String: String]? = nil) -> URL {
-        if let headers, let host = url.host()?.lowercased() { lock.withLock { hostHeaders[host] = headers } }
+        if let headers, let host = url.host?.lowercased() { lock.withLock { hostHeaders[host] = headers } }
         var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
         components?.scheme = scheme
         return components?.url ?? url
@@ -24,7 +24,7 @@ public enum LiveRepair {
 
     /// The headers the playlist's server was asked with.
     static func headers(for url: URL) -> [String: String] {
-        lock.withLock { hostHeaders[url.host()?.lowercased() ?? ""] ?? [:] }
+        lock.withLock { hostHeaders[url.host?.lowercased() ?? ""] ?? [:] }
     }
 
     /// The playlist on the server behind an address from `address`.
@@ -60,8 +60,8 @@ public enum LiveRepair {
             if value.isEmpty { return line }
             if value == "#EXT-X-DISCONTINUITY", sequence == 0, index < firstSegment { return nil }
             if !value.hasPrefix("#") { return resolve(value) }
-            guard let match = line.firstMatch(of: /URI="([^"]+)"/) else { return line }
-            return line.replacingCharacters(in: match.1.startIndex..<match.1.endIndex, with: resolve(String(match.1)))
+            guard let match = line.tvFirstMatch(#"URI="([^"]+)""#) else { return line }
+            return line.replacingCharacters(in: match[1].startIndex..<match[1].endIndex, with: resolve(String(match[1])))
         }.joined(separator: "\n")
     }
 }
@@ -86,7 +86,7 @@ private final class RepairedPlaylistLoader: NSObject, AVAssetResourceLoaderDeleg
                 guard (200..<300).contains(status) else { throw TVError.http(status) }
                 result = .success(Data(LiveRepair.rewrite(String(decoding: data, as: UTF8.self), origin: response.url ?? upstream).utf8))
             } catch {
-                if !(error is CancellationError) { Diagnostics.shared.record(.warning, "live", "repaired playlist host=\(upstream.host() ?? "-") \(error.localizedDescription)") }
+                if !(error is CancellationError) { Diagnostics.shared.record(.warning, "live", "repaired playlist host=\(upstream.host ?? "-") \(error.localizedDescription)") }
                 result = .failure(error)
             }
             self?.queue.async { [weak self] in

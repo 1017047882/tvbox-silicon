@@ -1,3 +1,5 @@
+import Perception
+import NavigationBackport
 import SwiftUI
 import TVCore
 import UniformTypeIdentifiers
@@ -11,6 +13,7 @@ private struct MusicPlayerInset: ViewModifier {
     @Environment(Store.self) private var store
     @Environment(\.horizontalSizeClass) private var sizeClass
     func body(content: Content) -> some View {
+        WithPerceptionTracking {
         #if os(tvOS) || os(macOS)
         // The remote could only reach a bottom panel through every result above it; Apple TV has
         // the Now Playing card at the top of the page and the full-screen player instead. The Mac's
@@ -18,6 +21,7 @@ private struct MusicPlayerInset: ViewModifier {
         content
         #else
         content.safeAreaInset(edge: .bottom, spacing: 0) {
+            WithPerceptionTracking {
             if store.music.showsStrip(videoPlaying: store.playing != nil) {
                 #if os(iOS)
                 if sizeClass == .compact {
@@ -35,8 +39,12 @@ private struct MusicPlayerInset: ViewModifier {
                 MusicNowPlaying().padding(.horizontal, Layout.gutter).padding(.bottom, 10)
                 #endif
             }
+
+            }
         }
         #endif
+
+        }
     }
 }
 
@@ -45,13 +53,16 @@ private struct MusicPlayerInset: ViewModifier {
 struct MusicActivityMark: View {
     @Environment(Store.self) private var store
     var body: some View {
+        WithPerceptionTracking {
         Group {
             if store.music.busy { ProgressView().controlSize(.small) }
-            else if store.music.phase == .playing { Image(systemName: "waveform").foregroundStyle(Brand.accent).symbolEffect(.variableColor.iterative) }
+            else if store.music.phase == .playing { Image(systemName: "waveform").foregroundStyle(Brand.accent).tvSymbolEffect(.variableColor.iterative) }
             else if store.music.failure != nil { Image(systemName: "exclamationmark.circle").foregroundStyle(Brand.amber) }
             else { Image(systemName: "speaker.wave.2.fill").foregroundStyle(.secondary) }
         }
         .frame(width: 24, height: 24)
+
+        }
     }
 }
 
@@ -77,6 +88,7 @@ struct MusicNowPlaying: View {
     #endif
 
     var body: some View {
+        WithPerceptionTracking {
         let music = store.music
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 14) {
@@ -112,24 +124,40 @@ struct MusicNowPlaying: View {
             // A phone gives the title its width and the playback controls a row of their own.
             if compact { controls(music).frame(maxWidth: .infinity) }
             // Its own full-width line, so the format is never cut short beside the controls.
-            ViewThatFits(in: .horizontal) {
+            Group {
+            if #available(iOS 16, macOS 13, tvOS 16, *) {
+                ViewThatFits(in: .horizontal) {
                 HStack(spacing: 12) { status(music); Spacer(minLength: 0); source(music) }
                 VStack(alignment: .leading, spacing: 4) { status(music); source(music) }
             }
+            } else {
+                VStack(alignment: .leading, spacing: 4) { status(music); source(music) }
+            }
+        }
         }
         .padding(14)
         .contentPanel(cornerRadius: 20)
         .frame(maxWidth: Layout.maxWidth)
         .frame(maxWidth: .infinity)
         .tvFocusSection()
-        .sheet(isPresented: $showsChannels) { MusicChannelsView() }
-        .sheet(isPresented: $showsLyrics) { MusicLyricsView() }
+        .sheet(isPresented: $showsChannels) {
+            WithPerceptionTracking {
+ MusicChannelsView()
+            }
+        }
+        .sheet(isPresented: $showsLyrics) {
+            WithPerceptionTracking {
+ MusicLyricsView()
+            }
+        }
         #if DEBUG
         // `-qaMusicLyrics 1` opens the lyrics once they load, for screenshots.
-        .onChange(of: music.lyrics) { _, lyrics in
+        .tvOnChange(of: music.lyrics) { _, lyrics in
             if lyrics != nil, UserDefaults.standard.bool(forKey: "qaMusicLyrics") { showsLyrics = true }
         }
         #endif
+
+        }
     }
 
     private func queueLine(_ queue: MusicQueue) -> String? {
@@ -290,6 +318,7 @@ struct MusicLyricsView: View {
     #endif
 
     var body: some View {
+        WithPerceptionTracking {
         let music = store.music
         MusicSheet(title: music.track?.title ?? L10n.text("Lyrics"), symbol: "quote.bubble") {
             VStack(spacing: 0) {
@@ -299,7 +328,7 @@ struct MusicLyricsView: View {
                 } else if music.lyricsLoading || music.busy {
                     ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    ContentUnavailableView(L10n.text("No Lyrics"), systemImage: "quote.bubble",
+                    TVEmptyState(L10n.text("No Lyrics"), systemImage: "quote.bubble",
                                            description: Text(L10n.text("Neither catalog has lyrics for this song.")))
                 }
             }
@@ -309,6 +338,8 @@ struct MusicLyricsView: View {
                     MusicLyricsTiming().padding(.vertical, 10)
                 }
             }
+        }
+
         }
     }
 
@@ -328,9 +359,12 @@ struct MusicLyricLines: View {
     @State private var scrolled: Int?
 
     var body: some View {
+        WithPerceptionTracking {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: size * 0.8) {
+                WithPerceptionTracking {
                 ForEach(Array(lyrics.lines.enumerated()), id: \.offset) { index, line in
+                    WithPerceptionTracking {
                     let active = lyrics.synced && index == current
                     VStack(alignment: .leading, spacing: 4) {
                         #if os(tvOS)
@@ -358,19 +392,25 @@ struct MusicLyricLines: View {
                     .onTapGesture { if lyrics.synced { store.music.seek(toLyric: line) } }
                     #endif
                     .id(index)
+
+                    }
                 }
                 Text(L10n.text("Lyrics from %@", lyrics.platform.name)).font(.caption).foregroundStyle(.tertiary).padding(.top, 12)
+
+                }
             }
-            .scrollTargetLayout()
+            .tvScrollTargetLayout()
             .padding(.horizontal, Layout.gutter * 1.5).padding(.vertical, 40)
         }
-        .scrollPosition(id: $scrolled, anchor: .center)
+        .tvScrollPosition(id: $scrolled, anchor: .center)
         // Once the lines are laid out: set as the view appeared, the position was dropped, and
         // reopening the player left the lyrics at the top until the next line.
-        .task { try? await Task.sleep(for: .milliseconds(60)); scrolled = current }
-        .onChange(of: current) { _, index in
+        .task { try? await tvSleep(for: .milliseconds(60)); scrolled = current }
+        .tvOnChange(of: current) { _, index in
             guard let index else { return }
-            withAnimation(.smooth(duration: 0.45)) { scrolled = index }
+            withAnimation(.tvSmooth(duration: 0.45)) { scrolled = index }
+        }
+
         }
     }
 }
@@ -381,11 +421,13 @@ struct MusicChannelsView: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
+        WithPerceptionTracking {
         let music = store.music
         MusicSheet(title: L10n.text("Channels"), symbol: "antenna.radiowaves.left.and.right") {
             List {
                 Section {
                     ForEach(Self.rows(music), id: \.candidate.id) { row in
+                        WithPerceptionTracking {
                         let current = row.candidate == music.selection?.candidate && music.failure == nil
                         Button {
                             music.choose(row.candidate); dismiss()
@@ -407,11 +449,15 @@ struct MusicChannelsView: View {
                         }
                         .glassRow()
                         .disabled(current)
+
+                        }
                     }
                 } footer: {
                     Text(L10n.text("The quality shown is read from the audio itself, not taken from what a channel claims."))
                 }
             }
+        }
+
         }
     }
 
@@ -464,7 +510,8 @@ struct MusicSettingsView: View {
     }
 
     var body: some View {
-        @Bindable var music = store.music
+        WithPerceptionTracking {
+        @Perception.Bindable var music = store.music
         #if os(tvOS)
         // A page like Settings' own, over the whole screen: a tvOS sheet is a small card that cut the
         // channels off. Quality steps through its choices; Menu closes the page.
@@ -477,7 +524,10 @@ struct MusicSettingsView: View {
             }
             TVSettingsSection(title: L10n.text("Channels"), footer: Self.channelNotes.joined(separator: "\n\n")) {
                 ForEach(Self.channels, id: \.0) { provider, detail in
+                    WithPerceptionTracking {
                     TVSettingsToggle(title: provider.name, detail: detail, isOn: enabled(provider, music: music))
+
+                    }
                 }
                 TVSettingsField(title: L10n.text("HYW key"), text: $music.preferences.hywKey)
             }
@@ -496,6 +546,7 @@ struct MusicSettingsView: View {
                 }
                 Section {
                     ForEach(Self.channels, id: \.0) { provider, detail in
+                        WithPerceptionTracking {
                         Toggle(isOn: enabled(provider, music: music)) {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(provider.name)
@@ -503,9 +554,11 @@ struct MusicSettingsView: View {
                             }
                         }
                         .settingsSwitch()
+
+                        }
                     }
                     TextField(L10n.text("HYW key"), text: $music.preferences.hywKey)
-                        .autocorrectionDisabled()
+                        .disableAutocorrection()
                         #if os(iOS)
                         .textInputAutocapitalization(.never)
                         #endif
@@ -520,10 +573,12 @@ struct MusicSettingsView: View {
                 MusicExtensionsSection()
             }
             #if os(macOS)
-            .formStyle(.grouped)
+            .tvGroupedForm()
             #endif
         }
         #endif
+
+        }
     }
 
     private func enabled(_ provider: MusicProviderID, music: MusicPlaybackSession) -> Binding<Bool> {
@@ -542,6 +597,7 @@ private struct MusicSheet<Content: View>: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
+        WithPerceptionTracking {
         #if os(macOS)
         VStack(spacing: 0) {
             HStack(spacing: 12) {
@@ -556,15 +612,20 @@ private struct MusicSheet<Content: View>: View {
         }
         .frame(minWidth: 480, minHeight: 420)
         #else
-        NavigationStack {
+        NBNavigationStack {
+            WithPerceptionTracking {
             content
                 .navigationTitle(title)
                 #if os(iOS)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .confirmationAction) { Button(L10n.text("Done")) { dismiss() } } }
                 #endif
+
+            }
         }
         #endif
+
+        }
     }
 }
 
@@ -572,6 +633,7 @@ private struct MusicSheet<Content: View>: View {
 struct MusicLyricsTiming: View {
     @Environment(Store.self) private var store
     var body: some View {
+        WithPerceptionTracking {
         let music = store.music
         HStack(spacing: 12) {
             Button { music.adjustLyrics(by: -0.5) } label: { Label(L10n.text("Lyrics Later"), systemImage: "minus") }
@@ -587,6 +649,8 @@ struct MusicLyricsTiming: View {
         }
         .labelStyle(.titleAndIcon)
         .frame(maxWidth: .infinity)
+
+        }
     }
 }
 
@@ -598,19 +662,21 @@ struct MusicScrubber: View {
     @State private var dragging: Double?
 
     var body: some View {
+        WithPerceptionTracking {
         let music = store.music
         let total = music.duration ?? 0
         let position = dragging.map { $0 * total } ?? min(music.seekingTo ?? music.position, total)
         let fraction = total > 0 ? min(1, max(0, position / total)) : 0
         VStack(spacing: 6) {
             GeometryReader { proxy in
+                WithPerceptionTracking {
                 ZStack(alignment: .leading) {
                     Capsule().fill(.white.opacity(0.22))
                     Capsule().fill(.white.opacity(dragging == nil ? 0.78 : 1)).frame(width: max(0, proxy.size.width * fraction))
                 }
                 .frame(height: dragging == nil ? 7 : 12)
                 .frame(maxHeight: .infinity)
-                .contentShape(.rect)
+                .contentShape(Rectangle())
                 .gesture(DragGesture(minimumDistance: 0)
                     .onChanged { value in if total > 0 { dragging = min(1, max(0, value.location.x / proxy.size.width)) } }
                     .onEnded { _ in
@@ -618,6 +684,8 @@ struct MusicScrubber: View {
                         dragging = nil
                     })
                 .animation(.easeOut(duration: 0.15), value: dragging == nil)
+
+                }
             }
             .frame(height: 22)
             HStack {
@@ -634,13 +702,15 @@ struct MusicScrubber: View {
         .accessibilityAdjustableAction { direction in
             music.skip(by: direction == .increment ? 10 : -10)
         }
+
+        }
     }
 }
 #endif
 
 /// The LX Music custom sources in Music Settings: add one by address (or from a file on iPhone, iPad and
 /// Mac), turn each on or off, remove it. Adding runs the script once to read which catalogs it covers.
-@MainActor @Observable final class MusicLXSourcesModel {
+@MainActor @Perceptible final class MusicLXSourcesModel {
     private(set) var sources: [LXSource] = LXSourceLibrary.shared.sources
     private(set) var busy = false
     var message: String?
@@ -653,7 +723,7 @@ struct MusicScrubber: View {
     func add(address text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        guard let url = URL(string: trimmed), url.host() != nil, ["http", "https"].contains(url.scheme?.lowercased() ?? "") else {
+        guard let url = URL(string: trimmed), url.host != nil, ["http", "https"].contains(url.scheme?.lowercased() ?? "") else {
             report(TVError.invalidURL); return
         }
         run { try await LXSourceLibrary.shared.add(script: LXSourceLibrary.download(url), origin: url) }
@@ -710,19 +780,25 @@ struct MusicLXSourcesSection: View {
     @State private var model = MusicLXSourcesModel()
     @State private var address = ""
     var body: some View {
+        WithPerceptionTracking {
         TVSettingsSection(title: L10n.text("LX Music Sources"), footer: [model.message, MusicLXSourcesModel.note].compactMap { $0 }.joined(separator: "\n\n")) {
             ForEach(model.sources) { source in
+                WithPerceptionTracking {
                 TVSettingsToggle(title: source.info.name, detail: MusicLXSourcesModel.detail(source), isOn: model.enabled(source))
                 TVSettingsAction(title: L10n.text("Remove “%@”", source.info.name), destructive: true) { model.remove(source) }
+
+                }
             }
             // Apple TV has no files to pick: sources come from an address.
             TVSettingsField(title: L10n.text("Add from Address"), text: $address)
                 .disabled(model.busy)
-                .onChange(of: address) { _, text in
+                .tvOnChange(of: address) { _, text in
                     guard !text.isEmpty else { return }
                     model.add(address: text)
                     address = ""
                 }
+        }
+
         }
     }
 }
@@ -732,8 +808,10 @@ struct MusicLXSourcesSection: View {
     @State private var address = ""
     @State private var importing = false
     var body: some View {
+        WithPerceptionTracking {
         Section {
             ForEach(model.sources) { source in
+                WithPerceptionTracking {
                 HStack {
                     Toggle(isOn: model.enabled(source)) {
                         VStack(alignment: .leading, spacing: 2) {
@@ -746,10 +824,12 @@ struct MusicLXSourcesSection: View {
                         .buttonStyle(.borderless)
                         .accessibilityLabel(L10n.text("Remove “%@”", source.info.name))
                 }
+
+                }
             }
             HStack {
                 TextField(L10n.text("Source address"), text: $address)
-                    .autocorrectionDisabled()
+                    .disableAutocorrection()
                     #if os(iOS)
                     .textInputAutocapitalization(.never).keyboardType(.URL)
                     #endif
@@ -769,6 +849,8 @@ struct MusicLXSourcesSection: View {
         .fileImporter(isPresented: $importing, allowedContentTypes: [.javaScript, .plainText, .data]) { result in
             if case .success(let file) = result { model.add(file: file) }
         }
+
+        }
     }
 
     private func add() {
@@ -781,7 +863,7 @@ struct MusicLXSourcesSection: View {
 /// The music extensions in Music Settings (Listenify-format scripts such as allfm.js): add one by address (or
 /// from a file on iPhone, iPad and Mac), turn each on or off, remove it. Their lists show on the Music page,
 /// which reloads their shelves after a change; their songs show in Music search.
-@MainActor @Observable final class MusicExtensionsModel {
+@MainActor @Perceptible final class MusicExtensionsModel {
     private(set) var items: [MusicExtension] = MusicExtensionLibrary.shared.extensions
     private(set) var busy = false
     var message: String?
@@ -796,7 +878,7 @@ struct MusicLXSourcesSection: View {
     func add(address text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        guard let url = URL(string: trimmed), url.host() != nil, ["http", "https"].contains(url.scheme?.lowercased() ?? "") else {
+        guard let url = URL(string: trimmed), url.host != nil, ["http", "https"].contains(url.scheme?.lowercased() ?? "") else {
             report(TVError.invalidURL); return
         }
         run { try await MusicExtensionLibrary.shared.add(script: MusicExtensionLibrary.download(url), origin: url) }
@@ -857,21 +939,27 @@ struct MusicExtensionsSection: View {
     @State private var model = MusicExtensionsModel()
     @State private var address = ""
     var body: some View {
+        WithPerceptionTracking {
         TVSettingsSection(title: L10n.text("Music Extensions"), footer: [model.message, MusicExtensionsModel.note].compactMap { $0 }.joined(separator: "\n\n")) {
             ForEach(model.items) { item in
+                WithPerceptionTracking {
                 TVSettingsToggle(title: item.name, detail: MusicExtensionsModel.detail(item), isOn: model.enabled(item))
                 TVSettingsAction(title: L10n.text("Remove “%@”", item.name), destructive: true) { model.remove(item) }
+
+                }
             }
             // Apple TV has no files to pick: extensions come from an address.
             TVSettingsField(title: L10n.text("Add from Address"), text: $address)
                 .disabled(model.busy)
-                .onChange(of: address) { _, text in
+                .tvOnChange(of: address) { _, text in
                     guard !text.isEmpty else { return }
                     model.add(address: text)
                     address = ""
                 }
         }
         .onAppear { model.changed = { [store] in Task { await store.musicBrowse.reload(.ext) } } }
+
+        }
     }
 }
 #else
@@ -881,8 +969,10 @@ struct MusicExtensionsSection: View {
     @State private var address = ""
     @State private var importing = false
     var body: some View {
+        WithPerceptionTracking {
         Section {
             ForEach(model.items) { item in
+                WithPerceptionTracking {
                 HStack {
                     Toggle(isOn: model.enabled(item)) {
                         VStack(alignment: .leading, spacing: 2) {
@@ -896,10 +986,12 @@ struct MusicExtensionsSection: View {
                         .buttonStyle(.borderless)
                         .accessibilityLabel(L10n.text("Remove “%@”", item.name))
                 }
+
+                }
             }
             HStack {
                 TextField(L10n.text("Extension address"), text: $address)
-                    .autocorrectionDisabled()
+                    .disableAutocorrection()
                     #if os(iOS)
                     .textInputAutocapitalization(.never).keyboardType(.URL)
                     #endif
@@ -920,6 +1012,8 @@ struct MusicExtensionsSection: View {
             if case .success(let file) = result { model.add(file: file) }
         }
         .onAppear { model.changed = { [store] in Task { await store.musicBrowse.reload(.ext) } } }
+
+        }
     }
 
     private func add() {

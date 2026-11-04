@@ -1,3 +1,4 @@
+import Perception
 import SwiftUI
 import TVCore
 
@@ -28,6 +29,7 @@ struct PluginSignInView: View {
     private var expired: Bool { now >= prompt.expires }
 
     var body: some View {
+        WithPerceptionTracking {
         content
         #if os(macOS)
         .frame(minWidth: 640, minHeight: 360)
@@ -37,16 +39,21 @@ struct PluginSignInView: View {
         #endif
         #if os(iOS)
         .sheet(isPresented: $signingIn) {
+            WithPerceptionTracking {
             if let service = WebSignIn(rawValue: prompt.drive) {
                 WebSignInView(service: service) { PluginSignIn.shared.signedInHere(prompt) }
+            }
+
             }
         }
         #endif
         .task {
             while !Task.isCancelled && !expired {
-                try? await Task.sleep(for: .seconds(1))
+                try? await tvSleep(for: .seconds(1))
                 now = Date()
             }
+        }
+
         }
     }
 
@@ -89,9 +96,15 @@ struct PluginSignInView: View {
     #else
     private var content: some View {
         // Side by side on a TV or Mac.
-        ViewThatFits(in: .horizontal) {
+        Group {
+            if #available(iOS 16, macOS 13, tvOS 16, *) {
+                ViewThatFits(in: .horizontal) {
             HStack(alignment: .center, spacing: spacing) { code; details }
             ScrollView { VStack(alignment: .leading, spacing: spacing) { code; details } }
+        }
+            } else {
+                ScrollView { VStack(alignment: .leading, spacing: spacing) { code; details } }
+            }
         }
         .padding(spacing)
     }

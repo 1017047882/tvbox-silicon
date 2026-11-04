@@ -1,3 +1,4 @@
+import Perception
 import SwiftUI
 import TVCore
 
@@ -52,6 +53,7 @@ struct DiscoverTVHeroPager: View {
     private var index: Int { items.firstIndex { $0.key == selection } ?? 0 }
 
     var body: some View {
+        WithPerceptionTracking {
         if !items.isEmpty {
             let item = items[index]
             let detail = details[item.key]
@@ -86,8 +88,10 @@ struct DiscoverTVHeroPager: View {
 
             }
             .overlay(alignment: .bottom) {
+                WithPerceptionTracking {
                 HStack(spacing: 0) {
                     ForEach(items.indices, id: \.self) { page in
+                        WithPerceptionTracking {
                         Button { openRoute?(Route { AnyView(DiscoverDetailView(item: items[page])) }) } label: {
                             Circle().fill(.white.opacity(page == index ? 1 : 0.35))
                                 .frame(width: page == focusedPage ? 13 : 8, height: page == focusedPage ? 13 : 8)
@@ -104,25 +108,37 @@ struct DiscoverTVHeroPager: View {
                         .accessibilityLabel(items[page].name)
                         .accessibilityIdentifier("discover.pageDot.\(page)")
                         .accessibilityAddTraits(page == index ? [.isSelected] : [])
+
+                        }
                     }
                 }
                 .padding(.horizontal, 16)
                 .background(alignment: .bottom) {
+                    WithPerceptionTracking {
                     Capsule().fill(.white.opacity(focusedPage == nil ? 0 : 0.16)).frame(height: 48).offset(y: 120)
+
+                    }
                 }
                 .overlay(alignment: .bottom) {
+                    WithPerceptionTracking {
                     Capsule().strokeBorder(.white.opacity(focusedPage == nil ? 0 : 0.6), lineWidth: 2).frame(height: 48).offset(y: 120)
                         .allowsHitTesting(false)
+
+                    }
                 }
                 .padding(.top, 160).padding(.bottom, 120)
+
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .focusScope(pagesScope)
             .focusSection()
-            .onChange(of: focusedPage) { _, page in
+            .tvOnChange(of: focusedPage) { _, page in
                 guard let page, items.indices.contains(page) else { return }
                 withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.3)) { selection = items[page].key }
             }
+        }
+
         }
     }
 }
@@ -131,8 +147,11 @@ private struct DiscoverTVLogo: View {
     let url: URL
     @State private var aspect: CGFloat?
     var body: some View {
+        WithPerceptionTracking {
         TMDBArtwork(url: url, maxPixels: 1200, fill: false, aspect: $aspect)
             .frame(width: min(580, 180 * (aspect ?? 3.2)), height: 180)
+
+        }
     }
 }
 
@@ -453,10 +472,13 @@ struct DiscoverTVLiftStyle: ButtonStyle {
         let scale: CGFloat
         @Environment(\.isFocused) private var focused
         var body: some View {
+            WithPerceptionTracking {
             configuration.label
                 .scaleEffect(configuration.isPressed ? scale * 0.97 : focused ? scale : 1)
                 .shadow(color: .black.opacity(focused ? 0.45 : 0), radius: 24, y: 14)
                 .animation(.easeOut(duration: 0.18), value: focused)
+
+            }
         }
     }
 }
@@ -470,6 +492,7 @@ struct DiscoverTVChipStyle: ButtonStyle {
         let active: Bool
         @Environment(\.isFocused) private var focused
         var body: some View {
+            WithPerceptionTracking {
             configuration.label
                 .font(.system(size: 26, weight: .medium)).lineLimit(1)
                 .foregroundStyle(focused ? Color.black : Color.white)
@@ -478,6 +501,8 @@ struct DiscoverTVChipStyle: ButtonStyle {
                 .scaleEffect(configuration.isPressed ? 0.97 : focused ? 1.05 : 1)
                 .shadow(color: .black.opacity(focused ? 0.35 : 0), radius: 16, y: 10)
                 .animation(.easeOut(duration: 0.18), value: focused)
+
+            }
         }
         private var glass: GlassStyle {
             if focused { return .regular.tint(.white.opacity(0.9)).interactive() }
@@ -503,6 +528,7 @@ struct DiscoverTVSearchView: View {
     private let gutter = DiscoverLayout.gutter
 
     var body: some View {
+        WithPerceptionTracking {
         ScrollView {
             VStack(alignment: .leading, spacing: 44) {
                 HStack(spacing: 30) {
@@ -516,7 +542,10 @@ struct DiscoverTVSearchView: View {
                 chips
                 if model.loading && model.groups.isEmpty { ProgressView().frame(maxWidth: .infinity).padding(.top, 80) }
                 ForEach([TMDBCatalog.SearchKind.person, .movie, .tv], id: \.self) { kind in
+                    WithPerceptionTracking {
                     if let group = model.groups[kind], group.count > 0 { section(group, kind: kind) }
+
+                    }
                 }
                 if model.isEmpty && !model.loading && !model.failed {
                     EmptyResults(symbol: "magnifyingglass", title: L10n.text("No Results"), message: L10n.text("Try another title or change your filters."),
@@ -526,17 +555,23 @@ struct DiscoverTVSearchView: View {
                 if model.failed { EmptyResults(symbol: "wifi.exclamationmark", title: L10n.text("Couldn't Load Results"), action: L10n.text("Try Again")) { revision += 1 } }
             }.padding(.top, 50).padding(.bottom, 80)
         }
-        .scrollClipDisabled()
-        .background { DiscoverSearchAtmosphere().ignoresSafeArea() }
+        .tvScrollClipDisabled()
+        .background {
+            WithPerceptionTracking {
+ DiscoverSearchAtmosphere().ignoresSafeArea()
+            }
+        }
         .foregroundStyle(.white).preferredColorScheme(.dark)
-        .toolbar(.hidden, for: .navigationBar)
+        .tvToolbar(.hidden, for: .navigationBar)
         .ignoresSafeArea(edges: .horizontal)
         .defaultFocus($focus, .query)
-        .onChange(of: query) { _, value in if value.count > 100 { query = String(value.prefix(100)) } }
-        .onChange(of: filter) { _, _ in expanded = nil }
+        .tvOnChange(of: query) { _, value in if value.count > 100 { query = String(value.prefix(100)) } }
+        .tvOnChange(of: filter) { _, _ in expanded = nil }
         .task(id: request) { await model.load(request) }
         .sheet(isPresented: $keywordsShown) {
             DiscoverSearchFilters(filter: Binding(get: { current }, set: { filter = $0 }), section: .keywords).frame(width: 900)
+        }
+
         }
     }
 
@@ -552,12 +587,15 @@ struct DiscoverTVSearchView: View {
                 }
                 menu(.genres) {
                     ForEach(DiscoverGenres.ids(for: current.kind), id: \.self) { id in
+                        WithPerceptionTracking {
                         let selected = current.genres.contains(id)
                         Button {
                             update { if selected { $0.genres.remove(id) } else if $0.genres.count < 8 { $0.genres.insert(id) } }
                         } label: {
                             let name = L10n.text(DiscoverGenres.names[id] ?? (id == 10766 ? "Soap" : "War & Politics"))
                             if selected { Label(name, systemImage: "checkmark") } else { Text(name) }
+                        }
+
                         }
                     }
                 }
@@ -590,7 +628,10 @@ struct DiscoverTVSearchView: View {
                     Picker(DiscoverFilterSection.language.title, selection: binding(\.originalLanguage)) {
                         Text(L10n.text("Any")).tag("")
                         ForEach(DiscoverSearchFilters.languages, id: \.self) { code in
+                            WithPerceptionTracking {
                             Text(Locale(identifier: TMDBMatch.language).localizedString(forLanguageCode: code) ?? code).tag(code)
+
+                            }
                         }
                     }
                 }
@@ -598,7 +639,10 @@ struct DiscoverTVSearchView: View {
                     Picker(DiscoverFilterSection.region.title, selection: binding(\.region)) {
                         Text(L10n.text("Any")).tag("")
                         ForEach(DiscoverSearchFilters.regions, id: \.self) { code in
+                            WithPerceptionTracking {
                             Text(Locale(identifier: TMDBMatch.language).localizedString(forRegionCode: code) ?? code).tag(code)
+
+                            }
                         }
                     }
                 }
@@ -611,7 +655,7 @@ struct DiscoverTVSearchView: View {
                         .accessibilityIdentifier("discover.search.resetFilters")
                 }
             }.padding(.horizontal, gutter).padding(.vertical, 16)
-        }.scrollClipDisabled().focusSection()
+        }.tvScrollClipDisabled().focusSection()
     }
 
     private func menu(_ section: DiscoverFilterSection, @ViewBuilder content: () -> some View) -> some View {
@@ -657,28 +701,47 @@ struct DiscoverTVSearchView: View {
             if kind == .person {
                 ScrollView(.horizontal) {
                     LazyHStack(alignment: .top, spacing: 40) {
+                        WithPerceptionTracking {
                         ForEach(group.people) { person in
+                            WithPerceptionTracking {
                             RouteLink { DiscoverPersonView(id: person.id, name: person.name, profile: person.profile) } label: { portrait(person) }
                                 .cardButton(.circle)
                                 .accessibilityIdentifier("discover.search.person.\(person.id)")
+
+                            }
+                        }
+
                         }
                     }.padding(.horizontal, gutter).padding(.vertical, 24)
-                }.scrollClipDisabled()
+                }.tvScrollClipDisabled()
             } else if grid {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 40), count: 3), alignment: .leading, spacing: 40) {
+                    WithPerceptionTracking {
                     ForEach(group.items, id: \.key) { item in
+                        WithPerceptionTracking {
                         card(item).onAppear {
                             if item.key == group.items.last?.key { Task { await model.more(kind, request: request) } }
                         }
+
+                        }
+                    }
+
                     }
                 }.padding(.horizontal, gutter)
                 if group.loadingMore { ProgressView().frame(maxWidth: .infinity) }
             } else {
                 ScrollView(.horizontal) {
                     LazyHStack(spacing: 40) {
-                        ForEach(group.items, id: \.key) { item in card(item).frame(width: 590) }
+                        WithPerceptionTracking {
+                        ForEach(group.items, id: \.key) { item in
+                            WithPerceptionTracking {
+ card(item).frame(width: 590)
+                            }
+                        }
+
+                        }
                     }.padding(.horizontal, gutter).padding(.vertical, 24)
-                }.scrollClipDisabled()
+                }.tvScrollClipDisabled()
             }
         }.focusSection()
     }
@@ -705,6 +768,7 @@ struct DiscoverTVSearchView: View {
 private struct DiscoverTVSearchCard: View {
     let item: TMDBCatalog.Item
     var body: some View {
+        WithPerceptionTracking {
         HStack(alignment: .top, spacing: 24) {
             PosterImage(url: item.poster).frame(width: 150, height: 225).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             VStack(alignment: .leading, spacing: 10) {
@@ -717,8 +781,11 @@ private struct DiscoverTVSearchCard: View {
                     HStack(spacing: 8) {
                         HStack(spacing: 2) {
                             ForEach(0..<5) { index in
+                                WithPerceptionTracking {
                                 Image(systemName: rating / 2 >= Double(index + 1) ? "star.fill" : rating / 2 > Double(index) ? "star.leadinghalf.filled" : "star")
                                     .font(.system(size: 20)).foregroundStyle(rating / 2 > Double(index) ? Color.yellow : .white.opacity(0.4))
+
+                                }
                             }
                         }
                         Text(rating, format: .number.precision(.fractionLength(1))).font(.system(size: 23)).foregroundStyle(.yellow)
@@ -731,8 +798,13 @@ private struct DiscoverTVSearchCard: View {
         }
         .padding(12).frame(height: 249)
         .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .overlay { RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(.white.opacity(0.08), lineWidth: 1) }
+        .overlay {
+            WithPerceptionTracking {
+ RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(.white.opacity(0.08), lineWidth: 1)
+            }
+        }
+
+        }
     }
 }
 #endif
-

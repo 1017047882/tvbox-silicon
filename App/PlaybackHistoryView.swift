@@ -1,3 +1,5 @@
+import Perception
+import NavigationBackport
 import SwiftUI
 import TVCore
 
@@ -15,6 +17,7 @@ struct PlaybackHistoryView: View {
     }
 
     var body: some View {
+        WithPerceptionTracking {
         Group {
             if history.entries.isEmpty {
                 EmptyPage(symbol: AppSection.history.icon, title: L10n.text("No Playback History Yet"),
@@ -27,7 +30,7 @@ struct PlaybackHistoryView: View {
         .screenBackdrop()
         .historyDetailsDestination()
         .tabTitle(L10n.text("Playback History"))
-        .onChange(of: history.entries.isEmpty) { _, empty in if empty { managing = false; selected.removeAll() } }
+        .tvOnChange(of: history.entries.isEmpty) { _, empty in if empty { managing = false; selected.removeAll() } }
         // Leaving the page gives up a title still being prepared.
         .onDisappear { if store.playing == nil { store.cancelResume() } }
         .confirmationDialog(L10n.text("Remove selected history and its cached content?"), isPresented: $confirmsDelete, titleVisibility: .visible) {
@@ -37,6 +40,8 @@ struct PlaybackHistoryView: View {
             .accessibilityIdentifier("history.confirmDelete")
         } message: {
             Text(L10n.text("Removing a title also clears its cached content and skip times."))
+        }
+
         }
     }
 
@@ -48,9 +53,15 @@ struct PlaybackHistoryView: View {
                 }
                 header
                 LazyVGrid(columns: Layout.posterColumns, spacing: Layout.gridRowSpacing) {
+                    WithPerceptionTracking {
                     ForEach(entries) { entry in
+                        WithPerceptionTracking {
                         HistoryCard(entry: entry, selection: managing ? selected.contains(entry.id) : nil, details: true,
                                     action: managing ? { tap(entry) } : nil)
+
+                        }
+                    }
+
                     }
                 }
                 .tvFocusSection()
@@ -63,7 +74,9 @@ struct PlaybackHistoryView: View {
     /// managing swaps them for selection actions.
     private var header: some View {
         let title = SectionHeader(title: L10n.text("%lld titles", entries.count))
-        return ViewThatFits(in: .horizontal) {
+        return Group {
+            if #available(iOS 16, macOS 13, tvOS 16, *) {
+                ViewThatFits(in: .horizontal) {
             HStack(alignment: .center, spacing: 12) {
                 title
                 Spacer(minLength: 12)
@@ -72,6 +85,13 @@ struct PlaybackHistoryView: View {
             VStack(alignment: .leading, spacing: 12) {
                 title
                 HStack(spacing: 10) { actions }
+            }
+        }
+            } else {
+                VStack(alignment: .leading, spacing: 12) {
+                title
+                HStack(spacing: 10) { actions }
+            }
             }
         }
         .tvFocusSection()
@@ -151,6 +171,7 @@ struct HistoryCard: View {
         #endif
     }
     var body: some View {
+        WithPerceptionTracking {
         // The heart is a sibling of the poster button, so a click does not resume or change the selection.
         ZStack(alignment: .topLeading) {
             posterButton
@@ -162,9 +183,14 @@ struct HistoryCard: View {
         #if !os(tvOS)
         // The menu lifts the whole card. Lifted from the poster alone, it left the heart drawn above
         // the poster behind: alone over the hole for a moment, then gone under the blur, a flicker.
-        .contextMenu { menu }
+        .contextMenu {
+            WithPerceptionTracking {
+ menu
+            }
+        }
         #endif
         .overlay(alignment: .topTrailing) {
+            WithPerceptionTracking {
             if selection == nil, hovering {
                 HStack(spacing: 6) {
                     if let details = detailsRoute { detailsButton(details) }
@@ -173,11 +199,15 @@ struct HistoryCard: View {
                     .padding(8)
                     .transition(.opacity)
             }
+
+            }
         }
         #if !os(tvOS)
         .onHover { hovering = $0 }
-        .animation(.smooth(duration: 0.15), value: hovering)
+        .animation(.tvSmooth(duration: 0.15), value: hovering)
         #endif
+
+        }
     }
 
     /// Remove control, rose under the pointer. A pointer shows it; the context menu stays for touch and the remote.
@@ -213,7 +243,7 @@ struct HistoryCard: View {
             #if os(iOS)
             // On an iPhone the title's watch page opens and resumes it at the top (`VideoDetailView`).
             if action == nil, WatchPage.applies(horizontalSizeClass, verticalSizeClass), let client = store.historyClient(entry) {
-                NavigationLink(value: Route { AnyView(VideoDetailView(video: entry.listVideo, client: client, resume: entry)) }) { cardLabel }
+                NBNavigationLink(value: Route { AnyView(VideoDetailView(video: entry.listVideo, client: client, resume: entry)) }) { cardLabel }
                     .cardButton()
             } else {
                 resumeButton
@@ -226,7 +256,11 @@ struct HistoryCard: View {
         .accessibilityIdentifier((selection != nil ? "history.select." : "history.resume.") + entry.context.videoID)
         #if os(tvOS)
         // The remote opens a menu on the focused button, so it stays here.
-        .contextMenu { menu }
+        .contextMenu {
+            WithPerceptionTracking {
+ menu
+            }
+        }
         #endif
     }
 
@@ -241,13 +275,24 @@ struct HistoryCard: View {
     private var cardLabel: some View {
         VStack(alignment: centredCaptions ? .center : .leading, spacing: 8) {
             Color.clear.aspectRatio(2.0 / 3.0, contentMode: .fit)
-                .overlay { PosterImage(url: entry.context.poster, headers: entry.context.posterHeaders ?? [:]) }
+                .overlay {
+                    WithPerceptionTracking {
+ PosterImage(url: entry.context.poster, headers: entry.context.posterHeaders ?? [:])
+                    }
+                }
                 .coverOverlay(alignment: .bottom) {
                     if entry.duration > 0 {
                         // White on the artwork, as in the TV app: the accent is near-black in light mode.
                         GeometryReader { proxy in
+                            WithPerceptionTracking {
                             Capsule().fill(.white.opacity(0.25))
-                                .overlay(alignment: .leading) { Capsule().fill(.white).frame(width: proxy.size.width * entry.progress) }
+                                .overlay(alignment: .leading) {
+                                    WithPerceptionTracking {
+ Capsule().fill(.white).frame(width: proxy.size.width * entry.progress)
+                                    }
+                                }
+
+                            }
                         }
                         .frame(height: 5).padding(10)
                     }
@@ -257,7 +302,7 @@ struct HistoryCard: View {
                         Image(systemName: selection ? "checkmark.circle.fill" : "circle")
                             .font(.title2).symbolRenderingMode(.palette)
                             .foregroundStyle(selection ? Brand.onAccent : .white, selection ? Brand.accent : .black.opacity(0.35))
-                            .contentTransition(.symbolEffect(.replace))
+                            .tvContentTransition(.symbolEffect(.replace))
                             .padding(8)
                     }
                 }
@@ -266,7 +311,7 @@ struct HistoryCard: View {
                     if store.resumingHistoryID == entry.id {
                         ZStack {
                             Color.black.opacity(0.5)
-                            ProgressView().controlSize(.large).tint(.white)
+                            ProgressView().tvLargeControl().tint(.white)
                         }
                     }
                 }
@@ -318,14 +363,20 @@ private struct HistoryDetailsDestination: ViewModifier {
     @Environment(\.openRoute) private var openRoute
     @State private var route: Route?
     func body(content: Content) -> some View {
+        WithPerceptionTracking {
         content
             .environment(\.openHistoryDetails) { if let openRoute { openRoute($0) } else { route = $0 } }
-            .navigationDestination(item: $route) { route in
+            .nbNavigationDestination(item: $route) { route in
+                WithPerceptionTracking {
                 #if os(macOS)
                 route.build().musicBar()
                 #else
                 route.build()
                 #endif
+
+                }
             }
+
+        }
     }
 }

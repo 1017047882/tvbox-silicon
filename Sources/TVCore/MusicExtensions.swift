@@ -125,7 +125,7 @@ public enum MusicExtensionItems {
         guard let value = json(text) else { return nil }
         let first = value["urls"]?.array?.first ?? value["url"]
         guard let address = first?.string ?? first?["url"]?.string, let url = URL(string: address),
-              let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https", url.host() != nil else { return nil }
+              let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https", url.host != nil else { return nil }
         var headers: [String: String] = [:]
         let fields = value["headers"]?.array?.first ?? value["headers"] ?? first?["headers"]
         for (field, entry) in fields?.object ?? [:] {
@@ -135,7 +135,7 @@ public enum MusicExtensionItems {
     }
 
     private static func url(_ value: JSONValue?) -> URL? {
-        guard let text = value?.string, !text.isEmpty, let url = URL(string: text), url.host() != nil else { return nil }
+        guard let text = value?.string, !text.isEmpty, let url = URL(string: text), url.host != nil else { return nil }
         return url
     }
 
@@ -168,9 +168,9 @@ public final class MusicExtensionLibrary: @unchecked Sendable {
     static var defaultFolder: URL {
         #if os(tvOS)
         // tvOS only permits Caches; a cleared script is fetched again from where it came from.
-        URL.cachesDirectory.appending(path: "com.tvbox.yingxia/MusicExtensions", directoryHint: .isDirectory)
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("com.tvbox.yingxia/MusicExtensions", isDirectory: true)
         #else
-        URL.applicationSupportDirectory.appending(path: "com.tvbox.yingxia/MusicExtensions", directoryHint: .isDirectory)
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("com.tvbox.yingxia/MusicExtensions", isDirectory: true)
         #endif
     }
     static let defaultsKey = "musicExtensions"
@@ -253,7 +253,7 @@ public final class MusicExtensionLibrary: @unchecked Sendable {
         return text
     }
 
-    private func file(_ id: String) -> URL { folder.appending(path: id + ".js") }
+    private func file(_ id: String) -> URL { folder.appendingPathComponent(id + ".js") }
 
     private func update(_ change: (inout [MusicExtension]) -> Void) {
         lock.withLock {

@@ -74,7 +74,7 @@ public struct CloudSyncLedger<Value: Codable & Equatable & Sendable>: Codable, E
 }
 
 @MainActor private protocol CloudSyncChannel: AnyObject {
-    var delay: Duration { get }
+    var delay: TVDelay { get }
     func flush(_ cloud: any CloudValueStore, now: Date)
     func reset()
 }
@@ -85,12 +85,12 @@ public struct CloudSyncLedger<Value: Codable & Equatable & Sendable>: Codable, E
 @MainActor private final class SyncChannel<Value: Codable & Equatable & Sendable>: CloudSyncChannel {
     let key: String
     let file: URL
-    let delay: Duration
+    let delay: TVDelay
     let current: @MainActor () -> [String: Value]
     let apply: @MainActor ([CloudSyncItem<Value>]) -> Void
     var ledger: CloudSyncLedger<Value>
 
-    init(key: String, file: URL, delay: Duration, current: @escaping @MainActor () -> [String: Value],
+    init(key: String, file: URL, delay: TVDelay, current: @escaping @MainActor () -> [String: Value],
          apply: @escaping @MainActor ([CloudSyncItem<Value>]) -> Void) {
         self.key = key; self.file = file; self.delay = delay; self.current = current; self.apply = apply
         ledger = (try? Data(contentsOf: file)).flatMap { try? JSONDecoder().decode(CloudSyncLedger<Value>.self, from: $0) } ?? CloudSyncLedger()
@@ -148,11 +148,11 @@ public struct CloudSyncLedger<Value: Codable & Equatable & Sendable>: Codable, E
     public init(cloud: any CloudValueStore = NSUbiquitousKeyValueStore.default, directory: URL? = nil, defaults: UserDefaults = .standard) {
         self.cloud = cloud; self.defaults = defaults
         #if os(tvOS)
-        let base = URL.cachesDirectory
+        let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         #else
-        let base = URL.applicationSupportDirectory
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         #endif
-        self.directory = directory ?? base.appending(path: "icloud-sync")
+        self.directory = directory ?? base.appendingPathComponent("icloud-sync")
     }
 
     /// On unless the viewer turned it off in Settings.
@@ -160,12 +160,12 @@ public struct CloudSyncLedger<Value: Codable & Equatable & Sendable>: Codable, E
 
     /// `current` is what this device holds now, by id; `apply` replaces it with the merged result.
     /// `delay` is how long a change waits for the next one before it goes up.
-    public func register<Value: Codable & Equatable & Sendable>(_ key: String, delay: Duration = .seconds(3),
+    public func register<Value: Codable & Equatable & Sendable>(_ key: String, delay: TVDelay = .seconds(3),
                                                                 current: @escaping @MainActor () -> [String: Value],
                                                                 apply: @escaping @MainActor ([CloudSyncItem<Value>]) -> Void) {
         let cloudKey = "sync." + key
         if channels[cloudKey] == nil { order.append(cloudKey) }
-        channels[cloudKey] = SyncChannel(key: cloudKey, file: directory.appending(path: key + ".json"), delay: delay, current: current, apply: apply)
+        channels[cloudKey] = SyncChannel(key: cloudKey, file: directory.appendingPathComponent(key + ".json"), delay: delay, current: current, apply: apply)
     }
 
     /// Listens for other devices' changes and merges everything once.
@@ -188,7 +188,7 @@ public struct CloudSyncLedger<Value: Codable & Equatable & Sendable>: Codable, E
         let key = "sync." + key
         guard isEnabled, pending[key] == nil, let delay = channels[key]?.delay else { return }
         pending[key] = Task { [weak self] in
-            try? await Task.sleep(for: delay)
+            try? await tvSleep(for: delay)
             guard let self, !Task.isCancelled else { return }
             self.pending[key] = nil
             self.flush([key])

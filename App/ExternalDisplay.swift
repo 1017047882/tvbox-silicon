@@ -115,13 +115,21 @@ private final class PlayerLayerDisplay: UIView {
 /// only while the player is on screen, so the system takes the display back once playback closes.
 struct ExternalDisplaySceneRegistrar: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> UIViewController {
-        if #available(iOS 27.0, *) { return ExternalDisplayAccessoryController() }
+
+#if TVBOX_SDK27
+if #available(iOS 27.0, *) { return ExternalDisplayAccessoryController() }
+#else
+
+#endif
+
         return UIViewController()
     }
 
     func updateUIViewController(_ controller: UIViewController, context: Context) {}
 }
 
+
+#if TVBOX_SDK27
 @available(iOS 27.0, *)
 private final class ExternalDisplayAccessoryController: UIViewController {
     private var registration: UISceneAccessoryRegistration?
@@ -148,6 +156,8 @@ private final class ExternalDisplayAccessoryController: UIViewController {
         self.registration = nil
     }
 }
+#endif
+
 
 /// The external-display scene's delegate. Its window is made by `ExternalDisplay`, when a video is playing.
 @objc(ExternalDisplaySceneDelegate)

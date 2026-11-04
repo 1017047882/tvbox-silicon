@@ -1,3 +1,4 @@
+import Perception
 import SwiftUI
 import TVCore
 
@@ -12,6 +13,7 @@ struct BilibiliAccountView: View {
     #endif
 
     var body: some View {
+        WithPerceptionTracking {
         SettingsPage(title: L10n.text("Bilibili Account"), symbol: "play.tv") {
             if account.signedIn {
                 SettingsGroup(footer: L10n.text("Bilibili plays the qualities your account allows. Sign-in details stay on this device.")) {
@@ -42,6 +44,8 @@ struct BilibiliAccountView: View {
             }
         }
         #endif
+
+        }
     }
 
     /// Shows the current name and membership, and notices a login that expired on the server.
@@ -64,9 +68,16 @@ struct BilibiliCodeSignIn: View {
     @State private var attempt = 0
 
     var body: some View {
-        ViewThatFits(in: .horizontal) {
+        WithPerceptionTracking {
+        Group {
+            if #available(iOS 16, macOS 13, tvOS 16, *) {
+                ViewThatFits(in: .horizontal) {
             HStack(alignment: .center, spacing: spacing) { code; details }
             VStack(alignment: .leading, spacing: spacing) { code; details }
+        }
+            } else {
+                VStack(alignment: .leading, spacing: spacing) { code; details }
+            }
         }
         #if os(tvOS)
         .frame(maxWidth: .infinity)
@@ -74,6 +85,8 @@ struct BilibiliCodeSignIn: View {
         .padding(.vertical, 10)
         #endif
         .task(id: attempt) { await run() }
+
+        }
     }
 
     private var details: some View {
@@ -137,7 +150,7 @@ struct BilibiliCodeSignIn: View {
             let login = try await BilibiliQRLogin.start()
             self.login = login
             while !Task.isCancelled {
-                try await Task.sleep(for: .seconds(2))
+                try await tvSleep(for: .seconds(2))
                 switch try await login.poll() {
                 case .waiting: continue
                 case .scanned: scanned = true
@@ -175,6 +188,7 @@ extension BilibiliAccount {
 /// Atop the Bilibili source while signed out: signing in adds the account's lists to the source.
 struct BilibiliSignInBanner: View {
     var body: some View {
+        WithPerceptionTracking {
         HStack(spacing: 16) {
             BilibiliMark(size: 44)
             VStack(alignment: .leading, spacing: 4) {
@@ -187,5 +201,7 @@ struct BilibiliSignInBanner: View {
         }
         .padding(16)
         .contentPanel()
+
+        }
     }
 }

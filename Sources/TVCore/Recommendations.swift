@@ -13,7 +13,7 @@ public struct PosterResource: Hashable, Sendable {
         var headers = headers
         // Douban's image hosts refuse covers without a Douban Referer (HTTP 418, or 403 with another site's);
         // many sources and the Douban lists on Discover show them.
-        if url.host()?.hasSuffix(".doubanio.com") == true, !headers.keys.contains(where: { $0.caseInsensitiveCompare("Referer") == .orderedSame }) {
+        if url.host?.hasSuffix(".doubanio.com") == true, !headers.keys.contains(where: { $0.caseInsensitiveCompare("Referer") == .orderedSame }) {
             headers["Referer"] = "https://movie.douban.com/"
         }
         self.headers = headers

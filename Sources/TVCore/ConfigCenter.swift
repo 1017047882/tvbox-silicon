@@ -19,7 +19,7 @@ public enum ConfigCenter {
     /// Wex's server redirects to the plugin proxy at this device's network address, but the proxy only listens on
     /// loopback, and loopback needs neither a network nor local network access.
     public static func local(_ url: URL) -> URL? {
-        guard url.scheme == "http", let host = url.host() else { return nil }
+        guard url.scheme == "http", let host = url.host else { return nil }
         if ["127.0.0.1", "localhost", "::1"].contains(host) { return url }
         guard ownAddresses().contains(host), var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
         parts.host = "127.0.0.1"

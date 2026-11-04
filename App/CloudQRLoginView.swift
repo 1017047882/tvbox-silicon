@@ -1,3 +1,4 @@
+import Perception
 import SwiftUI
 import TVCore
 
@@ -37,10 +38,17 @@ struct CloudQRLoginView: View {
         #endif
     }
     var body: some View {
+        WithPerceptionTracking {
         // Side by side on a TV, iPad or Mac; stacked on a phone.
-        ViewThatFits(in: .horizontal) {
+        Group {
+            if #available(iOS 16, macOS 13, tvOS 16, *) {
+                ViewThatFits(in: .horizontal) {
             HStack(alignment: .center, spacing: codeSpacing) { code; details }
             ScrollView { VStack(alignment: .leading, spacing: codeSpacing) { code; details } }
+        }
+            } else {
+                ScrollView { VStack(alignment: .leading, spacing: codeSpacing) { code; details } }
+            }
         }
         .padding(codeSpacing)
         #if os(macOS)
@@ -50,6 +58,8 @@ struct CloudQRLoginView: View {
         .screenBackdrop()
         #endif
         .task(id: attempt) { await run() }
+
+        }
     }
     private var details: some View {
         VStack(alignment: .leading, spacing: 28) {
@@ -123,7 +133,7 @@ struct CloudQRLoginView: View {
             let login = try await CloudDriveQRLogin.start(drive)
             self.login = login
             while !Task.isCancelled {
-                try await Task.sleep(for: .seconds(2))
+                try await tvSleep(for: .seconds(2))
                 switch try await login.poll() {
                 case .waiting: continue
                 case .expired: expired = true; return

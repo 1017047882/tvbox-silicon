@@ -71,7 +71,7 @@ public enum PlayOn {
     public static func isPortable(_ url: URL) -> Bool {
         if LiveCatalog.isRoomAddress(url) { return true }
         guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https",
-              let host = url.host()?.lowercased(), !host.isEmpty else { return false }
+              let host = url.host?.lowercased(), !host.isEmpty else { return false }
         return !["127.0.0.1", "localhost", "::1", "[::1]", "0.0.0.0"].contains(host)
     }
 

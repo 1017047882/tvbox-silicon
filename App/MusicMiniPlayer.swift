@@ -1,3 +1,4 @@
+import Perception
 import SwiftUI
 import TVCore
 
@@ -8,11 +9,18 @@ struct MusicArtwork: View {
     var size: CGFloat?
     var symbol = "music.note"
     var body: some View {
+        WithPerceptionTracking {
         Color.clear
             .aspectRatio(1, contentMode: .fit)
-            .overlay { PosterImage(url: url, symbol: symbol) }
+            .overlay {
+                WithPerceptionTracking {
+ PosterImage(url: url, symbol: symbol)
+                }
+            }
             .frame(width: size, height: size)
             .posterClip(RoundedRectangle(cornerRadius: size.map { max(4, $0 * 0.12) } ?? 12, style: .continuous))
+
+        }
     }
 }
 
@@ -25,6 +33,7 @@ struct MusicMiniPlayer: View {
     var inline = false
 
     var body: some View {
+        WithPerceptionTracking {
         let music = store.music
         HStack(spacing: inline ? 10 : 12) {
             MusicArtwork(url: music.track?.artwork, size: inline ? 28 : 34)
@@ -44,7 +53,7 @@ struct MusicMiniPlayer: View {
                     ProgressView().frame(width: 36, height: 36)
                 } else {
                     button(music.isPlaying ? "pause.fill" : "play.fill", label: music.isPlaying ? "Pause" : "Play") { music.toggle() }
-                        .contentTransition(.symbolEffect(.replace))
+                        .tvContentTransition(.symbolEffect(.replace))
                 }
                 if !inline {
                     button("forward.fill", label: "Next") { music.next() }.disabled(music.queue?.hasNext != true)
@@ -56,14 +65,17 @@ struct MusicMiniPlayer: View {
         }
         .padding(.leading, inline ? 6 : 10).padding(.trailing, inline ? 4 : 8)
         .frame(maxHeight: .infinity)
-        .contentShape(.rect)
+        .contentShape(Rectangle())
         .onTapGesture { music.presentsPlayer = true }
         // A swipe across the strip closes it too, as the × does.
         .simultaneousGesture(DragGesture(minimumDistance: 24).onEnded { drag in
             if abs(drag.translation.width) > 80, abs(drag.translation.width) > abs(drag.translation.height) * 2 { music.stop() }
         })
         .contextMenu {
+            WithPerceptionTracking {
             Button(role: .destructive) { music.stop() } label: { Label(L10n.text("Stop"), systemImage: "xmark") }
+
+            }
         }
         .accessibilityElement(children: .contain)
         .accessibilityAction(named: L10n.text("Now Playing")) { music.presentsPlayer = true }
@@ -72,11 +84,13 @@ struct MusicMiniPlayer: View {
         // `-qaNowPlaying artwork|lyrics|queue` opens Now Playing on that panel, for screenshots.
         .task { if UserDefaults.standard.string(forKey: "qaNowPlaying") != nil { music.presentsPlayer = true } }
         #endif
+
+        }
     }
 
     private func button(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: symbol).frame(width: 36, height: 36).contentShape(.rect)
+            Image(systemName: symbol).frame(width: 36, height: 36).contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(L10n.text(label))
@@ -88,25 +102,47 @@ struct MusicMiniPlayer: View {
 /// there is no way to hide the slot, so pages show the strip themselves (`musicPlayerInset`).
 extension View {
     @ViewBuilder func musicAccessory(enabled: Bool) -> some View {
-        if #available(iOS 26.1, *) {
+
+#if compiler(>=6.2.1)
+if #available(iOS 26.1, *) {
             tabViewBottomAccessory(isEnabled: enabled) { MusicAccessoryContent() }
         } else {
             self
         }
+#else
+
+            self
+
+#endif
+
     }
 }
 
 enum MusicAccessory {
     /// The system's accessory holds the mini player: iOS 26.1 on a phone.
     static func used(compact: Bool) -> Bool {
-        if #available(iOS 26.1, *) { return compact }
+
+#if compiler(>=6.2.1)
+if #available(iOS 26.1, *) { return compact }
+#else
+
+#endif
+
         return false
     }
 }
 
+
+#if compiler(>=6.2.1)
 @available(iOS 26.1, *)
 private struct MusicAccessoryContent: View {
     @Environment(\.tabViewBottomAccessoryPlacement) private var placement
-    var body: some View { MusicMiniPlayer(inline: placement == .inline) }
+    var body: some View {
+        WithPerceptionTracking {
+ MusicMiniPlayer(inline: placement == .inline)
+        }
+    }
 }
+#endif
+
 #endif

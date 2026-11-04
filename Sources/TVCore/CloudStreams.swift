@@ -208,7 +208,7 @@ actor CloudByteStream {
 
     init(source: CloudStreams.Source, session: URLSession = CloudByteStream.session, parallel: Int = CloudByteStream.parallel,
          rewritesSampleEntries: Bool = true, refresh: @escaping @Sendable () async -> CloudStreams.Source?) {
-        self.source = source; self.session = session; self.refresh = refresh; host = source.url.host()
+        self.source = source; self.session = session; self.refresh = refresh; host = source.url.host
         connections = max(1, parallel)
         mostConnections = connections
         self.rewritesSampleEntries = rewritesSampleEntries
@@ -310,17 +310,17 @@ actor CloudByteStream {
                 if [403, 429, 503].contains(status), served, refusals < 6 {
                     refusals += 1
                     refused(index, status: status, body: data)
-                    try await Task.sleep(for: .milliseconds(250 * refusals))
+                    try await tvSleep(for: .milliseconds(250 * refusals))
                     continue
                 }
-                let range = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Range")?.firstMatch(of: /^bytes (\d+)-(\d+)\/(\d+)$/)
-                let end = range.flatMap { Int($0.2) }
+                let range = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Range")?.tvFirstMatch(#"^bytes (\d+)-(\d+)/(\d+)$"#)
+                let end = range.flatMap { Int($0[2]) }
                 guard status == 206, let range, Int(range.1) == from, let end, end <= last, !data.isEmpty, data.count == end - from + 1 else {
                     // A drive sometimes answers a range with no bytes, or fewer than it says: the next try gets them.
                     if status == 206, cut < 2 {
                         cut += 1
-                        Diagnostics.shared.record(.debug, "cloud.stream", "chunk=\(index) short answer bytes=\(data.count) range=\(range.map { "\($0.1)-\($0.2)" } ?? "-"); again")
-                        try await Task.sleep(for: .milliseconds(300 * cut))
+                        Diagnostics.shared.record(.debug, "cloud.stream", "chunk=\(index) short answer bytes=\(data.count) range=\(range.map { "\($0[1])-\($0[2])" } ?? "-"); again")
+                        try await tvSleep(for: .milliseconds(300 * cut))
                         continue
                     }
                     Diagnostics.shared.record(.error, "cloud.stream", "chunk=\(index) status=\(status) bytes=\(data.count)")
@@ -348,7 +348,7 @@ actor CloudByteStream {
                 return playable
             } catch let error as URLError where error.code != .cancelled && attempt < 3 {
                 Diagnostics.shared.record(.debug, "cloud.stream", "chunk=\(index) retry \(error.code.rawValue)")
-                try await Task.sleep(for: .milliseconds(400 * attempt))
+                try await tvSleep(for: .milliseconds(400 * attempt))
             }
         }
     }
@@ -372,7 +372,7 @@ actor CloudByteStream {
         lastRefresh = (Date(), true)
         source = next
         served = false
-        Diagnostics.shared.record(.info, "cloud.stream", "refreshed host=\(next.url.host() ?? "-")")
+        Diagnostics.shared.record(.info, "cloud.stream", "refreshed host=\(next.url.host ?? "-")")
         return true
     }
 
@@ -440,7 +440,7 @@ private final class CloudResourceLoader: NSObject, AVAssetResourceLoaderDelegate
                             if latest > seen {
                                 // A newer request may be about to cancel this one: let that land first.
                                 seen = latest
-                                try await Task.sleep(for: .milliseconds(150))
+                                try await tvSleep(for: .milliseconds(150))
                             }
                             try Task.checkCancellation()
                             let next = min(bytes.endIndex, piece + 256 << 10)

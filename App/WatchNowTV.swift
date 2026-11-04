@@ -1,3 +1,4 @@
+import Perception
 import SwiftUI
 import TVCore
 
@@ -18,43 +19,61 @@ struct WatchNowTVPage: View {
     }
 
     var body: some View {
+        WithPerceptionTracking {
         GeometryReader { proxy in
+            WithPerceptionTracking {
             let heroHeight = DiscoverLayout.heroHeight(proxy.size.width)
             let entries = upNext
             ZStack(alignment: .top) {
                 WatchNowTVBackdrop(state: hero, width: proxy.size.width, height: heroHeight)
                 ScrollViewReader { reader in
+                    WithPerceptionTracking {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 30) {
+                            WithPerceptionTracking {
                             if entries.isEmpty {
                                 Color.clear.frame(height: 40)
                             } else {
                                 WatchNowTVHero(entries: entries, state: hero).frame(width: proxy.size.width, height: heroHeight)
                             }
                             rows
+
+                            }
                         }
                         .padding(.bottom, 60)
                         .background {
+                            WithPerceptionTracking {
                             GeometryReader { geometry in
+                                WithPerceptionTracking {
                                 Color.clear.preference(key: DiscoverScrollKey.self, value: -geometry.frame(in: .named("watchNowScroll")).minY)
+
+                                }
+                            }
+
                             }
                         }
                     }
                     .coordinateSpace(name: "watchNowScroll")
                     .modifier(DiscoverScrollObserver(offset: Binding(get: { hero.scrollY }, set: { hero.scrollY = $0 })))
-                    .scrollIndicators(.hidden)
-                    .scrollClipDisabled()
+                    .tvScrollIndicators(.hidden)
+                    .tvScrollClipDisabled()
                     #if DEBUG
                     // `-qaScroll <row>` (continue, recommendations, favorites, live) scrolls there, for screenshots.
                     .task { if let target = QALaunch.scrollTarget { try? await Task.sleep(for: .seconds(8)); reader.scrollTo(target, anchor: .top) } }
                     #endif
+
+                    }
                 }
             }
             .task(id: entries.map(\.id)) { await hero.load(entries) }
+
+            }
         }
         .foregroundStyle(.white)
         .environment(\.colorScheme, .dark)
         .ignoresSafeArea()
+
+        }
     }
 
     @ViewBuilder private var rows: some View {
@@ -70,10 +89,20 @@ struct WatchNowTVPage: View {
                 VStack(alignment: .leading, spacing: 0) {
                     WatchNowTVHeading(title: L10n.text("Pinned Sources"))
                     LazyVGrid(columns: Layout.cardColumns, spacing: Layout.cardSpacing) {
+                        WithPerceptionTracking {
                         ForEach(pinned) { site in
+                            WithPerceptionTracking {
                             RouteLink { SiteView(site: site, origin: config.origin, jarURL: config.spiderURL) } label: { SiteCard(site: site, marksPinned: false) }
-                                .tileButton().contextMenu { PinSourceButton(site: site, origin: config.origin) }
+                                .tileButton().contextMenu {
+                                    WithPerceptionTracking {
+ PinSourceButton(site: site, origin: config.origin)
+                                    }
+                                }
                                 .accessibilityIdentifier("home.pinned." + site.key)
+
+                            }
+                        }
+
                         }
                     }
                     .padding(.horizontal, DiscoverLayout.gutter).padding(.vertical, 24)
@@ -109,10 +138,13 @@ private struct WatchNowTVBackdrop: View {
     let height: CGFloat
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
+        WithPerceptionTracking {
         DiscoverBackdrop(paint: state.paint, width: width, heroHeight: height, scrollY: state.scrollY, trailer: nil, playsTrailer: false)
             .id(state.selected)
             .transition(.opacity)
             .animation(reduceMotion ? nil : .easeInOut(duration: 0.3), value: state.selected)
+
+        }
     }
 }
 
@@ -130,6 +162,7 @@ private struct WatchNowTVHero: View {
     private var entry: PlaybackHistoryEntry { entries.first { $0.id == state.selected } ?? entries[0] }
 
     var body: some View {
+        WithPerceptionTracking {
         let entry = entry
         let details = state.details[entry.id]
         VStack(alignment: .leading, spacing: 12) {
@@ -153,7 +186,11 @@ private struct WatchNowTVHero: View {
             }
             if entry.duration > 0, !entry.completed {
                 Capsule().fill(.white.opacity(0.25)).frame(width: 420, height: 6)
-                    .overlay(alignment: .leading) { Capsule().fill(.white).frame(width: 420 * entry.progress) }
+                    .overlay(alignment: .leading) {
+                        WithPerceptionTracking {
+ Capsule().fill(.white).frame(width: 420 * entry.progress)
+                        }
+                    }
                     .padding(.top, 4)
                     .accessibilityHidden(true)
             }
@@ -181,18 +218,23 @@ private struct WatchNowTVHero: View {
         .padding(.horizontal, DiscoverLayout.gutter).padding(.bottom, 40)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
         .background(alignment: .trailing) {
+            WithPerceptionTracking {
             // No TMDB backdrop: the page is tinted by the title's own cover, blurred, so show that cover itself too.
             if state.paints[entry.id] != nil, details?.backdrop == nil, let poster = entry.context.poster {
                 WatchNowTVHeroCover(url: poster, headers: entry.context.posterHeaders ?? [:])
                     .id(entry.id).transition(.opacity)
                     .padding(.trailing, DiscoverLayout.gutter)
             }
+
+            }
         }
         .focusSection()
         .defaultFocus($focus, .resume)
-        .onChange(of: focus) { _, value in
+        .tvOnChange(of: focus) { _, value in
             guard case .page(let index) = value, entries.indices.contains(index) else { return }
             withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.3)) { state.selected = entries[index].id }
+        }
+
         }
     }
 
@@ -200,6 +242,7 @@ private struct WatchNowTVHero: View {
     private var dots: some View {
         HStack(spacing: 0) {
             ForEach(entries.indices, id: \.self) { index in
+                WithPerceptionTracking {
                 let shown = entries[index].id == entry.id
                 Button { store.resume(entries[index]) } label: {
                     Circle().fill(.white.opacity(shown ? 1 : 0.35))
@@ -211,11 +254,21 @@ private struct WatchNowTVHero: View {
                 .accessibilityLabel(entries[index].context.videoName)
                 .accessibilityAddTraits(shown ? [.isSelected] : [])
                 .accessibilityIdentifier("home.upNext.page.\(index)")
+
+                }
             }
         }
         .padding(.horizontal, 16)
-        .background { Capsule().fill(.white.opacity(isPage ? 0.16 : 0)) }
-        .overlay { Capsule().strokeBorder(.white.opacity(isPage ? 0.6 : 0), lineWidth: 2).allowsHitTesting(false) }
+        .background {
+            WithPerceptionTracking {
+ Capsule().fill(.white.opacity(isPage ? 0.16 : 0))
+            }
+        }
+        .overlay {
+            WithPerceptionTracking {
+ Capsule().strokeBorder(.white.opacity(isPage ? 0.6 : 0), lineWidth: 2).allowsHitTesting(false)
+            }
+        }
         .padding(.leading, 12)
     }
 
@@ -234,7 +287,9 @@ private struct WatchNowTVHeroCover: View {
     let headers: [String: String]
     @State private var aspect: CGFloat?
     var body: some View {
+        WithPerceptionTracking {
         GeometryReader { proxy in
+            WithPerceptionTracking {
             let box = CGSize(width: proxy.size.width * 0.4, height: proxy.size.height * 0.62)
             let shape = aspect ?? 2.0 / 3.0
             let size = shape > box.width / max(box.height, 1)
@@ -242,15 +297,23 @@ private struct WatchNowTVHeroCover: View {
             PosterImage(url: url, headers: headers, aspect: $aspect)
                 .frame(width: size.width, height: size.height)
                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .overlay { RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(.white.opacity(0.14), lineWidth: 1) }
+                .overlay {
+                    WithPerceptionTracking {
+ RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(.white.opacity(0.14), lineWidth: 1)
+                    }
+                }
                 .shadow(color: .black.opacity(0.5), radius: 34, y: 18)
                 .opacity(aspect == nil ? 0 : 1)
                 .animation(.easeOut(duration: 0.25), value: aspect == nil)
                 .frame(width: proxy.size.width, height: proxy.size.height, alignment: .trailing)
                 .offset(y: 36)
+
+            }
         }
         .accessibilityHidden(true)
         .allowsHitTesting(false)
+
+        }
     }
 }
 
@@ -262,8 +325,11 @@ private struct WatchNowTVLogo: View {
     let url: URL
     @State private var aspect: CGFloat?
     var body: some View {
+        WithPerceptionTracking {
         TMDBArtwork(url: url, maxPixels: 1200, fill: false, aspect: $aspect)
             .frame(width: min(580, 160 * (aspect ?? 3.2)), height: 160, alignment: .leading)
+
+        }
     }
 }
 
@@ -271,10 +337,13 @@ private struct WatchNowTVLogo: View {
 struct WatchNowTVHeading: View {
     let title: String
     var body: some View {
+        WithPerceptionTracking {
         Text(title).font(.system(size: DiscoverLayout.heading, weight: .semibold)).lineLimit(1)
             .frame(height: DiscoverLayout.headingHeight, alignment: .top)
             .padding(.horizontal, DiscoverLayout.gutter)
             .accessibilityAddTraits(.isHeader)
+
+        }
     }
 }
 
@@ -284,9 +353,12 @@ struct WatchNowTVRail<Content: View>: View {
     var seeAll: WatchNowTVSeeAll? = nil
     @ViewBuilder let content: () -> Content
     var body: some View {
+        WithPerceptionTracking {
         VStack(alignment: .leading, spacing: 0) {
             WatchNowTVHeading(title: title)
             WatchNowTVRow(seeAll: seeAll, content: content)
+        }
+
         }
     }
 }
@@ -300,18 +372,24 @@ struct WatchNowTVRow<Content: View>: View {
     @State private var revealed = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
+        WithPerceptionTracking {
         ScrollView(.horizontal) {
             LazyHStack(alignment: .top, spacing: DiscoverLayout.spacing) {
+                WithPerceptionTracking {
                 if let seeAll { seeAll.revealing(revealed).focused($seeAllFocused) }
                 content()
+
+                }
             }
             .padding(.leading, seeAll != nil && !revealed ? DiscoverLayout.gutter - DiscoverLayout.spacing - 1 : DiscoverLayout.gutter)
             .padding(.trailing, DiscoverLayout.gutter).padding(.vertical, 24)
         }
-        .scrollClipDisabled().scrollIndicators(.hidden)
+        .tvScrollClipDisabled().tvScrollIndicators(.hidden)
         .focusSection()
-        .onChange(of: seeAllFocused) { _, focused in
+        .tvOnChange(of: seeAllFocused) { _, focused in
             withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) { revealed = focused }
+        }
+
         }
     }
 }
@@ -325,6 +403,7 @@ struct WatchNowTVCover: View {
     let poster: URL?
     var headers: [String: String] = [:]
     var body: some View {
+        WithPerceptionTracking {
         VStack(spacing: 5) {
             PosterImage(url: poster, headers: headers).frame(width: Self.width, height: Self.height)
             VStack(spacing: 0) {
@@ -334,6 +413,8 @@ struct WatchNowTVCover: View {
             .lineLimit(1).cardCaption()
         }
         .frame(width: Self.width)
+
+        }
     }
 }
 
@@ -349,6 +430,7 @@ struct WatchNowTVSeeAll: View {
     func revealing(_ revealed: Bool) -> Self { var copy = self; copy.isRevealed = revealed; return copy }
     @Environment(\.openRoute) private var openRoute
     var body: some View {
+        WithPerceptionTracking {
         Button { if let destination { openRoute?(destination) } else { action() } } label: {
             VStack(spacing: 12) {
                 Text(L10n.text("See All")).font(.system(size: 26, weight: .medium)).multilineTextAlignment(.center)
@@ -367,6 +449,8 @@ struct WatchNowTVSeeAll: View {
         .accessibilityHidden(!isRevealed)
         .accessibilityLabel(L10n.text("See All"))
         .accessibilityIdentifier("watchnow.more")
+
+        }
     }
 }
 
@@ -378,12 +462,15 @@ struct WatchNowTVPlateStyle: ButtonStyle {
         @Environment(\.isFocused) private var focused
         @Environment(\.accessibilityReduceMotion) private var reduceMotion
         var body: some View {
+            WithPerceptionTracking {
             configuration.label
                 .foregroundStyle(focused ? Color.black : Color.white)
                 .background(Color(white: focused ? 0.88 : 1, opacity: focused ? 1 : 0.12), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .scaleEffect(configuration.isPressed ? 1.04 : focused ? 1.08 : 1)
                 .shadow(color: .black.opacity(focused ? 0.35 : 0), radius: 18, y: 10)
                 .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: focused)
+
+            }
         }
     }
 }
@@ -395,21 +482,34 @@ private struct WatchNowTVFavorite: View {
     let item: FavoriteItem
 
     var body: some View {
+        WithPerceptionTracking {
         switch item {
         case .video(let video):
             let cover = WatchNowTVCover(title: video.videoName, detail: SourceLabel(video.sourceName).text, poster: video.poster, headers: video.posterHeaders)
             if let listing = video.listingVideo(), let client = store.catalogClient(for: video) {
                 RouteLink { VideoDetailView(video: listing, client: client) } label: { cover }
-                    .cardButton().contextMenu { FavoriteMenuButton(item: item, name: video.videoName) }
+                    .cardButton().contextMenu {
+                        WithPerceptionTracking {
+ FavoriteMenuButton(item: item, name: video.videoName)
+                        }
+                    }
             } else {
                 Button { store.reportMissingFavoriteSource() } label: { cover }
-                    .cardButton().contextMenu { FavoriteMenuButton(item: item, name: video.videoName) }
+                    .cardButton().contextMenu {
+                        WithPerceptionTracking {
+ FavoriteMenuButton(item: item, name: video.videoName)
+                        }
+                    }
             }
         case .episode(let episode):
             Button { store.play(episode) } label: {
                 WatchNowTVCover(title: episode.video.videoName, detail: episode.episodeName, poster: episode.video.poster, headers: episode.video.posterHeaders)
             }
-            .cardButton().contextMenu { FavoriteMenuButton(item: item, name: episode.video.videoName) }
+            .cardButton().contextMenu {
+                WithPerceptionTracking {
+ FavoriteMenuButton(item: item, name: episode.video.videoName)
+                }
+            }
         case .live(let channel):
             plate(title: channel.name, detail: channel.displayGroup, action: { store.playing = channel }) {
                 ChannelLogo(channel: channel).frame(width: 140, height: 140)
@@ -423,6 +523,8 @@ private struct WatchNowTVFavorite: View {
             plate(title: file.fileName, detail: CloudFiles.drive(key: file.driveKey)?.name ?? file.driveKey, action: { store.play(file) }) {
                 Image(systemName: cloud.symbol).font(.system(size: 72, weight: .medium)).foregroundStyle(cloud.tint)
             }
+        }
+
         }
     }
 
@@ -450,7 +552,11 @@ private struct WatchNowTVFavorite: View {
             .frame(width: WatchNowTVCover.width, height: WatchNowTVCover.height)
         }
         .buttonStyle(WatchNowTVPlateStyle())
-        .contextMenu { FavoriteMenuButton(item: item, name: name) }
+        .contextMenu {
+            WithPerceptionTracking {
+ FavoriteMenuButton(item: item, name: name)
+            }
+        }
     }
 }
 
@@ -466,6 +572,7 @@ struct WatchNowTVCategoryRail: View {
     private var key: String { WatchNowRows.key(category: category, client: client) }
 
     var body: some View {
+        WithPerceptionTracking {
         let row = WatchNowRows.shared.rows[key]
         Group {
             if let row, row.videos.isEmpty {
@@ -475,24 +582,32 @@ struct WatchNowTVCategoryRail: View {
                 WatchNowTVRail(title: title, seeAll: row == nil ? nil : WatchNowTVSeeAll(height: WatchNowTVCover.height, route: seeAll)) {
                     if let row {
                         ForEach(row.videos.prefix(20)) { video in
+                            WithPerceptionTracking {
                             let cover = WatchNowTVCover(title: video.name, detail: video.remarks, poster: video.poster, headers: video.posterHeaders)
                             if isIndex {
                                 Button { store.searchVideos(video.name) } label: { cover }.cardButton()
                             } else {
                                 RouteLink { CatalogDestination(video: video, client: client) } label: { cover }.cardButton()
                             }
+
+                            }
                         }
                     } else {
                         // As tall as the covers and captions that replace them, so nothing below moves when they come.
                         ForEach(0..<6, id: \.self) { _ in
+                            WithPerceptionTracking {
                             SkeletonBlock(cornerRadius: 12).frame(width: WatchNowTVCover.width, height: WatchNowTVCover.height)
                                 .frame(height: WatchNowTVCover.height + DiscoverLayout.captionHeight, alignment: .top)
+
+                            }
                         }
                     }
                 }
             }
         }
         .task(id: key) { WatchNowRows.shared.load(category: category, client: client) }
+
+        }
     }
 }
 
@@ -500,7 +615,7 @@ struct WatchNowTVCategoryRail: View {
 
 /// The hero's selection and artwork, read only by the hero and the backdrop: scrolling and paging must not evaluate the
 /// rows again.
-@MainActor @Observable final class WatchNowHeroState {
+@MainActor @Perceptible final class WatchNowHeroState {
     var selected: String?
     var scrollY: CGFloat = 0
     var paints: [String: DiscoverPaint] = [:]
@@ -558,11 +673,11 @@ struct WatchNowTVCategoryRail: View {
 
 /// Watch Now's category rows, kept for the app's life. A row older than ten minutes loads again when it comes on
 /// screen, showing the old covers until the new ones arrive; a load runs to the end even if the row scrolls away. Apple TV and iPhone share it.
-@MainActor @Observable final class WatchNowRows {
+@MainActor @Perceptible final class WatchNowRows {
     static let shared = WatchNowRows()
     struct Row { var videos: [Video]; var date: Date }
     private(set) var rows: [String: Row] = [:]
-    @ObservationIgnored private var loading: Set<String> = []
+    @PerceptionIgnored private var loading: Set<String> = []
 
     static func key(category: String, client: CatalogClient) -> String { "\(client.origin)|\(client.site.key)|\(category)" }
 

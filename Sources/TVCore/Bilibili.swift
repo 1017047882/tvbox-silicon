@@ -208,8 +208,8 @@ extension Bilibili {
 extension Bilibili {
     /// The cid in a Bilibili media address (…/upgcxcode/…/<cid>-<n>-<quality>.mp4), as the phone app casts it.
     public static func castCID(_ url: URL) -> Int? {
-        guard url.path.contains("xcode"), let match = url.lastPathComponent.firstMatch(of: /^(\d+)-\d+-\d+\.(mp4|m4s|flv)$/) else { return nil }
-        return Int(match.1)
+        guard url.path.contains("xcode"), let match = url.lastPathComponent.tvFirstMatch(#"^(\d+)-\d+-\d+\.(mp4|m4s|flv)$"#) else { return nil }
+        return Int(match[1])
     }
 
     /// The video a cast part belongs to. A DLNA cast names only the part (cid) and the title, so the

@@ -1,3 +1,5 @@
+import Perception
+import NavigationBackport
 #if os(iOS)
 import Photos
 import SwiftUI
@@ -32,7 +34,9 @@ struct WebSignInView<Code: View>: View {
     }
 
     var body: some View {
-        NavigationStack {
+        WithPerceptionTracking {
+        NBNavigationStack {
+            WithPerceptionTracking {
             Group {
                 if showsCode { code() } else { page }
             }
@@ -46,8 +50,12 @@ struct WebSignInView<Code: View>: View {
                     }
                 }
             }
+
+            }
         }
         .task { await watch() }
+
+        }
     }
 
     private var page: some View {
@@ -61,14 +69,20 @@ struct WebSignInView<Code: View>: View {
             WebSignInBrowser(webView: webView, service: service, error: $error, loading: $loading, ticket: $ticket)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .overlay {
+                    WithPerceptionTracking {
                     if saving {
                         HStack(spacing: 10) { ProgressView(); Text(L10n.text("Signing In…")) }
                             .padding(.horizontal, 18).padding(.vertical, 12)
                             .glassSurface(.regular, in: Capsule())
                     }
+
+                    }
                 }
                 .overlay(alignment: .top) {
+                    WithPerceptionTracking {
                     if loading && !saving { ProgressView().padding(12) }
+
+                    }
                 }
             if Code.self != EmptyView.self {
                 Button { showsCode = true } label: {
@@ -88,7 +102,7 @@ struct WebSignInView<Code: View>: View {
         var followedUp = false
         var waitedForTicket = 0
         while !Task.isCancelled {
-            try? await Task.sleep(for: .seconds(1))
+            try? await tvSleep(for: .seconds(1))
             let cookies = await webView.configuration.websiteDataStore.httpCookieStore.allCookies()
             var stored: String?
             if let storage = service.storage, let host = webView.url?.host, storage.hosts.contains(host) {
@@ -279,6 +293,7 @@ struct SaveCodeButton: View {
     @State private var error: String?
 
     var body: some View {
+        WithPerceptionTracking {
         VStack(alignment: .leading, spacing: 8) {
             Button { Task { await save() } } label: {
                 Label(L10n.text(saved ? "Saved to Photos" : "Save Code to Photos"), systemImage: saved ? "checkmark" : "square.and.arrow.down")
@@ -297,6 +312,8 @@ struct SaveCodeButton: View {
                 Text(L10n.text("In the %@ app, tap Scan, then choose this photo.", app))
                     .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
+        }
+
         }
     }
 
@@ -340,7 +357,9 @@ struct ConfigCenterView: View {
     @State private var loading = true
 
     var body: some View {
-        NavigationStack {
+        WithPerceptionTracking {
+        NBNavigationStack {
+            WithPerceptionTracking {
             VStack(spacing: 0) {
                 if let error {
                     Label(error, systemImage: "exclamationmark.triangle.fill")
@@ -350,7 +369,11 @@ struct ConfigCenterView: View {
                 }
                 ConfigCenterBrowser(webView: webView, error: $error, loading: $loading)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .overlay(alignment: .top) { if loading { ProgressView().padding(12) } }
+                    .overlay(alignment: .top) {
+                        WithPerceptionTracking {
+ if loading { ProgressView().padding(12) }
+                        }
+                    }
             }
             .navigationTitle(L10n.text("Config Center"))
             .navigationBarTitleDisplayMode(.inline)
@@ -361,10 +384,14 @@ struct ConfigCenterView: View {
                         .accessibilityLabel(L10n.text("Refresh"))
                 }
             }
+
+            }
         }
         .task { await open(reload: true) }
         // Back from another app (copying a password, say): the page moves to the bundle's new port, if it has one.
-        .onChange(of: scenePhase) { _, phase in if phase == .active { Task { await open(reload: false) } } }
+        .tvOnChange(of: scenePhase) { _, phase in if phase == .active { Task { await open(reload: false) } } }
+
+        }
     }
 
     private func open(reload: Bool) async {
@@ -374,7 +401,7 @@ struct ConfigCenterView: View {
             return
         }
         guard let page, var current = webView.url.flatMap({ URLComponents(url: $0, resolvingAgainstBaseURL: false) }),
-              current.host == fresh.host() else {
+              current.host == fresh.host else {
             page = fresh
             webView.load(URLRequest(url: fresh))
             return

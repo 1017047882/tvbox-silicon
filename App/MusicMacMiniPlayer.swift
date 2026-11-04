@@ -1,3 +1,4 @@
+import Perception
 #if os(macOS)
 import AppKit
 import SwiftUI
@@ -14,6 +15,7 @@ struct MusicMacMiniPlayer: View {
     @State private var hovering = false
 
     var body: some View {
+        WithPerceptionTracking {
         let music = store.music
         HStack(spacing: 12) {
             cover(music)
@@ -41,16 +43,22 @@ struct MusicMacMiniPlayer: View {
         }
         .padding(10).padding(.trailing, 2)
         .frame(width: 340, height: 76)
-        .contentShape(.rect)
+        .contentShape(Rectangle())
         .gesture(WindowDragGesture())
         .glassSurface(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(alignment: .topLeading) { if hovering { close } }
+        .overlay(alignment: .topLeading) {
+            WithPerceptionTracking {
+ if hovering { close }
+            }
+        }
         .onHover { hovering = $0 }
         .onAppear { MusicMiniWindow.isOpen = true }
         .onDisappear { MusicMiniWindow.isOpen = false; MusicMiniWindow.openedForMinimize = false }
         // One opened for a minimized window goes with the song.
-        .onChange(of: music.track == nil) { _, gone in
+        .tvOnChange(of: music.track == nil) { _, gone in
             if gone && MusicMiniWindow.openedForMinimize { dismissWindow(id: Self.windowID) }
+        }
+
         }
     }
 
@@ -62,12 +70,15 @@ struct MusicMacMiniPlayer: View {
         } label: {
             MusicArtwork(url: music.track?.artwork, size: 56)
                 .overlay {
+                    WithPerceptionTracking {
                     if hovering {
                         RoundedRectangle(cornerRadius: 7, style: .continuous).fill(.black.opacity(0.35))
                         Image(systemName: "arrow.up.left.and.arrow.down.right").font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
                     }
+
+                    }
                 }
-                .contentShape(.rect)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .help(L10n.text("Now Playing"))
@@ -115,6 +126,7 @@ struct MusicMiniPlayerTrigger: View {
     #endif
 
     var body: some View {
+        WithPerceptionTracking {
         MainWindowObserver { window, minimized in
             #if DEBUG
             qaWindow = window
@@ -143,6 +155,8 @@ struct MusicMiniPlayerTrigger: View {
             }
         }
         #endif
+
+        }
     }
 }
 

@@ -1,3 +1,4 @@
+import Perception
 import SwiftUI
 import TVCore
 
@@ -20,9 +21,13 @@ struct LivePlatformView: View {
     private var trimmed: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
+        WithPerceptionTracking {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 22) {
+                WithPerceptionTracking {
                 if trimmed.isEmpty { browse } else { LiveRoomSearch(platform: platform, query: trimmed) }
+
+                }
             }.pageContainer()
         }
         .screenBackdrop()
@@ -37,6 +42,8 @@ struct LivePlatformView: View {
             if areas.isEmpty { reload() }
         }
         .onDisappear { loader?.cancel(); loader = nil }
+
+        }
     }
 
     @ViewBuilder private var browse: some View {
@@ -46,7 +53,10 @@ struct LivePlatformView: View {
                 GlassGroup(spacing: 8) {
                     HStack(spacing: 8) {
                         ForEach(areas) { value in
+                            WithPerceptionTracking {
                             Chip(title: value.name, selected: area == value) { select(value) }
+
+                            }
                         }
                     }
                 }.padding(.vertical, 4)
@@ -60,7 +70,7 @@ struct LivePlatformView: View {
         LiveRoomGrid(rooms: rooms) { room in if room.id == rooms.last?.id { more() } }
         if loader != nil && rooms.isEmpty { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 60) }
         if loader == nil && error == nil && page > 0 && rooms.isEmpty {
-            ContentUnavailableView(L10n.text("No Live Rooms"), systemImage: "dot.radiowaves.left.and.right")
+            TVEmptyState(L10n.text("No Live Rooms"), systemImage: "dot.radiowaves.left.and.right")
                 .frame(maxWidth: .infinity)
         }
     }
@@ -128,13 +138,14 @@ private struct LiveRoomSearch: View {
     @State private var error: String?
 
     var body: some View {
+        WithPerceptionTracking {
         Group {
             if let error {
-                ContentUnavailableView(L10n.text("Search Failed"), systemImage: "exclamationmark.magnifyingglass", description: Text(error))
+                TVEmptyState(L10n.text("Search Failed"), systemImage: "exclamationmark.magnifyingglass", description: Text(error))
                     .frame(maxWidth: .infinity)
             } else if rooms.isEmpty {
                 if searching { ProgressView().frame(maxWidth: .infinity).padding(.vertical, 60) }
-                else { ContentUnavailableView.search(text: query).frame(maxWidth: .infinity) }
+                else { TVEmptyState.search(text: query).frame(maxWidth: .infinity) }
             } else {
                 LiveRoomGrid(rooms: rooms)
             }
@@ -142,7 +153,7 @@ private struct LiveRoomSearch: View {
         .task(id: query) {
             searching = true; error = nil
             // Wait for the typing to pause.
-            try? await Task.sleep(for: .milliseconds(450))
+            try? await tvSleep(for: .milliseconds(450))
             guard !Task.isCancelled else { return }
             do { rooms = try await LiveCatalog.search(platform, keyword: query) }
             catch is CancellationError { return }
@@ -153,6 +164,8 @@ private struct LiveRoomSearch: View {
             }
             if !Task.isCancelled { searching = false }
         }
+
+        }
     }
 }
 
@@ -160,11 +173,21 @@ struct LiveRoomGrid: View {
     let rooms: [LiveRoom]
     var appeared: (LiveRoom) -> Void = { _ in }
     var body: some View {
+        WithPerceptionTracking {
         // Search results can list a room twice.
         var seen = Set<String>()
         let unique = rooms.filter { seen.insert($0.id).inserted }
         LazyVGrid(columns: [GridItem(.adaptive(minimum: Layout.tileMin), spacing: Layout.cardSpacing)], spacing: Layout.gridRowSpacing) {
-            ForEach(unique) { room in LiveRoomCard(room: room).onAppear { appeared(room) } }
+            WithPerceptionTracking {
+            ForEach(unique) { room in
+                WithPerceptionTracking {
+ LiveRoomCard(room: room).onAppear { appeared(room) }
+                }
+            }
+
+            }
+        }
+
         }
     }
 }
@@ -188,9 +211,13 @@ struct LiveSearchResults: View {
     private var finished: Bool { !loadingPlaylists && platforms.allSatisfy { found[$0] != nil || failures[$0] != nil } }
 
     var body: some View {
+        WithPerceptionTracking {
         LazyVStack(alignment: .leading, spacing: Layout.sectionSpacing) {
             ForEach(platforms) { platform in
+                WithPerceptionTracking {
                 if found[platform]?.isEmpty != true || failures[platform] != nil { section(platform) }
+
+                }
             }
             if !channels.isEmpty {
                 VStack(alignment: .leading, spacing: Layout.headerSpacing) {
@@ -201,12 +228,12 @@ struct LiveSearchResults: View {
                 }
             }
             if finished && channels.isEmpty && platforms.allSatisfy({ found[$0]?.isEmpty != false }) {
-                ContentUnavailableView.search(text: query).frame(maxWidth: .infinity)
+                TVEmptyState.search(text: query).frame(maxWidth: .infinity)
             }
         }
         .task(id: query) {
             found = [:]; failures = [:]
-            try? await Task.sleep(for: .milliseconds(450))
+            try? await tvSleep(for: .milliseconds(450))
             guard !Task.isCancelled else { return }
             await withTaskGroup(of: (LivePlatform, Result<[LiveRoom], Error>).self) { group in
                 for platform in platforms {
@@ -230,6 +257,8 @@ struct LiveSearchResults: View {
                 for await (id, list) in group { playlists[id] = list }
             }
             loadingPlaylists = false
+        }
+
         }
     }
 
@@ -262,11 +291,16 @@ struct LiveRoomCard: View {
     let room: LiveRoom
 
     var body: some View {
+        WithPerceptionTracking {
         let favorite = store.isFavorite(room.channel)
         Button { store.playing = room.channel } label: {
             VStack(alignment: .leading, spacing: 8) {
                 Color.clear.aspectRatio(16.0 / 9.0, contentMode: .fit)
-                    .overlay { PosterImage(url: room.cover, headers: [:]) }
+                    .overlay {
+                        WithPerceptionTracking {
+ PosterImage(url: room.cover, headers: [:])
+                        }
+                    }
                     .posterClip(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .coverOverlay(alignment: .topLeading) {
                         HStack(spacing: 5) {
@@ -300,10 +334,15 @@ struct LiveRoomCard: View {
         }
         .cardButton()
         .contextMenu {
+            WithPerceptionTracking {
             Button(favorite ? L10n.text("Remove %@ from favorites", room.host) : L10n.text("Add %@ to favorites", room.host),
                    systemImage: favorite ? "heart.slash" : "heart") { store.toggleFavorite(room.channel) }
+
+            }
         }
         .accessibilityLabel("\(room.host), \(room.title)")
+
+        }
     }
 }
 
@@ -319,10 +358,10 @@ extension LivePlatform {
 /// A room each built-in platform is showing now, for its card: the busiest room with a cover in the
 /// first of its areas that has one (a signed-out "Following" list is empty), asked again after ten
 /// minutes. The fetch outlives the card's appearance: a slow platform would otherwise never finish.
-@MainActor @Observable final class LivePreviews {
+@MainActor @Perceptible final class LivePreviews {
     static let shared = LivePreviews()
     private(set) var rooms: [LivePlatform: LiveRoom] = [:]
-    @ObservationIgnored private var asked: [LivePlatform: Date] = [:]
+    @PerceptionIgnored private var asked: [LivePlatform: Date] = [:]
 
     func load(_ platform: LivePlatform) {
         if let date = asked[platform], Date.now.timeIntervalSince(date) < 600 { return }
@@ -364,19 +403,42 @@ struct LivePlatformCard: View {
     #endif
 
     var body: some View {
+        WithPerceptionTracking {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         Color.clear.aspectRatio(16.0 / 9.0, contentMode: .fit)
-            .background { backdrop }
+            .background {
+                WithPerceptionTracking {
+ backdrop
+                }
+            }
             // Shade under the caption so white text reads on any cover.
-            .overlay { LinearGradient(stops: [.init(color: .black.opacity(0.15), location: 0), .init(color: .clear, location: 0.3), .init(color: .black.opacity(0.85), location: 1)], startPoint: .top, endPoint: .bottom) }
-            .overlay(alignment: .topTrailing) { if room != nil { badge.padding(padding) } }
-            .overlay(alignment: .bottomLeading) { caption.padding(padding) }
+            .overlay {
+                WithPerceptionTracking {
+ LinearGradient(stops: [.init(color: .black.opacity(0.15), location: 0), .init(color: .clear, location: 0.3), .init(color: .black.opacity(0.85), location: 1)], startPoint: .top, endPoint: .bottom)
+                }
+            }
+            .overlay(alignment: .topTrailing) {
+                WithPerceptionTracking {
+ if room != nil { badge.padding(padding) }
+                }
+            }
+            .overlay(alignment: .bottomLeading) {
+                WithPerceptionTracking {
+ caption.padding(padding)
+                }
+            }
             .clipShape(shape)
-            .overlay { shape.strokeBorder(.white.opacity(focused ? 0.95 : 0.1), lineWidth: focused ? 4 : 1) }
+            .overlay {
+                WithPerceptionTracking {
+ shape.strokeBorder(.white.opacity(focused ? 0.95 : 0.1), lineWidth: focused ? 4 : 1)
+                }
+            }
             .animation(.easeOut(duration: 0.3), value: room)
             .onAppear { LivePreviews.shared.load(platform) }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(platform.name)
+
+        }
     }
 
     @ViewBuilder private var backdrop: some View {
@@ -440,23 +502,38 @@ struct LivePlatformMark: View {
     var size: CGFloat = 44
 
     var body: some View {
+        WithPerceptionTracking {
         #if os(tvOS)
         let size = size >= 44 ? max(size, 56) : size
         #endif
         if platform.mark == "bilibili" { BilibiliMark(size: size) }
         // A split glyph has cyan and red offsets, like Douyin's.
         else { tile(platform.glyph, platform.color, size: size, split: platform.split) }
+
+        }
     }
 
     private func tile(_ glyph: String, _ color: Color, size: CGFloat, split: Bool = false) -> some View {
         let shape = RoundedRectangle(cornerRadius: size * 0.26, style: .continuous)
         let offset = split ? size * 0.03 : 0
         return Text(glyph).font(.system(size: size * 0.52, weight: .heavy, design: .rounded)).foregroundStyle(.white)
-            .background { Text(glyph).font(.system(size: size * 0.52, weight: .heavy, design: .rounded)).foregroundStyle(Color(red: 0.15, green: 0.96, blue: 0.94)).offset(x: -offset, y: -offset).opacity(split ? 1 : 0) }
-            .background { Text(glyph).font(.system(size: size * 0.52, weight: .heavy, design: .rounded)).foregroundStyle(Color(red: 1.0, green: 0.17, blue: 0.33)).offset(x: offset, y: offset).opacity(split ? 1 : 0) }
+            .background {
+                WithPerceptionTracking {
+ Text(glyph).font(.system(size: size * 0.52, weight: .heavy, design: .rounded)).foregroundStyle(Color(red: 0.15, green: 0.96, blue: 0.94)).offset(x: -offset, y: -offset).opacity(split ? 1 : 0)
+                }
+            }
+            .background {
+                WithPerceptionTracking {
+ Text(glyph).font(.system(size: size * 0.52, weight: .heavy, design: .rounded)).foregroundStyle(Color(red: 1.0, green: 0.17, blue: 0.33)).offset(x: offset, y: offset).opacity(split ? 1 : 0)
+                }
+            }
             .frame(width: size, height: size)
             .background(color, in: shape)
-            .overlay { shape.strokeBorder(.white.opacity(0.12), lineWidth: 1) }
+            .overlay {
+                WithPerceptionTracking {
+ shape.strokeBorder(.white.opacity(0.12), lineWidth: 1)
+                }
+            }
             .accessibilityHidden(true)
     }
 }

@@ -40,8 +40,8 @@ public actor PluginConversionAhead {
     }
 
     /// Plugin requests running now, and when the last one started or ended.
-    private static let activity = OSAllocatedUnfairLock(initialState: (running: 0, last: ContinuousClock.now))
-    private static let foreground = OSAllocatedUnfairLock(initialState: true)
+    private static let activity = TVLocked(initialState: (running: 0, last: TVInstant.now))
+    private static let foreground = TVLocked(initialState: true)
     private var task: Task<Void, Never>?
     private var observers: [NSObjectProtocol] = []
     private static let doneKey = "pluginConversionAheadDone"
@@ -85,7 +85,7 @@ public actor PluginConversionAhead {
 
     private func run(_ archives: [Archive]) async {
         // Let launch and the first screens settle before anything else runs.
-        guard (try? await Task.sleep(for: .seconds(60))) != nil else { return }
+        guard (try? await tvSleep(for: .seconds(60))) != nil else { return }
         let http = HTTPClient()
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0"
         defer { Task { await EmbeddedJarHost.shared.releaseConversionAhead() } }
@@ -111,8 +111,8 @@ public actor PluginConversionAhead {
                 // Short of memory: leave the rest for another launch.
                 if batch.stopped == "memory" { return }
                 // Breathe between batches, longer when a request interrupted this one.
-                let pause: Duration = batch.stopped == "busy" ? .seconds(30) : .seconds(2)
-                guard (try? await Task.sleep(for: pause)) != nil else { return }
+                let pause: TVDelay = batch.stopped == "busy" ? .seconds(30) : .seconds(2)
+                guard (try? await tvSleep(for: pause)) != nil else { return }
             }
         }
     }
@@ -121,7 +121,7 @@ public actor PluginConversionAhead {
     private static func waitUntilAllowed() async -> Bool {
         while !Task.isCancelled {
             if current().allowsWork { return true }
-            guard (try? await Task.sleep(for: .seconds(30))) != nil else { return false }
+            guard (try? await tvSleep(for: .seconds(30))) != nil else { return false }
         }
         return false
     }
@@ -136,7 +136,7 @@ public actor PluginConversionAhead {
         let available = Int.max
         #endif
         let (running, last) = activity.withLock { $0 }
-        let idle = running > 0 ? 0 : Double(last.duration(to: .now).components.seconds)
+        let idle = running > 0 ? 0 : last.duration(to: .now).seconds
         return Conditions(active: foreground.withLock { $0 }, lowPower: info.isLowPowerModeEnabled, thermal: info.thermalState,
                           availableMemory: available, idle: idle)
     }

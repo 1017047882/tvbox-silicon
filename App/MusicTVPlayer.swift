@@ -1,3 +1,4 @@
+import Perception
 import SwiftUI
 import TVCore
 
@@ -7,6 +8,7 @@ import TVCore
 struct MusicNowPlayingButton: View {
     @Environment(Store.self) private var store
     var body: some View {
+        WithPerceptionTracking {
         let music = store.music
         if let track = music.track {
             Button { music.presentsPlayer = true } label: {
@@ -15,13 +17,15 @@ struct MusicNowPlayingButton: View {
                         .frame(width: 40, height: 40)
                         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     // Bars in the label's own colour, so they stay visible on the focused white plate.
-                    Image(systemName: "waveform").symbolEffect(.variableColor.iterative, isActive: music.phase == .playing)
+                    Image(systemName: "waveform").tvSymbolEffect(.variableColor.iterative, isActive: music.phase == .playing)
                     Text([track.title, track.artistLine].joined(separator: " · ")).lineLimit(1)
                 }
             }
             .glassPill()
             .accessibilityLabel(Text(L10n.text("Now Playing") + ", " + track.title))
             .padding(.bottom, 16)
+        }
+
         }
     }
 }
@@ -32,18 +36,21 @@ struct MusicTabLabel: View {
     @Environment(Store.self) private var store
     @State private var bars = MusicTabBars()
     var body: some View {
+        WithPerceptionTracking {
         let music = store.music
         Label { Text(music.track?.title ?? L10n.text("Now Playing")) } icon: { Image(uiImage: bars.image) }
-            .onChange(of: music.phase == .playing, initial: true) { _, playing in bars.animates = playing }
+            .tvOnChange(of: music.phase == .playing, initial: true) { _, playing in bars.animates = playing }
+
+        }
     }
 }
 
 /// Three bars drawn at a few heights, cycled while the song plays; low and still while it is paused.
-@MainActor @Observable final class MusicTabBars {
+@MainActor @Perceptible final class MusicTabBars {
     private(set) var image = MusicTabBars.frames[0]
     var animates = false { didSet { if animates != oldValue { restart() } } }
-    @ObservationIgnored private var frame = 0
-    @ObservationIgnored private var timer: Timer?
+    @PerceptionIgnored private var frame = 0
+    @PerceptionIgnored private var timer: Timer?
     private static let still = render([0.35, 0.35, 0.35])
     private static let frames = [[0.45, 0.9, 0.6], [0.8, 0.5, 1.0], [0.6, 1.0, 0.4], [1.0, 0.65, 0.8]].map { render($0) }
 
@@ -83,10 +90,17 @@ struct MusicSidebarNowPlaying: View {
     @Environment(Store.self) private var store
 
     static var inSidebarHeader: Bool {
-        if #available(tvOS 27, *) { true } else { false }
+
+#if TVBOX_SDK27
+if #available(tvOS 27, *) { true } else { false }
+#else
+ false
+#endif
+
     }
 
     var body: some View {
+        WithPerceptionTracking {
         let music = store.music
         if let track = music.track {
             Button { music.presentsPlayer = true } label: { MusicSidebarCard(track: track) }
@@ -94,6 +108,8 @@ struct MusicSidebarNowPlaying: View {
                 .accessibilityLabel(Text(L10n.text("Now Playing") + ", " + track.title))
                 // Close to the sections under it, as the profile card sits in Music.
                 .padding(.bottom, -36)
+        }
+
         }
     }
 }
@@ -106,13 +122,21 @@ private struct MusicSidebarCard: View {
     private let art: CGFloat = 60
 
     var body: some View {
+        WithPerceptionTracking {
         HStack(spacing: 16) {
             MusicArtwork(url: track.artwork, size: art)
-                .overlay { activity(store.music) }
                 .overlay {
+                    WithPerceptionTracking {
+ activity(store.music)
+                    }
+                }
+                .overlay {
+                    WithPerceptionTracking {
                     RoundedRectangle(cornerRadius: art * 0.12 + 5, style: .continuous)
                         .strokeBorder(.white, lineWidth: 3).padding(-5)
                         .opacity(focused ? 1 : 0)
+
+                    }
                 }
                 .scaleEffect(focused ? 1.08 : 1)
                 .shadow(color: .black.opacity(focused ? 0.45 : 0), radius: 12, y: 6)
@@ -125,6 +149,8 @@ private struct MusicSidebarCard: View {
         // The cover lines up with the section icons, with room above for its outline.
         .padding(.leading, 22).padding(.trailing, 12).padding(.top, 14).padding(.bottom, 6)
         .animation(.easeOut(duration: 0.15), value: focused)
+
+        }
     }
 
     /// Bars while sound plays, a spinner while a channel is found; the cover alone while paused.
@@ -136,7 +162,7 @@ private struct MusicSidebarCard: View {
                     ProgressView().tint(.white).scaleEffect(0.7)
                 } else {
                     Image(systemName: "waveform").font(.system(size: 24, weight: .bold)).foregroundStyle(.white)
-                        .symbolEffect(.variableColor.iterative, isActive: true)
+                        .tvSymbolEffect(.variableColor.iterative, isActive: true)
                 }
             }
         }
@@ -153,7 +179,13 @@ private struct MusicSidebarCardStyle: ButtonStyle {
 extension View {
     /// The Now Playing card at the top of the sidebar, where tvOS has a place for one.
     @ViewBuilder func musicSidebarHeader() -> some View {
-        if #available(tvOS 27, *) { tabViewSidebarHeader { MusicSidebarNowPlaying() } } else { self }
+
+#if TVBOX_SDK27
+if #available(tvOS 27, *) { tabViewSidebarHeader { MusicSidebarNowPlaying() } } else { self }
+#else
+ self
+#endif
+
     }
 }
 #endif

@@ -1,3 +1,5 @@
+import Perception
+import NavigationBackport
 import SwiftUI
 import TVCore
 #if os(macOS)
@@ -16,10 +18,12 @@ struct CloudDriveView: View {
     @State private var saving = false
     @State private var showsManual = false
     var body: some View {
+        WithPerceptionTracking {
         SettingsPage(title: L10n.text("Cloud Drive Accounts"), symbol: "externaldrive") {
             SettingsGroup(footer: store.extrasUnlocked ? L10n.text("Sign in to Quark and UC on their official page, and to Baidu and Aliyun by scanning a code with their phone app. Yingxia stores the login on this Mac and supplies it to the plugins you run.")
                             : L10n.text("Sign in to Quark and UC on their official page. Yingxia stores the login on this Mac.")) {
                 ForEach(CloudProvider.shown(store)) { provider in
+                    WithPerceptionTracking {
                     let signedIn = provider.isSignedIn(accounts)
                     SettingsRow(symbol: provider.symbol, tint: provider.tint, title: provider.name,
                                 subtitle: L10n.text(signedIn ? "Signed In" : "Not Signed In")) {
@@ -34,6 +38,8 @@ struct CloudDriveView: View {
                                 if provider == .xunlei { texting = true } else if provider.signsInOnWeb { login = provider } else { scan = provider }
                             }.settingsButton(prominent: true)
                         }
+                    }
+
                     }
                 }
             }
@@ -59,25 +65,36 @@ struct CloudDriveView: View {
         }
         .task { do { accounts = try CloudDriveAccounts.load() } catch { self.error = error.localizedDescription } }
         .sheet(item: $login) { provider in
+            WithPerceptionTracking {
             CloudLoginView(provider: provider) { cookie, ticket in
                 try await provider.saveLogin(cookie, ticket: ticket)
                 accounts = (try? CloudDriveAccounts.load()) ?? accounts
                 notice = L10n.text("Accounts saved. Retry the video source.")
                 error = nil
             }
+
+            }
         }
         .sheet(item: $scan) { provider in
+            WithPerceptionTracking {
             CloudQRLoginView(drive: provider.qrDrive) {
                 accounts = (try? CloudDriveAccounts.load()) ?? accounts
                 save()
             }
+
+            }
         }
         .sheet(isPresented: $texting) {
+            WithPerceptionTracking {
             XunleiSignInView {
                 accounts = (try? CloudDriveAccounts.load()) ?? accounts
                 notice = L10n.text("Accounts saved. Retry the video source.")
                 error = nil
             }
+
+            }
+        }
+
         }
     }
     private func save() {
@@ -110,12 +127,13 @@ struct CloudLoginView: View {
     /// Quark's approved sign-in ticket. FTY's player needs the mobile ticket derived from it.
     @State private var ticket: String?
     var body: some View {
+        WithPerceptionTracking {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
                 Image(systemName: provider.symbol)
                     .font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
                     .frame(width: 28, height: 28)
-                    .background(provider.tint.gradient, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .background(provider.tint.tvGradient, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                 VStack(alignment: .leading, spacing: 1) {
                     Text(L10n.text(provider == .quark ? "Sign In to Quark" : "Sign In to UC")).font(.headline)
                     Text(provider.url.host ?? "").font(.caption).foregroundStyle(.secondary)
@@ -145,6 +163,8 @@ struct CloudLoginView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(width: 900, height: 680)
+
+        }
     }
 
     /// Saves once the page has a drive cookie. Quark also waits briefly for the sign-in ticket the page
@@ -165,7 +185,7 @@ struct CloudLoginView: View {
         var found = ticket
         if provider == .quark, found == nil {
             for _ in 0..<4 {
-                try? await Task.sleep(for: .seconds(1))
+                try? await tvSleep(for: .seconds(1))
                 if let ticket { found = ticket; break }
             }
         }
@@ -262,9 +282,11 @@ struct CloudDriveView: View {
     @State private var login: CloudProvider?
     @State private var error: String?
     var body: some View {
+        WithPerceptionTracking {
         SettingsPage(title: L10n.text("Cloud Drive Accounts"), symbol: "externaldrive") {
             SettingsGroup(footer: footer) {
                 ForEach(CloudProvider.shown(store)) { provider in
+                    WithPerceptionTracking {
                     let signedIn = provider.isSignedIn(accounts)
                     SettingsRow(symbol: provider.symbol, tint: provider.tint, title: provider.name,
                                 subtitle: L10n.text(signedIn ? "Signed In" : "Not Signed In")) {
@@ -274,6 +296,8 @@ struct CloudDriveView: View {
                             Button(L10n.text("Sign In")) { login = provider }.settingsButton(prominent: true)
                         }
                     }
+
+                    }
                 }
             }
             if let error { Label(error, systemImage: "exclamationmark.triangle.fill").font(.callout).foregroundStyle(Brand.rose) }
@@ -281,27 +305,38 @@ struct CloudDriveView: View {
         .task { reload() }
         #if os(iOS)
         .sheet(item: $login) { provider in
+            WithPerceptionTracking {
             if provider == .xunlei { XunleiSignInView(signedIn: reload) }
             else if provider == .pan115 {
                 // 115 has no sign-in page here, only the code to scan with its app on another phone.
-                NavigationStack {
+                NBNavigationStack {
+                    WithPerceptionTracking {
                     CloudQRLoginView(drive: provider.qrDrive) { reload() }
                         .navigationTitle(L10n.text("Sign In to %@", provider.name))
                         .navigationBarTitleDisplayMode(.inline)
                         .toolbar { ToolbarItem(placement: .cancellationAction) { Button(L10n.text("Cancel")) { login = nil } } }
+
+                    }
                 }
             } else {
                 WebSignInView(service: provider.webSignIn, signedIn: reload) {
                     CloudQRLoginView(drive: provider.qrDrive) { reload() }
                 }
             }
+
+            }
         }
         #else
         .fullScreenCover(item: $login) { provider in
+            WithPerceptionTracking {
             if provider == .xunlei { XunleiSignInView(signedIn: reload) }
             else { CloudQRLoginView(drive: provider.qrDrive) { reload() } }
+
+            }
         }
         #endif
+
+        }
     }
     private var footer: String {
         #if os(iOS)

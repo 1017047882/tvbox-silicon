@@ -1,3 +1,5 @@
+import Perception
+import NavigationBackport
 import SwiftUI
 import TVCore
 #if !os(tvOS)
@@ -19,6 +21,7 @@ struct DouyinAccountView: View {
     #endif
 
     var body: some View {
+        WithPerceptionTracking {
         SettingsPage(title: L10n.text("Douyin Account"), symbol: "music.note") {
             if account.signedIn {
                 SettingsGroup(footer: L10n.text("Douyin Live search uses this sign-in. It stays on this device.")) {
@@ -29,10 +32,16 @@ struct DouyinAccountView: View {
                 }
             } else {
                 #if os(tvOS)
+                Group {
+            if #available(iOS 16, macOS 13, tvOS 16, *) {
                 ViewThatFits(in: .horizontal) {
                     HStack(alignment: .center, spacing: 72) { code; handoffDetails }
                     VStack(alignment: .leading, spacing: 72) { code; handoffDetails }
                 }
+            } else {
+                VStack(alignment: .leading, spacing: 72) { code; handoffDetails }
+            }
+        }
                 .frame(maxWidth: .infinity)
                 #else
                 SettingsGroup(footer: L10n.text("Douyin answers live searches only for signed-in accounts. Sign in on Douyin's own page with a text-message code, or by scanning its code with the Douyin app on another phone.")) {
@@ -57,6 +66,8 @@ struct DouyinAccountView: View {
         #if !os(tvOS)
         .sheet(isPresented: $signingIn) { DouyinLoginView { account = $0 } }
         #endif
+
+        }
     }
 
     private func run() async {
@@ -146,6 +157,7 @@ extension DouyinAccount {
 /// Atop Douyin Live while signed out: signing in adds search.
 struct DouyinSignInBanner: View {
     var body: some View {
+        WithPerceptionTracking {
         HStack(spacing: 16) {
             if let douyin = LivePlatform(rawValue: "douyin") { LivePlatformMark(platform: douyin, size: 44) }
             VStack(alignment: .leading, spacing: 4) {
@@ -158,6 +170,8 @@ struct DouyinSignInBanner: View {
         }
         .padding(16)
         .contentPanel()
+
+        }
     }
 }
 
@@ -180,6 +194,7 @@ struct DouyinLoginView: View {
     static let page = URL(string: "https://www.douyin.com/")!
 
     var body: some View {
+        WithPerceptionTracking {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
                 if let douyin = LivePlatform(rawValue: "douyin") { LivePlatformMark(platform: douyin, size: 28) }
@@ -220,8 +235,10 @@ struct DouyinLoginView: View {
                     } catch { self.error = error.localizedDescription }
                     return
                 }
-                try? await Task.sleep(for: .seconds(1))
+                try? await tvSleep(for: .seconds(1))
             }
+        }
+
         }
     }
 }
@@ -279,7 +296,9 @@ struct DouyinHandoffView: View {
     @State private var error: String?
 
     var body: some View {
-        NavigationStack {
+        WithPerceptionTracking {
+        NBNavigationStack {
+            WithPerceptionTracking {
             VStack(spacing: 18) {
                 Image(systemName: sent ? "checkmark.circle.fill" : "appletv.fill")
                     .font(.system(size: 56)).foregroundStyle(sent ? Color.green : Color.secondary)
@@ -302,8 +321,12 @@ struct DouyinHandoffView: View {
             .padding(28)
             .frame(maxWidth: 480)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button(L10n.text("Cancel")) { dismiss() } } }
+
+            }
         }
         .sheet(isPresented: $signingIn) { DouyinLoginView { account = $0 } }
+
+        }
     }
 
     private var message: String {

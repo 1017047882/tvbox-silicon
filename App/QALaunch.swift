@@ -1,3 +1,4 @@
+import Perception
 #if DEBUG
 import AVFoundation
 import SwiftUI
@@ -51,10 +52,10 @@ enum QALaunch {
         if let path = UserDefaults.standard.string(forKey: "qaWindowSnapshot") {
             Task { @MainActor in
                 let size = (UserDefaults.standard.string(forKey: "qaWindowSize") ?? "").split(separator: "x").compactMap { Double($0) }
-                try? await Task.sleep(for: .seconds(1))
+                try? await tvSleep(for: .seconds(1))
                 if size.count == 2 { NSApp.windows.first { $0.isVisible }?.setContentSize(NSSize(width: size[0], height: size[1])) }
                 let delay = UserDefaults.standard.object(forKey: "qaSnapshotDelay") == nil ? 20 : UserDefaults.standard.double(forKey: "qaSnapshotDelay")
-                try? await Task.sleep(for: .seconds(delay))
+                try? await tvSleep(for: .seconds(delay))
                 // The main window into the path; each other visible window (a sheet, a popover) beside it as <path>-1.png, -2…
                 for (index, window) in NSApp.windows.filter(\.isVisible).enumerated() {
                     guard let view = window.contentView?.superview, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
@@ -103,7 +104,7 @@ enum QALaunch {
         if let section { store.section = section }
         if let page, page.hasPrefix("search:") {
             // Let the tab settle first: switching sections suspends a search that is already running.
-            try? await Task.sleep(for: .seconds(2))
+            try? await tvSleep(for: .seconds(2))
             store.searchVideos(String(page.dropFirst(7)))
         }
         // `-qaPlayLive [<platform>:]<room>` opens a live room (Bilibili by default) in the player.
@@ -176,7 +177,7 @@ enum QALaunch {
                 store.playing = store.catalogChannel(channel, video: video, episode: episode, client: client, resumePosition: start)
             } catch {
                 store.error = error.localizedDescription
-                let file = URL.cachesDirectory.appending(path: "qa-playback.json")
+                let file = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("qa-playback.json")
                 try? JSONSerialization.data(withJSONObject: ["source": key, "stage": "resolve", "error": error.localizedDescription]).write(to: file, options: .atomic)
             }
         }
@@ -336,7 +337,14 @@ private struct QASheet<Content: View>: View {
     @ViewBuilder let content: () -> Content
     @State private var shown = false
     var body: some View {
-        Color.clear.task { shown = true }.sheet(isPresented: $shown) { content() }
+        WithPerceptionTracking {
+        Color.clear.task { shown = true }.sheet(isPresented: $shown) {
+            WithPerceptionTracking {
+ content()
+            }
+        }
+
+        }
     }
 }
 
@@ -359,12 +367,12 @@ enum QASweep {
     struct Failure: LocalizedError { let message: String; var errorDescription: String? { message } }
 
     static var enabled: Bool { UserDefaults.standard.bool(forKey: "qaSweep") }
-    static let folder = URL.cachesDirectory.appending(path: "qa-sweep")
+    static let folder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("qa-sweep")
 
     static func run(_ config: Subscription) async {
         await PluginLocator.shared.use(config.pluginArchives)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let file = folder.appending(path: "results.json")
+        let file = folder.appendingPathComponent("results.json")
         let fresh = UserDefaults.standard.bool(forKey: "qaSweepFresh")
         let previous = fresh ? [] : ((try? JSONDecoder().decode([Record].self, from: Data(contentsOf: file))) ?? [])
         let recorder = Recorder(file: file, records: previous)
@@ -466,7 +474,7 @@ enum QASweep {
                 catch { if gate.claim() { continuation.resume(throwing: error) } }
             }
             Task {
-                try? await Task.sleep(for: .seconds(seconds))
+                try? await tvSleep(for: .seconds(seconds))
                 if gate.claim() { work.cancel(); continuation.resume(throwing: Timeout(seconds: seconds)) }
             }
         }
@@ -485,7 +493,7 @@ enum QASweep {
             status("\(records.count) done, \(records.filter(\.ok).count) ok, last \(record.key)")
         }
         func status(_ text: String) {
-            try? Data(text.utf8).write(to: file.deletingLastPathComponent().appending(path: "status.txt"), options: .atomic)
+            try? Data(text.utf8).write(to: file.deletingLastPathComponent().appendingPathComponent("status.txt"), options: .atomic)
         }
     }
 }
@@ -515,15 +523,26 @@ private struct QADanmakuList: View {
         return list.sorted { $0.time < $1.time }
     }()
     var body: some View {
+        WithPerceptionTracking {
         #if os(tvOS)
         // A cover so focus starts on the first row instead of the tab bar.
-        Color.clear.fullScreenCover(isPresented: .constant(true)) { DanmakuListView(player: player, comments: comments) }
+        Color.clear.fullScreenCover(isPresented: .constant(true)) {
+            WithPerceptionTracking {
+ DanmakuListView(player: player, comments: comments)
+            }
+        }
         #else
         // The list as the player shows it: a sheet over the picture.
         LinearGradient(colors: [Color(red: 0.1, green: 0.16, blue: 0.3), .black], startPoint: .top, endPoint: .bottom)
             .ignoresSafeArea()
-            .sheet(isPresented: .constant(true)) { DanmakuListView(player: player, comments: comments).danmakuListPresentation() }
+            .sheet(isPresented: .constant(true)) {
+                WithPerceptionTracking {
+ DanmakuListView(player: player, comments: comments).danmakuListPresentation()
+                }
+            }
         #endif
+
+        }
     }
 }
 #endif

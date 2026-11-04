@@ -1,3 +1,4 @@
+import Perception
 import SwiftUI
 import TVCore
 
@@ -60,7 +61,7 @@ import TVCore
                 }
                 #if os(tvOS) || os(macOS)
                 .task { BilibiliCastController.shared.start(store) }
-                .onChange(of: store.extrasUnlocked) { _, unlocked in if unlocked { BilibiliCastController.shared.start(store) } }
+                .tvOnChange(of: store.extrasUnlocked) { _, unlocked in if unlocked { BilibiliCastController.shared.start(store) } }
                 #endif
                 #if os(tvOS) || os(macOS)
                 .task { PlayOnController.shared.start(store) }
@@ -70,8 +71,8 @@ import TVCore
                 .sheet(item: $douyinHandoff) { DouyinHandoffView(link: $0) }
                 #endif
                 // A launch that ends while active, without passing through here, crashed or was ended.
-                .onChange(of: scenePhase, initial: true) { _, phase in ErrorReports.shared.onScreen(phase == .active) }
-                .onChange(of: scenePhase) { _, phase in
+                .tvOnChange(of: scenePhase, initial: true) { _, phase in ErrorReports.shared.onScreen(phase == .active) }
+                .tvOnChange(of: scenePhase) { _, phase in
                     if phase == .background {
                         Task { _ = await Diagnostics.shared.snapshot(); ErrorReports.shared.save() }
                         store.cloudSync?.flushPending()
@@ -79,16 +80,22 @@ import TVCore
                     if phase == .active { Task { await ErrorReports.shared.sendIfDue() } }
                     #if os(tvOS) || os(macOS)
                     // Phones only see the TV while the app is open.
-                    if phase == .background { BilibiliCastController.shared.stop() }
+                    if phase == .background {
+                        BilibiliCastController.shared.stop()
+                    }
                     if phase == .active { BilibiliCastController.shared.start(store) }
                     #endif
                     #if os(tvOS)
                     // As for Bilibili casts: other devices only see the TV while the app is open.
-                    if phase == .background { PlayOnController.shared.stop() }
+                    if phase == .background {
+                        PlayOnController.shared.stop()
+                    }
                     if phase == .active { PlayOnController.shared.start(store) }
                     #endif
                     #if !os(macOS)
-                    if phase == .background { DownloadsLifecycle.enteredBackground() }
+                    if phase == .background {
+                        DownloadsLifecycle.enteredBackground()
+                    }
                     if phase == .active { DownloadsLifecycle.becameActive() }
                     #endif
                     // Apple TV and Mac sessions run for days; look again when the app comes back.

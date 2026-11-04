@@ -84,13 +84,13 @@ public struct MusicHistoryEntry: Codable, Equatable, Identifiable, Sendable {
 
 /// Songs played recently, newest first, and where to continue: kept in one file.
 @MainActor @Perceptible public final class MusicLibrary {
-    public static let shared = MusicLibrary(file: MusicLibrary.directory.appending(path: "music-library.json"))
+    public static let shared = MusicLibrary(file: MusicLibrary.directory.appendingPathComponent("music-library.json"))
     /// tvOS only keeps app files in Caches, as for subscriptions.
     static var directory: URL {
         #if os(tvOS)
-        URL.cachesDirectory
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         #else
-        URL.applicationSupportDirectory
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         #endif
     }
     public static let historyLimit = 200
@@ -149,7 +149,7 @@ public struct MusicHistoryEntry: Codable, Equatable, Identifiable, Sendable {
     private func scheduleSave() {
         guard let file, saveTask == nil else { return }
         saveTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(1))
+            try? await tvSleep(for: .seconds(1))
             guard let self else { return }
             self.saveTask = nil
             self.saveNow(to: file)

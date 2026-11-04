@@ -1,9 +1,11 @@
+import Perception
+import NavigationBackport
 import SwiftUI
 import AVKit
 import TVCore
 import UniformTypeIdentifiers
 
-@MainActor @Observable final class CatalogDanmakuModel {
+@MainActor @Perceptible final class CatalogDanmakuModel {
     private(set) var comments: [CatalogDanmakuComment] = []
     private(set) var track = ""
     private(set) var revision = UUID()
@@ -38,8 +40,8 @@ import UniformTypeIdentifiers
     private(set) var fromCache = false
     var context: PlaybackHistoryContext? { automaticContext }
 
-    @ObservationIgnored private var renderedKey: String?
-    @ObservationIgnored private var rendered: [Danmaku] = []
+    @PerceptionIgnored private var renderedKey: String?
+    @PerceptionIgnored private var rendered: [Danmaku] = []
     var renderedRevision: String { "\(revision):\(offset)" }
     var renderedComments: [Danmaku] {
         let key = renderedRevision
@@ -92,7 +94,7 @@ import UniformTypeIdentifiers
             guard let self else { return }
             await self.automaticTask?.value
             guard !Task.isCancelled, self.generation == active, !self.comments.isEmpty else { return }
-            try? await Task.sleep(for: .seconds(3))
+            try? await tvSleep(for: .seconds(3))
             guard !Task.isCancelled, self.generation == active else { return }
             _ = try? await Self.resolver().resolve(context, ticket: ticket)
         }
@@ -173,8 +175,10 @@ struct CatalogDanmakuSettingsView: View {
     @State private var showsImporter = false
 
     var body: some View {
-        @Bindable var model = model
-        NavigationStack {
+        WithPerceptionTracking {
+        @Perception.Bindable var model = model
+        NBNavigationStack {
+            WithPerceptionTracking {
             Form {
                 Section {
                     Toggle(L10n.text("Show Danmaku"), isOn: $model.enabled).settingsSwitch().accessibilityIdentifier("danmaku.enabled")
@@ -219,16 +223,22 @@ struct CatalogDanmakuSettingsView: View {
                         Button(L10n.text("Back to search results")) { work?.cancel(); busy = false; selectedAnime = nil; episodes = []; error = nil }
                         Text(anime.title).font(.headline)
                         ForEach(episodes) { episode in
+                            WithPerceptionTracking {
                             Button(episode.title) { load(episode, anime: anime) }.disabled(busy).accessibilityIdentifier("danmaku.episode." + episode.id)
+
+                            }
                         }
                     } else {
                         ForEach(animes) { anime in
+                            WithPerceptionTracking {
                             Button { select(anime) } label: {
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(anime.title)
                                     if !anime.type.isEmpty { Text(anime.type).font(.caption).foregroundStyle(.secondary) }
                                 }
                             }.disabled(busy).accessibilityIdentifier("danmaku.anime." + anime.id)
+
+                            }
                         }
                         if searched && animes.isEmpty && !busy && error == nil {
                             Text(L10n.text("No danmaku found. Try another title or server.")).foregroundStyle(.secondary)
@@ -242,9 +252,9 @@ struct CatalogDanmakuSettingsView: View {
                 Section {
                     TextField(L10n.text("Danmaku server URL"), text: $server)
                         #if os(iOS)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
+                        .textInputAutocapitalization(.never).disableAutocorrection().keyboardType(.URL)
                         #endif
-                        .onChange(of: server) { _, _ in
+                        .tvOnChange(of: server) { _, _ in
                             work?.cancel(); busy = false; animes = []; episodes = []; selectedAnime = nil; searched = false; error = nil
                         }
                     Button(L10n.text("Use Default URL")) { server = CatalogDanmakuClient.defaultServer }
@@ -253,6 +263,8 @@ struct CatalogDanmakuSettingsView: View {
             }
             .navigationTitle(L10n.text("Danmaku"))
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button(L10n.text("Done")) { dismiss() } } }
+
+            }
         }
         #if os(macOS)
         .frame(minWidth: 520, idealWidth: 560, minHeight: 500)
@@ -265,6 +277,8 @@ struct CatalogDanmakuSettingsView: View {
         .fileImporter(isPresented: $showsImporter, allowedContentTypes: [.xml, .json]) { result in
             do { try model.importFile(result.get()); dismiss() }
             catch { self.error = error.localizedDescription }
+        }
+
         }
     }
 

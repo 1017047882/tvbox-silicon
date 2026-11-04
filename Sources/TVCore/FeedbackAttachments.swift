@@ -52,7 +52,7 @@ extension Feedback {
     static let thumbnailSide = 240
 
     /// Where the copies are kept until they are sent.
-    static var folder: URL { FileManager.default.temporaryDirectory.appending(path: "Feedback", directoryHint: .isDirectory) }
+    static var folder: URL { FileManager.default.temporaryDirectory.appendingPathComponent("Feedback", isDirectory: true) }
 
     /// A picture or video the viewer chose, copied and ready to upload: a picture without its metadata
     /// (location, camera) and no larger than `pictureSide`; a video without where it was filmed or by whom.
@@ -80,7 +80,7 @@ extension Feedback {
               let thumbnail = thumbnail(image) else { throw Failure.unsupportedAttachment }
         // A GIF keeps its frames as it is: it has no location or camera details to lose.
         if type.conforms(to: .gif) {
-            let file = folder.appending(path: UUID().uuidString + ".gif")
+            let file = folder.appendingPathComponent(UUID().uuidString + ".gif")
             try FileManager.default.copyItem(at: source, to: file)
             // The copy keeps the original's date; `discardStale` goes by when it was added.
             try FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: file.path)
@@ -94,7 +94,7 @@ extension Feedback {
             kCGImageSourceThumbnailMaxPixelSize: pictureSide, kCGImageSourceShouldCacheImmediately: true,
         ]
         guard let pixels = CGImageSourceCreateThumbnailAtIndex(image, 0, options as CFDictionary) else { throw Failure.unsupportedAttachment }
-        let file = folder.appending(path: UUID().uuidString + (png ? ".png" : ".jpg"))
+        let file = folder.appendingPathComponent(UUID().uuidString + (png ? ".png" : ".jpg"))
         guard let destination = CGImageDestinationCreateWithURL(file as CFURL, (png ? UTType.png : .jpeg).identifier as CFString, 1, nil)
         else { throw Failure.unsupportedAttachment }
         CGImageDestinationAddImage(destination, pixels, png ? nil : [kCGImageDestinationLossyCompressionQuality: 0.85] as CFDictionary)
@@ -109,7 +109,7 @@ extension Feedback {
         // The same picture and sound, without the location and the owner's details.
         session.metadataItemFilter = .forSharing()
         let mp4 = ["mp4", "m4v"].contains(source.pathExtension.lowercased()) && session.supportedFileTypes.contains(.mp4)
-        let file = folder.appending(path: UUID().uuidString + (mp4 ? ".mp4" : ".mov"))
+        let file = folder.appendingPathComponent(UUID().uuidString + (mp4 ? ".mp4" : ".mov"))
         if #available(macOS 15, iOS 18, tvOS 18, *) {
             try await session.export(to: file, as: mp4 ? .mp4 : .mov)
         } else {
@@ -121,8 +121,12 @@ extension Feedback {
         let generator = AVAssetImageGenerator(asset: AVURLAsset(url: file))
         generator.appliesPreferredTrackTransform = true
         generator.maximumSize = CGSize(width: thumbnailSide, height: thumbnailSide)
-        let frame = try? await generator.image(at: .zero).image
-        return try Attachment(kind: .video, file: file, type: mp4 ? "video/mp4" : "video/quicktime", thumbnail: frame.flatMap(jpeg))
+        let thumbnail: Data? = await withCheckedContinuation { continuation in
+            generator.generateCGImagesAsynchronously(forTimes: [NSValue(time: .zero)]) { _, image, _, _, _ in
+                continuation.resume(returning: image.flatMap(jpeg))
+            }
+        }
+        return try Attachment(kind: .video, file: file, type: mp4 ? "video/mp4" : "video/quicktime", thumbnail: thumbnail)
     }
 
     /// A small JPEG of the first picture in `source`.
@@ -146,7 +150,7 @@ extension Feedback {
         return await Task.detached(priority: .userInitiated) { () -> Attachment? in
             guard let data = try? Data(contentsOf: export, options: .mappedIfSafe), !data.isEmpty,
                   let packed = gzip(data), packed.count <= sizeLimit(.log) else { return nil }
-            let file = folder.appending(path: UUID().uuidString + ".jsonl.gz")
+            let file = folder.appendingPathComponent(UUID().uuidString + ".jsonl.gz")
             do {
                 try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
                 try packed.write(to: file)
@@ -200,7 +204,7 @@ extension Feedback {
 
     /// Uploads one file and answers the id the message names it by.
     static func upload(_ attachment: Attachment, to base: URL, install: String, sent: @escaping @Sendable (Int64) -> Void) async throws -> String {
-        let address = base.appending(path: "uploads").appending(queryItems: [
+        let address = base.appendingPathComponent("uploads").tvAppending(queryItems: [
             URLQueryItem(name: "install", value: install), URLQueryItem(name: "kind", value: attachment.kind.rawValue),
         ])
         // Seconds without progress, not for the whole upload.

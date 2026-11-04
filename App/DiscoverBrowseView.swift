@@ -1,3 +1,4 @@
+import Perception
 import SwiftUI
 import TVCore
 
@@ -31,6 +32,7 @@ struct DiscoverBrowseView: View {
         }.accessibilityIdentifier("discover.browse.retry")
     }
     var body: some View {
+        WithPerceptionTracking {
         #if os(tvOS)
         DiscoverTVGrid(title: title, items: items, identifier: "discover.browse.item", reachedEnd: { await load(reset: false) }) {
             if filter.company.isEmpty {
@@ -48,28 +50,45 @@ struct DiscoverBrowseView: View {
             else if loading { ProgressView() }
             else if items.isEmpty { noResults }
         }
-        .background { DiscoverSearchAtmosphere() }
+        .background {
+            WithPerceptionTracking {
+ DiscoverSearchAtmosphere()
+            }
+        }
         .foregroundStyle(.white).preferredColorScheme(.dark)
-        .onChange(of: filter.kind) { _, kind in filter.genres.formIntersection(DiscoverGenres.ids(for: kind)) }
+        .tvOnChange(of: filter.kind) { _, kind in filter.genres.formIntersection(DiscoverGenres.ids(for: kind)) }
         .task(id: request) { await load(reset: true) }
         #else
         GeometryReader { geometry in
+            WithPerceptionTracking {
             ScrollView {
                 if let logo {
                     TMDBArtwork(url: logo, maxPixels: 600, fill: false).frame(height: 48).padding(.top, 14).padding(.bottom, 14)
                 }
                 if layout == "grid" {
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: geometry.size.width < 600 ? 3 : 5), spacing: 14) {
+                        WithPerceptionTracking {
                         ForEach(items, id: \.key) { item in
+                            WithPerceptionTracking {
                             RouteLink { DiscoverDetailView(item: item) } label: { tile(item) }.buttonStyle(.plain)
                                 .accessibilityIdentifier("discover.browse.item.\(item.key)")
+
+                            }
+                        }
+
                         }
                     }.padding(.horizontal, 14).padding(.top, 14)
                 } else {
                     LazyVStack(spacing: 10) {
+                        WithPerceptionTracking {
                         ForEach(items, id: \.key) { item in
+                            WithPerceptionTracking {
                             RouteLink { DiscoverDetailView(item: item) } label: { DiscoverSearchRow(item: item) }.buttonStyle(.plain)
                                 .accessibilityIdentifier("discover.browse.item.\(item.key)")
+
+                            }
+                        }
+
                         }
                     }.padding(14)
                 }
@@ -85,14 +104,24 @@ struct DiscoverBrowseView: View {
                         .onAppear { Task { await load(reset: false) } }
                 }
                 Color.clear.frame(height: 90)
-            }.scrollIndicators(.hidden)
-                .overlay(alignment: .bottomTrailing) { sortMenu.padding(20) }
+            }.tvScrollIndicators(.hidden)
+                .overlay(alignment: .bottomTrailing) {
+                    WithPerceptionTracking {
+ sortMenu.padding(20)
+                    }
+                }
+
+            }
         }
-        .background { DiscoverSearchAtmosphere() }
+        .background {
+            WithPerceptionTracking {
+ DiscoverSearchAtmosphere()
+            }
+        }
         .navigationTitle(title)
         #if !os(macOS)
-        .toolbar(.visible, for: .navigationBar)
-        .toolbarBackground(.hidden, for: .navigationBar)
+        .tvToolbar(.visible, for: .navigationBar)
+        .tvToolbarBackground(.hidden, for: .navigationBar)
         #endif
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -102,11 +131,14 @@ struct DiscoverBrowseView: View {
                 Menu {
                     Menu(L10n.text("Genres")) {
                         ForEach(DiscoverGenres.ids(for: filter.kind), id: \.self) { id in
+                            WithPerceptionTracking {
                             Button {
                                 filter.genres = filter.genres.contains(id) ? [] : [id]
                             } label: {
                                 if filter.genres.contains(id) { Label(L10n.text(DiscoverGenres.names[id] ?? ""), systemImage: "checkmark") }
                                 else { Text(L10n.text(DiscoverGenres.names[id] ?? "")) }
+                            }
+
                             }
                         }
                     }
@@ -125,9 +157,11 @@ struct DiscoverBrowseView: View {
                     .accessibilityIdentifier("discover.browse.layout")
             }
         }
-        .onChange(of: filter.kind) { _, kind in filter.genres.formIntersection(DiscoverGenres.ids(for: kind)) }
+        .tvOnChange(of: filter.kind) { _, kind in filter.genres.formIntersection(DiscoverGenres.ids(for: kind)) }
         .task(id: request) { await load(reset: true) }
         #endif
+
+        }
     }
     private static let sorts = [("popularity.desc", "Popularity ↓"), ("vote_average.desc", "Rating ↓"), ("vote_count.desc", "Most Votes"),
                                 ("date.desc", "Newest First"), ("date.asc", "Oldest First")]

@@ -6,7 +6,7 @@ import Foundation
 /// players reconnect. The episode opens again a few times, a little later each time, before the error shows.
 public struct PlaybackDropRecovery: Sendable {
     /// The waits before each reopening; once they're used up the error shows.
-    public static let delays: [Duration] = [.seconds(1), .seconds(3), .seconds(8)]
+    public static let delays: [TVDelay] = [.seconds(1), .seconds(3), .seconds(8)]
     /// Playing this many seconds away from the last reopening means the connection came back: a later drop starts
     /// the count again.
     public static let recovered: Double = 60
@@ -17,7 +17,7 @@ public struct PlaybackDropRecovery: Sendable {
     public init() {}
 
     /// The wait before the episode opens again at `position` after `failure`, or nil when the error should show.
-    public mutating func delay(after failure: Error?, position: Double) -> Duration? {
+    public mutating func delay(after failure: Error?, position: Double) -> TVDelay? {
         guard Self.isDrop(failure), position.isFinite else { return nil }
         if let reopenedAt, abs(position - reopenedAt) >= Self.recovered { attempts = 0 }
         guard attempts < Self.delays.count else { return nil }
