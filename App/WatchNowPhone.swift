@@ -579,7 +579,7 @@ private struct WatchNowPhoneFavorite: View {
         }
     }
 
-    private func plate<Art: View>(title: String, detail: String, action: @escaping () -> Void, @ViewBuilder art: () -> Art) -> some View {
+    private func plate<Art: View>(title: String, detail: String, action: @escaping () -> Void, @ViewBuilder art: @escaping () -> Art) -> some View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 0) {
                 RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.primary.opacity(0.08))

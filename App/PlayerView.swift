@@ -1,6 +1,7 @@
 import Perception
 import SwiftUI
 import AVKit
+@preconcurrency import AVFoundation
 import TVCore
 
 struct PlaybackView: View {

@@ -44,8 +44,8 @@ iOS 15 真机回归至少覆盖：订阅导入与恢复、搜索、导航进入�
 完整 App 编译日志补充修复：播放会话保存所选倍速，iOS 15 的各个恢复播放入口使用该值；`AVPlayer.defaultRate` 只在 iOS 16+ 使用。锁屏信息和手机倍速菜单读取会话值。回归需覆盖：暂停后恢复、历史位置恢复、循环播放、下一集及临时加速释放后的倍速；音轨/字幕加载期间切换视频时，应丢弃旧项目的结果。本机没有 Apple SDK，尚未完成这些行为测试或 MC/DC 测量。
 
 [技术债务]
-规则/惯例：在 MobilePlayer.swift 和 PlaybackView.swift 局部使用 `@preconcurrency import AVFoundation`，放宽旧 SDK 的 Sendable 静态诊断。
-理由：Xcode 16.4 的媒体选择组未声明 Sendable，异步加载返回该对象；应用侧将组和选项限制在 `@MainActor MediaTracks` 中使用，保留取消及当前项目身份检查。
+规则/惯例：在 MobilePlayer.swift、PlaybackView.swift 和 PlayerView.swift 局部使用 `@preconcurrency import AVFoundation`，放宽旧 SDK 的 Sendable 静态诊断。
+理由：旧 SDK 的媒体选择组和 AVAssetTrack 缺少 Sendable 标注，异步加载涉及这些对象；应用侧由主 actor 管理媒体选择和 PlaybackFormats 的轨道缓存，播放信息刷新保留取消及当前项目身份检查。该导入不能证明底层异步加载无数据竞争。
 风险等级：中。
 潜在影响：此文件内部分 AVFoundation 跨隔离访问不能完全由编译器检查，需要人工维护其所有权边界。
 建议重构时机：更新到提供完整并发标注的 SDK 后移除此兼容导入，并重新执行严格并发检查；这不构成给 AVMediaSelectionGroup 添加 Sendable 承诺。
