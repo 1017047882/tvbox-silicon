@@ -1,0 +1,204 @@
+name: iOS 15 build preparation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    name: Inspect sources and Apple toolchain (no IPA)
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Record Apple toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          {
+            git rev-parse HEAD
+            uname -m
+            xcodebuild -version
+            xcrun swift --version
+            xcrun --sdk iphoneos --show-sdk-version
+          } 2>&1 | tee artifacts/toolchain.txt
+
+      - name: Inspect iOS 15 migration requirements
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import pathlib
+          import re
+
+          root = pathlib.Path.cwd()
+          lines = ["# iOS 15 compatibility preflight", "",
+                   "This workflow inventories migration requirements; it does not compile or produce an IPA.",
+                   "", "## Deployment settings"]
+          checks = {
+              "project.yml": r"iOS:\s*['\"]([0-9.]+)",
+              "Package.swift": r"\.iOS\(\.v(\d+)\)",
+          }
+          for name, pattern in checks.items():
+              match = re.search(pattern, (root / name).read_text())
+              version = match.group(1) if match else "unknown"
+              lines.append(f"- {name}: iOS {version}")
+
+          lines.extend(["", "## Shared package symlinks"])
+          for name in ["Package.swift", "Sources", "Vendor", "Tests/TVCoreTests"]:
+              path = root / "Packages/TVCore" / name
+              status = "OK" if path.is_symlink() and path.exists() else "CHECK REQUIRED"
+              lines.append(f"- Packages/TVCore/{name}: {status}")
+
+          patterns = {
+              "Observation declarations (iOS 17+)": r"@Observable\b",
+              "Navigation APIs (iOS 16+)": r"\b(?:NavigationStack|NavigationSplitView|NavigationPath)\b",
+              "Presentation APIs (iOS 17+)": r"\b(?:ContentUnavailableView|scrollPosition|sensoryFeedback|symbolEffect)\b",
+              "iOS 27 API references requiring SDK review": r"iOS 27|UISceneAccessoryRegistration|registerSceneAccessory",
+              "Native iOS 17 build settings": r"ios17\.0|miphoneos-version-min=17\.0|MINIMUM_OS=17\.0|IPHONEOS_DEPLOYMENT_TARGET=17\.0",
+          }
+          files = sorted({p for folder in ["App", "Sources", "Scripts"]
+                          for p in (root / folder).rglob("*")
+                          if p.is_file() and p.suffix in {".swift", ".sh"}})
+          for title, pattern in patterns.items():
+              lines.extend(["", "## " + title])
+              hits = []
+              for path in files:
+                  for number, line in enumerate(path.read_text(errors="replace").splitlines(), 1):
+                      if re.search(pattern, line):
+                          hits.append(f"- {path.relative_to(root).as_posix()}:{number}: `{line.strip()}`")
+              lines.extend(hits or ["No textual matches; compiler and binary checks are still required."])
+
+          lines.extend(["", "## Required next steps",
+                        "- Backport source APIs and rebuild native dependencies for iOS 15.",
+                        "- Inspect NodeMobile and Python binary deployment requirements.",
+                        "- Use an arm64 macOS runner for the upstream native runtime build recipes.",
+                        "- Compile and validate the application before packaging an unsigned IPA.",
+                        "- Sign and test on a physical iOS 15 device."])
+          report = "\n".join(lines) + "\n"
+          (root / "artifacts/ios15-report.md").write_text(report)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write(report)
+          print(report)
+          PY
+
+      - name: Upload compatibility report
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: ios15-preflight-${{ github.run_number }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14
+
+  compile-core:
+    name: Build native prerequisites and compile iOS 15 core (no IPA)
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      TVBOX_FFMPEG_CACHE: ${{ github.workspace }}/build/ffmpeg-cache
+      JOBS: '3'
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Record toolchain and verify package symlinks
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          {
+            git rev-parse HEAD
+            uname -m
+            xcodebuild -version
+            xcrun swift --version
+            xcrun --sdk iphoneos --show-sdk-version
+          } 2>&1 | tee artifacts/compiler-toolchain.txt
+          for link in Package.swift Sources Vendor Tests/TVCoreTests; do
+            test -L "Packages/TVCore/$link"
+            test -e "Packages/TVCore/$link"
+          done
+          test -L Vendor/FFmpeg/FFmpeg.xcframework
+
+      - name: Verify preparation regression tests
+        run: python3 -m unittest discover -s Tests/BuildChecks -v
+
+      - name: Install native build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew install autoconf automake libtool pkg-config
+
+      - name: Build libffi for an iOS 15 device
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash Scripts/build-apple-libffi.sh ios 2>&1 | tee artifacts/libffi-build.log
+          xcrun ar -t build/apple-runtime/libffi-ios-3.4.8/install/lib/libffi.a > artifacts/libffi-members.txt
+
+      - name: Build FFmpeg with iOS 15 deployment targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash Scripts/build-apple-ffmpeg.sh 2>&1 | tee artifacts/ffmpeg-build.log
+          plutil -lint Vendor/FFmpeg/FFmpeg.xcframework/Info.plist
+
+      - name: Compile TVCore against the iOS 15 device target
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK_PATH="$(xcrun --sdk iphoneos --show-sdk-path)"
+          xcrun swift build --target TVCore --configuration debug \
+            --triple arm64-apple-ios15.0 --sdk "$SDK_PATH" \
+            --scratch-path build/ios15-core --jobs 3 --verbose \
+            2>&1 | tee artifacts/ios15-core-build.log
+
+      - name: Summarize the actual build status
+        if: always()
+        shell: bash
+        env:
+          BUILD_STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          {
+            echo '# iOS 15 build preparation'
+            echo
+            echo "Job status before this summary: $BUILD_STATUS"
+            echo
+            echo 'This job builds prerequisites and invokes the compiler for TVCore only.'
+            echo 'It does not build, sign or package the application; no IPA is expected at this stage.'
+            echo 'A successful core build does not establish application or device compatibility.'
+            echo
+            echo '## Compiler diagnostics (first 80 matches)'
+            if [ -f artifacts/ios15-core-build.log ]; then
+              python3 - <<'PY'
+          import pathlib
+          lines = pathlib.Path('artifacts/ios15-core-build.log').read_text(errors='replace').splitlines()
+          errors = [line for line in lines if 'error:' in line]
+          print('```text')
+          print('\n'.join(errors[:80]) or 'No error lines found; check the full log and step result.')
+          print('```')
+          PY
+            else
+              echo 'The compiler step was not reached. Read libffi/FFmpeg logs and the failed step first.'
+            fi
+          } | tee artifacts/build-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload actual compiler and dependency logs
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: ios15-build-preparation-${{ github.run_number }}
+          path: |
+            artifacts/
+            build/ffmpeg-cache/work.*/**/*.log
+            build/apple-runtime/libffi-ios-3.4.8/config.log
+          if-no-files-found: warn
+          retention-days: 14

@@ -4,40 +4,46 @@
 # of the conversion path, VideoToolbox decoding for HDR to SDR, dav1d for AV1 without AV1 hardware, and nothing
 # else (no network, no programs, no external libraries but zlib and dav1d). LGPL only (dav1d is BSD).
 # Output: build/FFmpeg/FFmpeg.xcframework (Vendor/FFmpeg links to it), one static library per platform.
-# Builds are kept in a cache shared by every checkout and worktree, one per recipe (the lines between RECIPE
-# and END below), so a checkout usually just links the one already built (about 5 minutes otherwise; dav1d's
+# Builds are kept in a cache shared by every checkout and worktree, one per complete script hash,
+# so a checkout usually just links the one already built (about 5 minutes otherwise; dav1d's
 # build tools also need Python 3).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 CACHE="${TVBOX_FFMPEG_CACHE:-$HOME/Library/Caches/tvbox-ffmpeg}"
-SIGNATURE="$(sed -n '/^# RECIPE$/,/^# END$/p' "$0" | shasum -a 256 | cut -c1-16)"
+SIGNATURE="$(shasum -a 256 "$0" | cut -c1-16)"
 OUTPUT="$CACHE/$SIGNATURE/FFmpeg.xcframework"
 LINK="$PWD/build/FFmpeg/FFmpeg.xcframework"
 link() {
   mkdir -p "$(dirname "$LINK")"
-  [ "$(readlink "$LINK" 2>/dev/null)" = "$OUTPUT" ] || { rm -rf "$LINK"; ln -s "$OUTPUT" "$LINK"; }
+  if [ "$(readlink "$LINK" 2>/dev/null)" = "$OUTPUT" ]; then return; fi
+  if [ -L "$LINK" ]; then
+    unlink "$LINK"
+  elif [ -e "$LINK" ]; then
+    echo "Refusing to replace non-symlink output: $LINK" >&2
+    exit 1
+  fi
+  ln -s "$OUTPUT" "$LINK"
 }
 if [ -f "$OUTPUT/Info.plist" ]; then
   link
   echo "FFmpeg is up to date: $OUTPUT"
   exit 0
 fi
-WORK="$CACHE/work"
-# Two checkouts building at once would share the work folder.
+# The lock protects publication; fresh work directories preserve failed build logs.
 mkdir -p "$CACHE"
 mkdir "$CACHE/lock" 2>/dev/null || { echo "Another FFmpeg build is running (or remove $CACHE/lock)" >&2; exit 1; }
 trap 'rmdir "$CACHE/lock"' EXIT
-mkdir -p "$WORK"
+WORK="$(mktemp -d "$CACHE/work.XXXXXX")"
+echo "FFmpeg work directory (preserved): $WORK"
 
 # RECIPE
 VERSION=8.1.3
 COMMIT=1041abdc962f4cc4f394aa8de9dc5236c0c3b9e7
 SOURCE="$WORK/FFmpeg-n$VERSION"
 if [ ! -f "$SOURCE/configure" ]; then
-  rm -rf "$SOURCE.download"
   git -c advice.detachedHead=false clone --quiet --depth 1 --branch "n$VERSION" https://github.com/FFmpeg/FFmpeg.git "$SOURCE.download"
   test "$(git -C "$SOURCE.download" rev-parse HEAD)" = "$COMMIT"
-  rm -rf "$SOURCE"; mv "$SOURCE.download" "$SOURCE"
+  mv "$SOURCE.download" "$SOURCE"
 fi
 # dav1d decodes AV1 for the conversion path where there is no AV1 hardware (Macs before the M3, iPhones and
 # iPads before the A17 Pro, Apple TV).
@@ -45,15 +51,13 @@ DAV1D_VERSION=1.5.4
 DAV1D_COMMIT=54706fc6bc0cdecab7e9593974a4039cc038fca7
 DAV1D="$WORK/dav1d-$DAV1D_VERSION"
 if [ ! -f "$DAV1D/meson.build" ]; then
-  rm -rf "$DAV1D.download"
   git -c advice.detachedHead=false clone --quiet --depth 1 --branch "$DAV1D_VERSION" https://code.videolan.org/videolan/dav1d.git "$DAV1D.download"
   test "$(git -C "$DAV1D.download" rev-parse HEAD)" = "$DAV1D_COMMIT"
-  rm -rf "$DAV1D"; mv "$DAV1D.download" "$DAV1D"
+  mv "$DAV1D.download" "$DAV1D"
 fi
 # Its build tools, in a folder of their own.
 TOOLS="$WORK/meson-1.9.1-ninja-1.13.2"
 if [ ! -x "$TOOLS/bin/ninja" ]; then
-  rm -rf "$TOOLS"
   python3 -m venv "$TOOLS"
   "$TOOLS/bin/pip" install --quiet --disable-pip-version-check meson==1.9.1 ninja==1.13.2
 fi
@@ -76,7 +80,7 @@ build_slice() {
   # No nasm on the build Mac: Intel Macs lose only the conversion path's assembly (FFmpeg's and dav1d's);
   # copying needs none.
   [ "$arch" = x86_64 ] && { extra+=(--disable-x86asm); asm=false; }
-  rm -rf "$build" "$prefix" "$WORK/dav1d-build-$name"; mkdir -p "$build"
+  mkdir -p "$build"
   cat > "$build/dav1d.cross" <<CROSS
 [binaries]
 c = '$cc'
@@ -126,22 +130,25 @@ CROSS
 
 build_slice macos-arm64 macosx aarch64 arm64-apple-macos14.0
 build_slice macos-x86_64 macosx x86_64 x86_64-apple-macos14.0
-build_slice ios iphoneos aarch64 arm64-apple-ios17.0
-build_slice ios-simulator iphonesimulator aarch64 arm64-apple-ios17.0-simulator
+build_slice ios iphoneos aarch64 arm64-apple-ios15.0
+build_slice ios-simulator iphonesimulator aarch64 arm64-apple-ios15.0-simulator
 build_slice tvos appletvos aarch64 arm64-apple-tvos17.0
 build_slice tvos-simulator appletvsimulator aarch64 arm64-apple-tvos17.0-simulator
 # END
 
 mkdir -p "$WORK/install-macos/lib"
 lipo -create "$WORK/install-macos-arm64/libFFmpeg.a" "$WORK/install-macos-x86_64/libFFmpeg.a" -output "$WORK/install-macos/libFFmpeg.a"
-rm -rf "$WORK/install-macos/include"; cp -R "$WORK/install-macos-arm64/include" "$WORK/install-macos/include"
-PARTIAL="$CACHE/$SIGNATURE.partial"
-rm -rf "$OUTPUT" "$PARTIAL"; mkdir -p "$PARTIAL"
+cp -R "$WORK/install-macos-arm64/include" "$WORK/install-macos/include"
+PARTIAL="$(mktemp -d "$CACHE/$SIGNATURE.partial.XXXXXX")"
 arguments=()
 for slice in macos ios ios-simulator tvos tvos-simulator; do
   arguments+=(-library "$WORK/install-$slice/libFFmpeg.a" -headers "$WORK/install-$slice/include")
 done
 xcodebuild -create-xcframework "${arguments[@]}" -output "$PARTIAL/FFmpeg.xcframework" > /dev/null
-rm -rf "$(dirname "$OUTPUT")"; mv "$PARTIAL" "$(dirname "$OUTPUT")"
+if [ -e "$(dirname "$OUTPUT")" ]; then
+  echo "Refusing to overwrite existing FFmpeg cache: $(dirname "$OUTPUT")" >&2
+  exit 1
+fi
+mv "$PARTIAL" "$(dirname "$OUTPUT")"
 link
 echo "FFmpeg $VERSION: $OUTPUT"

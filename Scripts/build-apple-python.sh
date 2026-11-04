@@ -18,7 +18,7 @@ case "$TARGET" in
   *) echo "Usage: $0 [ios|ios-simulator|tvos|tvos-simulator]" >&2; exit 2 ;;
 esac
 VERSION=3.14; SUPPORT=b13
-MINIMUM_OS=17.0  # the apps' deployment target in project.yml
+case "$FAMILY" in iOS) MINIMUM_OS=15.0 ;; tvOS) MINIMUM_OS=17.0 ;; esac
 case "$FAMILY" in
   iOS) SHA256=ce1c68affa1cbd9c5611a0f4a013e412f14a760cf22c6bb58cfb4d893073bd45 ;;
   tvOS) SHA256=72380111fcf9362b587b30e1fdf31df4ca8d6d0f72f46054eb7e3673d61f44d1 ;;
@@ -120,8 +120,8 @@ find "$DEST/python" "$DEST/PythonHost" -name '*.so' | sort | while read -r libra
   echo "$framework/$module" > "${library%.so}.fwork"
   echo "${relative%.so}.fwork" > "$DEST/$framework/$module.origin"
 done
-# BeeWare's templates say iOS 13 / tvOS 9, but our wheels target 17.0, some tvOS modules 12.0 and the simulator's
-# Python.framework 14.0. App Store processing rejects a framework whose binary needs a newer OS than its
+# BeeWare's templates say iOS 13 / tvOS 9, but our wheels target iOS 15 / tvOS 17; the simulator's
+# Python.framework may need 14.0. App Store processing rejects a binary requiring a newer OS than its
 # MinimumOSVersion (ITMS-90208), so declare the app's deployment target, which covers them all.
 # _ssl and _hashlib link OpenSSL, which Apple lists as a commonly used third-party SDK: TestFlight review rejects
 # a framework holding it without a privacy manifest (ITMS-91061). Every module framework gets one (no tracking,
