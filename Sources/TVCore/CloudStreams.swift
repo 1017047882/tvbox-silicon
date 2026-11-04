@@ -315,7 +315,7 @@ actor CloudByteStream {
                 }
                 let range = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Range")?.tvFirstMatch(#"^bytes (\d+)-(\d+)/(\d+)$"#)
                 let end = range.flatMap { Int($0[2]) }
-                guard status == 206, let range, Int(range.1) == from, let end, end <= last, !data.isEmpty, data.count == end - from + 1 else {
+                guard status == 206, let range, Int(range[1]) == from, let end, end <= last, !data.isEmpty, data.count == end - from + 1 else {
                     // A drive sometimes answers a range with no bytes, or fewer than it says: the next try gets them.
                     if status == 206, cut < 2 {
                         cut += 1

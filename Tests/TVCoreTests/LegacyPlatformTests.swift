@@ -14,6 +14,20 @@ import Testing
     #expect(line.tvFirstMatch("[") == nil)
 }
 
+@Test func legacyFirstRegexMatchKeepsFirstCapturesAndEmptyMatches() throws {
+    let text = "中文🎬 first=一 second=二"
+    let slice = text.dropFirst(2)
+    let pattern = #"(first|second)=([^ ]+)"#
+    let match = try #require(slice.tvFirstMatch(pattern))
+    #expect(match[1] == "first")
+    #expect(match[2] == "一")
+    #expect(text[match.range] == "first=一")
+    #expect(slice.tvMatches(pattern).count == 2)
+    #expect(slice.tvFirstMatch("not-present") == nil)
+    #expect(slice.tvFirstMatch("^")?[0] == "")
+    #expect(slice.tvFirstMatch(#"(missing)?first"#)?[1] == "")
+}
+
 @Test func legacyQueryKeepsExistingItemsAndFragment() throws {
     let url = try #require(URL(string: "https://example.com/path?existing=a%26b#fragment"))
     let added = url.tvAppending(queryItems: [.init(name: "new", value: "中文+&")])

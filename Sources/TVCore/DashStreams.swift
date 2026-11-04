@@ -34,7 +34,10 @@ public enum DashStreams {
         guard url.scheme == scheme else { return nil }
         let headers = PlaylistStore.shared.headers(url)
         var options: [String: Any] = ["AVURLAssetHTTPHeaderFieldsKey": headers]
-        if let agent = headers.first(where: { $0.key.lowercased() == "user-agent" })?.value { options[AVURLAssetHTTPUserAgentKey] = agent }
+        if #available(iOS 16, macOS 13, tvOS 16, *),
+           let agent = headers.first(where: { $0.key.lowercased() == "user-agent" })?.value {
+            options[AVURLAssetHTTPUserAgentKey] = agent
+        }
         let asset = AVURLAsset(url: url, options: options)
         asset.resourceLoader.setDelegate(PlaylistLoader.shared, queue: PlaylistLoader.shared.queue)
         return asset

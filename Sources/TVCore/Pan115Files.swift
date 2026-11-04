@@ -192,7 +192,12 @@ enum M115 {
     }
 
     static func derive(_ seed: [UInt8], _ size: Int) -> [UInt8] {
-        (0..<size).map { (seed[$0] &+ table[size * $0]) ^ table[size * (size - $0 - 1)] }
+        (0..<size).map { index -> UInt8 in
+            let forward = table[size * index]
+            let backward = table[size * (size - index - 1)]
+            let sum: UInt8 = seed[index] &+ forward
+            return sum ^ backward
+        }
     }
 
     /// XOR with `key` repeated, restarting it after the first `count % 4` bytes.

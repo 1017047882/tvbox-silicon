@@ -95,7 +95,16 @@ extension StringProtocol where SubSequence == Substring {
             })
         }
     }
-    func tvFirstMatch(_ pattern: String) -> TVRegexMatch? { tvMatches(pattern).first }
+    /// @brief Stops at the first match instead of allocating every match in a large source document.
+    func tvFirstMatch(_ pattern: String) -> TVRegexMatch? {
+        guard let expression = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let text = String(self)
+        guard let match = expression.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) else { return nil }
+        return TVRegexMatch(captures: (0..<match.numberOfRanges).map { index in
+            guard let range = Range(match.range(at: index), in: self) else { return self[startIndex..<startIndex] }
+            return self[range]
+        })
+    }
     func tvReplacing(_ pattern: String, with replacement: String) -> String {
         String(self).replacingOccurrences(of: pattern, with: replacement, options: .regularExpression)
     }
