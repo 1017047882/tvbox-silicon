@@ -156,7 +156,7 @@ jobs:
           SDK_PATH="$(xcrun --sdk iphoneos --show-sdk-path)"
           xcrun swift build --target TVCore --configuration debug \
             --triple arm64-apple-ios15.0 --sdk "$SDK_PATH" \
-            --scratch-path build/ios15-core --jobs 3 --verbose \
+            --scratch-path build/ios15-core --jobs 3 \
             2>&1 | tee artifacts/ios15-core-build.log
 
       - name: Summarize the actual build status
