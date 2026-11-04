@@ -83,7 +83,10 @@ import UIKit
     private var externalScene: UIWindowScene? {
         UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
-            .first { $0.session.role == .windowExternalDisplayNonInteractive }
+            .first {
+                if #available(iOS 16, *) { return $0.session.role == .windowExternalDisplayNonInteractive }
+                return $0.session.role == .windowExternalDisplay
+            }
     }
 }
 

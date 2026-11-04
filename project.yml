@@ -170,6 +170,9 @@ targets:
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
           UISceneConfigurations:
+            UIWindowSceneSessionRoleExternalDisplay:
+              - UISceneConfigurationName: External Display
+                UISceneDelegateClassName: ExternalDisplaySceneDelegate
             UIWindowSceneSessionRoleExternalDisplayNonInteractive:
               - UISceneConfigurationName: External Display
                 UISceneDelegateClassName: ExternalDisplaySceneDelegate

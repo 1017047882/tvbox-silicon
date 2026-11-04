@@ -198,18 +198,23 @@ jobs:
             echo 'It does not link native app runtimes, sign or package the application; no IPA is expected.'
             echo 'Both compiler steps must pass. Installation and iOS 15 device behavior still need validation.'
             echo
-            echo '## Compiler diagnostics (first 80 matches)'
+            echo '## Compiler diagnostics (first 80 unique source errors)'
             if [ -f artifacts/ios15-core-build.log ]; then
               python3 - <<'PY'
           import pathlib
+          import re
           errors = []
           for name in ['ios15-core-build.log', 'ios15-app-build.log']:
               path = pathlib.Path('artifacts') / name
               if path.exists():
-                  errors += [name + ': ' + line for line in path.read_text(errors='replace').splitlines() if 'error:' in line]
+                  errors += [name + ': ' + line for line in path.read_text(errors='replace').splitlines()
+                             if re.search(r':\d+:\d+: error:', line)]
+          errors = list(dict.fromkeys(errors))
           print('```text')
           print('\n'.join(errors[:80]) or 'No error lines found; check the full log and step result.')
           print('```')
+          if len(errors) > 80:
+              print(f'{len(errors)} unique source errors; see full compiler logs for the remainder.')
           PY
             else
               echo 'The compiler step was not reached. Read libffi/FFmpeg logs and the failed step first.'

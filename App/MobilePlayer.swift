@@ -2,6 +2,9 @@ import Perception
 #if os(iOS)
 import SwiftUI
 import AVKit
+// Older AVFoundation SDK annotations do not mark media-selection groups as Sendable.
+// MediaTracks owns and accesses the loaded groups only on the main actor.
+@preconcurrency import AVFoundation
 import MediaPlayer
 import TVCore
 
@@ -130,7 +133,7 @@ struct MobilePlayerView: View {
         .animation(.easeInOut(duration: 0.4), value: waiting?.starting)
         .onAppear {
             clock.attach(session.player)
-            speed = session.player.defaultRate
+            speed = session.playbackRate
             nowPlaying.start(session)
             nowPlaying.update(title: channel.name, session: session)
             tvBrowser.start()
@@ -1295,7 +1298,7 @@ private struct PlayerLayerView: UIViewRepresentable {
         nextPreview = nil
         generating = true
         generator.generateCGImagesAsynchronously(forTimes: [NSValue(time: CMTime(seconds: seconds, preferredTimescale: 600))]) { [weak self] _, image, _, _, _ in
-            nonisolated(unsafe) let frame = image
+            let frame = image
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.generating = false
@@ -1426,8 +1429,8 @@ private struct PlayerLayerView: UIViewRepresentable {
             MPMediaItemPropertyTitle: self.title,
             MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.video.rawValue,
             MPNowPlayingInfoPropertyIsLiveStream: session.isLive,
-            MPNowPlayingInfoPropertyPlaybackRate: session.paused ? 0.0 : Double(session.boost ?? player.defaultRate),
-            MPNowPlayingInfoPropertyDefaultPlaybackRate: Double(player.defaultRate),
+            MPNowPlayingInfoPropertyPlaybackRate: session.paused ? 0.0 : Double(session.boost ?? session.playbackRate),
+            MPNowPlayingInfoPropertyDefaultPlaybackRate: Double(session.playbackRate),
         ]
         let elapsed = player.currentTime().seconds
         if elapsed.isFinite { info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = elapsed }

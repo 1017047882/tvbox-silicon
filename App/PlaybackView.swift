@@ -6,6 +6,14 @@ import TVCore
 @MainActor @Perceptible final class PlaybackSession {
     /// A queue, so the next episode can wait behind this one and play straight on.
     let player: AVQueuePlayer
+    /// @brief The chosen rate is retained across pauses on iOS 15, which has no AVPlayer.defaultRate.
+    private(set) var playbackRate: Float = 1
+
+    /// @brief Starts playback on the main actor and restores the chosen or temporary rate.
+    private func startPlayback() {
+        player.play()
+        player.rate = boost ?? playbackRate
+    }
     /// Upscaling and 60 fps smoothing, drawn over AVKit's picture when switched on in Settings.
     let enhancer: VideoEnhancer
     let catalogDanmaku = CatalogDanmakuModel()
@@ -33,7 +41,7 @@ import TVCore
 
     func endEditingSkip() {
         editingSkip = false
-        if resumeAfterEditing { player.play() }
+        if resumeAfterEditing { startPlayback() }
         resumeAfterEditing = false
     }
 
@@ -190,7 +198,7 @@ import TVCore
                player.currentTime().seconds >= item.duration.seconds - 0.1 {
                 player.seek(to: .zero)
             }
-            player.play()
+            startPlayback()
         } else { player.pause() }
         // The button follows the tap at once; the player's status (observed below) confirms it a moment later.
         paused = player.rate == 0
@@ -390,7 +398,8 @@ import TVCore
 
     func setSpeed(_ speed: Float) {
         clearBoost()
-        player.defaultRate = speed
+        playbackRate = speed
+        if #available(iOS 16, macOS 13, tvOS 16, *) { player.defaultRate = speed }
         if player.rate != 0 { player.rate = speed }
     }
 
@@ -410,7 +419,7 @@ import TVCore
     private func applyBoost() {
         boost = throttle.map { Float($0.rate) }
         boostWanted = throttle.flatMap { $0.limited ? Float($0.wanted) : nil }
-        if player.rate != 0 { player.rate = boost ?? player.defaultRate }
+        if player.rate != 0 { player.rate = boost ?? playbackRate }
     }
     private func clearBoost() { throttle = nil; boost = nil; boostWanted = nil }
     /// Once a second while a hold plays faster than normal: slower before the buffered video runs out, and faster
@@ -430,6 +439,8 @@ import TVCore
     private var generation = UUID()
     init() {
         let player = AVQueuePlayer()
+        self.player = player
+        enhancer = VideoEnhancer(player: player)
         // An episode ends paused on its last frame; only a queued next episode makes the queue move on.
         player.actionAtItemEnd = .pause
         #if DEBUG
@@ -443,15 +454,13 @@ import TVCore
                 Diagnostics.shared.record(.info, "player", "qa background pause at=\(Int(player.currentTime().seconds))s")
                 player.pause()
             }
-            NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
+            NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
                 Diagnostics.shared.record(.info, "player", "qa active play at=\(Int(player.currentTime().seconds))s")
-                player.play()
+                Task { @MainActor [weak self] in self?.startPlayback() }
             }
         }
         #endif
         #endif
-        self.player = player
-        enhancer = VideoEnhancer(player: player)
         queueObservation = player.observe(\.currentItem, options: [.new]) { [weak self] _, _ in
             Task { @MainActor [weak self] in self?.queueMoved() }
         }
@@ -546,9 +555,9 @@ import TVCore
         #if DEBUG
         // `-qaSpeed <rate>` plays at that speed, as picking it in the speed menu does.
         let qaSpeed = UserDefaults.standard.float(forKey: "qaSpeed")
-        if qaSpeed > 0 { player.defaultRate = qaSpeed }
+        if qaSpeed > 0 { setSpeed(qaSpeed) }
         #endif
-        if pendingResume == nil { player.play() }
+        if pendingResume == nil { startPlayback() }
         #if DEBUG
         // `-qaSeek <seconds>` starts playback there, for screenshots.
         let qaSeek = UserDefaults.standard.double(forKey: "qaSeek")
@@ -621,7 +630,7 @@ import TVCore
             guard let remuxed else {
                 self.restorePositionIfNeeded(item)
                 self.loading = self.pendingResume != nil || self.restoringPosition
-                if self.pendingResume == nil { self.player.play() }
+                if self.pendingResume == nil { self.startPlayback() }
                 return
             }
             self.detachItem(); self.observation = nil
@@ -740,7 +749,7 @@ import TVCore
                 self.saveHistory(completed: true)
                 if self.looping {
                     self.skipPass = EpisodeSkipPass()
-                    self.player.seek(to: .zero); self.player.play()
+                    self.player.seek(to: .zero); self.startPlayback()
                 } else { self.onPlaybackEnded?() }
             }
         }
@@ -971,7 +980,7 @@ import TVCore
                 }
                 self.restoredPosition = self.player.currentTime().seconds
                 Diagnostics.shared.record(.info, "player", "history resume requested=\(requested) restored=\(self.restoredPosition ?? -1)")
-                if !self.editingSkip { self.player.play() }
+                if !self.editingSkip { self.startPlayback() }
                 self.saveHistory()
             }
         }
@@ -1199,7 +1208,7 @@ extension PlaybackSession {
         guard let upcoming, upcoming.item.status != .failed, player.currentItem === item else { return false }
         skipsToUpcoming = true
         player.advanceToNextItem()
-        player.play()
+        startPlayback()
         return true
     }
 

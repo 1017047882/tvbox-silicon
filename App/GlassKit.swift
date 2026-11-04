@@ -169,17 +169,20 @@ if #available(iOS 26, *) { tabBarMinimizeBehavior(.onScrollDown) } else { self }
             onScrollVisibilityChange(threshold: threshold, action)
         } else {
             tvOnGeometryChange(for: Bool.self) { geometry in
-                #if os(iOS)
-                if #unavailable(iOS 17) {
+                if #available(iOS 17, macOS 14, tvOS 17, *) {
+                    let own = CGRect(origin: .zero, size: geometry.size)
+                    guard own.width * own.height > 0, let viewport = geometry.bounds(of: .scrollView) else { return false }
+                    let shown = own.intersection(viewport)
+                    return !shown.isNull && shown.width * shown.height >= own.width * own.height * threshold
+                } else {
+                    #if os(iOS)
                     let own = geometry.frame(in: .global)
                     let shown = own.intersection(UIScreen.main.bounds)
                     return own.width * own.height > 0 && !shown.isNull && shown.width * shown.height >= own.width * own.height * threshold
+                    #else
+                    return false
+                    #endif
                 }
-                #endif
-                let own = CGRect(origin: .zero, size: geometry.size)
-                guard own.width * own.height > 0, let viewport = geometry.bounds(of: .scrollView) else { return false }
-                let shown = own.intersection(viewport)
-                return !shown.isNull && shown.width * shown.height >= own.width * own.height * threshold
             } action: { action($0) }
         }
     }

@@ -98,7 +98,7 @@ struct EpisodeSkipSettingsView: View {
             #if os(iOS)
             .keyboardType(.numbersAndPunctuation)
             .textInputAutocapitalization(.never)
-            .disableAutocorrection()
+            .disableAutocorrection(true)
             #endif
     }
 }
