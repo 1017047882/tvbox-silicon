@@ -55,8 +55,8 @@ struct WebSignInView<Code: View>: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button(L10n.text("Cancel")) { dismiss() } }
-                if showsCode {
-                    ToolbarItem(placement: .primaryAction) {
+                ToolbarItem(placement: .primaryAction) {
+                    if showsCode {
                         Button(L10n.text("Sign In Here")) { showsCode = false }.accessibilityIdentifier("webSignIn.page")
                     }
                 }
