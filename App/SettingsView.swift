@@ -464,7 +464,7 @@ struct FormSettingsView: View {
                 #else
                 TextField(L10n.text("Subscription URL (TVBox JSON, M3U or TXT)"), text: $store.subscriptionAddress, prompt: Text(L10n.text("Subscription URL (TVBox JSON, M3U or TXT)")))
                     .labelsHidden()
-                    .disableAutocorrection()
+                    .disableAutocorrection(true)
                     .onSubmit { add() }
                 TextField(L10n.text("Name (optional)"), text: $store.subscriptionName, prompt: Text(L10n.text("Name (optional)")))
                     .labelsHidden()
@@ -999,49 +999,17 @@ private struct AddSubscriptionSheet: View {
 
     var body: some View {
         WithPerceptionTracking {
-        @Perception.Bindable var store = store
         NBNavigationStack {
             WithPerceptionTracking {
-            Form { Group {
-                Section {
-                    TextField(L10n.text("Subscription URL (TVBox JSON, M3U or TXT)"), text: $store.subscriptionAddress, prompt: Text(L10n.text("Subscription URL (TVBox JSON, M3U or TXT)")))
-                        .labelsHidden()
-                        .disableAutocorrection()
-                        .textInputAutocapitalization(.never).keyboardType(.URL)
-                        .submitLabel(.done)
-                        .focused($focused)
-                        .onSubmit(add)
-                    TextField(L10n.text("Name (optional)"), text: $store.subscriptionName, prompt: Text(L10n.text("Name (optional)")))
-                        .labelsHidden()
-                        .submitLabel(.done)
-                        .onSubmit(add)
-                } footer: {
-                    if let error = store.importError { Text(error).foregroundStyle(Brand.amber) }
-                    else { Text(L10n.text("Paste the address of a TVBox JSON subscription, an M3U or TXT live playlist, or an AList server.")) }
-                }
-                // Offered, never filled in or imported on its own.
-                Section {
-                    Button { store.subscriptionAddress = Store.defaultURL } label: {
-                        FormLabel(symbol: "sparkles", tint: Brand.indigo, title: L10n.text("Use a Demo URL"))
-                            .foregroundStyle(.primary)
-                    }
-                }
-                Section {
-                    Button { choosesFile = true } label: {
-                        FormLabel(symbol: "doc.badge.plus", tint: .orange, title: L10n.text("Add from File…"))
-                            .foregroundStyle(.primary)
-                    }
-                    .disabled(store.importing)
-                } footer: { Text(L10n.text("A TVBox JSON subscription, or one Python (.py) or JavaScript (.js) spider.")) }
-            }.settingsRows() }
-            .settingsForm(L10n.text("Add Subscription"))
+                subscriptionForm
+                    .settingsForm(L10n.text("Add Subscription"))
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(L10n.text("Cancel")) { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     if store.importing { ProgressView() }
-                    else { Button(L10n.text("Add"), action: add).fontWeight(.semibold).disabled(!canAdd) }
+                    else { Button(L10n.text("Add"), action: add).tvFontWeight(.semibold).disabled(!canAdd) }
                 }
             }
 
@@ -1057,6 +1025,44 @@ private struct AddSubscriptionSheet: View {
             }
         }
 
+        }
+    }
+
+    private var subscriptionForm: some View {
+        WithPerceptionTracking {
+            @Perception.Bindable var store = store
+            Form { Group {
+                    Section {
+                        TextField(L10n.text("Subscription URL (TVBox JSON, M3U or TXT)"), text: $store.subscriptionAddress, prompt: Text(L10n.text("Subscription URL (TVBox JSON, M3U or TXT)")))
+                        .labelsHidden()
+                        .disableAutocorrection(true)
+                        .textInputAutocapitalization(.never).keyboardType(.URL)
+                        .submitLabel(.done)
+                        .focused($focused)
+                        .onSubmit(add)
+                        TextField(L10n.text("Name (optional)"), text: $store.subscriptionName, prompt: Text(L10n.text("Name (optional)")))
+                        .labelsHidden()
+                        .submitLabel(.done)
+                        .onSubmit(add)
+                    } footer: {
+                        if let error = store.importError { Text(error).foregroundStyle(Brand.amber) }
+                        else { Text(L10n.text("Paste the address of a TVBox JSON subscription, an M3U or TXT live playlist, or an AList server.")) }
+                    }
+                    // Offered, never filled in or imported on its own.
+                    Section {
+                        Button { store.subscriptionAddress = Store.defaultURL } label: {
+                            FormLabel(symbol: "sparkles", tint: Brand.indigo, title: L10n.text("Use a Demo URL"))
+                            .foregroundStyle(.primary)
+                        }
+                    }
+                    Section {
+                        Button { choosesFile = true } label: {
+                            FormLabel(symbol: "doc.badge.plus", tint: .orange, title: L10n.text("Add from File…"))
+                            .foregroundStyle(.primary)
+                        }
+                        .disabled(store.importing)
+                    } footer: { Text(L10n.text("A TVBox JSON subscription, or one Python (.py) or JavaScript (.js) spider.")) }
+                }.settingsRows() }
         }
     }
 
@@ -1188,7 +1194,7 @@ private struct PlayURLView: View {
             Section {
                 TextField(L10n.text("HTTP / HTTPS media URL"), text: $address, prompt: Text(L10n.text("HTTP / HTTPS media URL")))
                     .labelsHidden()
-                    .disableAutocorrection()
+                    .disableAutocorrection(true)
                     #if os(iOS)
                     .textInputAutocapitalization(.never).keyboardType(.URL)
                     #endif
@@ -1394,7 +1400,7 @@ struct DiagnosticsView: View {
         VStack(spacing: 14) {
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField(L10n.text("Search Logs"), text: $search).textFieldStyle(.plain).disableAutocorrection()
+                TextField(L10n.text("Search Logs"), text: $search).textFieldStyle(.plain).disableAutocorrection(true)
                 if !search.isEmpty {
                     let clear = Button { search = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
                         .accessibilityLabel(L10n.text("Clear Search"))

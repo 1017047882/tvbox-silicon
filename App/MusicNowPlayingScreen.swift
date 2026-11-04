@@ -20,34 +20,7 @@ struct MusicNowPlayingScreen: View {
     var body: some View {
         WithPerceptionTracking {
         let music = store.music
-        VStack(spacing: 0) {
-            if let panel {
-                header(music, compact: true)
-                Group {
-                    switch panel {
-                    case .lyrics: MusicNowPlayingLyrics()
-                    case .queue: MusicUpNext()
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
-            } else {
-                Spacer(minLength: 12)
-                MusicArtwork(url: music.track?.artwork)
-                    .matchedGeometryEffect(id: "cover", in: cover)
-                    .shadow(color: .black.opacity(0.35), radius: 24, y: 14)
-                    // As in Music, the cover steps back while paused.
-                    .scaleEffect(music.isPlaying || music.busy ? 1 : 0.84)
-                    .animation(.spring(response: 0.5, dampingFraction: 0.72), value: music.isPlaying)
-                Spacer(minLength: 12)
-                header(music, compact: false)
-            }
-            MusicScrubber().padding(.top, 16)
-            quality(music)
-            transport(music)
-            MusicVolumeSlider().padding(.top, 4)
-            bottomBar
-        }
+        playerContent
         .padding(.horizontal, 28).padding(.top, 30).padding(.bottom, 6)
         .foregroundStyle(.white)
         .tint(.white)
@@ -58,7 +31,7 @@ struct MusicNowPlayingScreen: View {
         }
         .environment(\.colorScheme, .dark)
         .tvPresentationDragIndicator(.visible)
-        .presentationBackground { backdrop }
+        .tvPresentationBackground { backdrop }
         .task(id: music.track?.artwork) {
             guard let url = music.track?.artwork, let color = await PosterPalette.average(url) else { return }
             withAnimation(.easeInOut(duration: 0.6)) { tint = color }
@@ -79,6 +52,40 @@ struct MusicNowPlayingScreen: View {
             }
         }
 
+        }
+    }
+
+    private var playerContent: some View {
+        WithPerceptionTracking {
+            let music = store.music
+            VStack(spacing: 0) {
+                if let panel {
+                    header(music, compact: true)
+                    Group {
+                        switch panel {
+                            case .lyrics: MusicNowPlayingLyrics()
+                            case .queue: MusicUpNext()
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
+                } else {
+                    Spacer(minLength: 12)
+                    MusicArtwork(url: music.track?.artwork)
+                    .matchedGeometryEffect(id: "cover", in: cover)
+                    .shadow(color: .black.opacity(0.35), radius: 24, y: 14)
+                    // As in Music, the cover steps back while paused.
+                    .scaleEffect(music.isPlaying || music.busy ? 1 : 0.84)
+                    .animation(.spring(response: 0.5, dampingFraction: 0.72), value: music.isPlaying)
+                    Spacer(minLength: 12)
+                    header(music, compact: false)
+                }
+                MusicScrubber().padding(.top, 16)
+                quality(music)
+                transport(music)
+                MusicVolumeSlider().padding(.top, 4)
+                bottomBar
+            }
         }
     }
 

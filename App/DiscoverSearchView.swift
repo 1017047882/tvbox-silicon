@@ -354,12 +354,16 @@ struct DiscoverSearchAtmosphere: View {
     /// An ellipse of this size as if blurred by `blur`: a gradient that falls off as a Gaussian blur does, from
     /// solid inside to clear three blur radii past the edge.
     private static func glow(_ color: Color, width: CGFloat, height: CGFloat, blur: CGFloat) -> some View {
-        let half = min(width, height) / 2, reach = half + blur * 3
+        let half = Double(min(width, height)) / 2
+        let blurRadius = Double(blur)
+        let reach = half + blurRadius * 3
         let stops = (0...12).map { step in
             let location = Double(step) / 12
             // How far past the ellipse's edge this stop lies, in blur radii.
-            let outside = (location * reach - half) / blur
-            return Gradient.Stop(color: color.opacity(0.5 * erfc(outside / 2.squareRoot())), location: location)
+            let outside = (location * reach - half) / blurRadius
+            let normalized: Double = Double(outside) / Double(2).squareRoot()
+            let opacity: Double = 0.5 * erfc(normalized)
+            return Gradient.Stop(color: color.opacity(opacity), location: location)
         }
         return EllipticalGradient(stops: stops, center: .center, startRadiusFraction: 0, endRadiusFraction: 0.5)
             // Drawn past the ellipse's frame, as the blur was, without changing the layout.
@@ -719,7 +723,7 @@ private struct DiscoverSearchInput: View {
     var body: some View {
         WithPerceptionTracking {
         TextField(L10n.text("Search"), text: $text)
-            .font(.system(size: 16)).focused($hasFocus).disableAutocorrection().onSubmit(submit)
+            .font(.system(size: 16)).focused($hasFocus).disableAutocorrection(true).onSubmit(submit)
             .tvOnChange(of: focused) { _, value in hasFocus = value }
             .tvOnChange(of: hasFocus) { _, value in focused = value }
             .accessibilityIdentifier("discover.search.input")

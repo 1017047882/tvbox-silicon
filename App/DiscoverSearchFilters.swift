@@ -77,141 +77,180 @@ struct DiscoverSearchFilters: View {
     }
     @ViewBuilder private var editor: some View {
         switch section {
-        case .type:
+        case .type: typeEditor
+        case .genres: genresEditor
+        case .years: yearsEditor
+        case .sort: sortEditor
+        case .platform: platformEditor
+        case .language: languageEditor
+        case .region: regionEditor
+        case .keywords: keywordsEditor
+        }
+    }
+    private var typeEditor: some View {
+        WithPerceptionTracking {
             LazyVGrid(columns: columns, spacing: 8) {
                 WithPerceptionTracking {
-                ForEach([TMDBCatalog.SearchKind.movie, .tv], id: \.self) { kind in
-                    WithPerceptionTracking {
-                    choice(kind.title, selected: filter.kind == kind) {
-                        filter.switchKind(kind)
-                    }.accessibilityIdentifier("discover.filter.type.\(kind.rawValue)")
+                    ForEach([TMDBCatalog.SearchKind.movie, .tv], id: \.self) { kind in
+                        WithPerceptionTracking {
+                            choice(kind.title, selected: filter.kind == kind) {
+                                filter.switchKind(kind)
+                            }.accessibilityIdentifier("discover.filter.type.\(kind.rawValue)")
 
+                        }
                     }
-                }
 
                 }
             }
-        case .genres:
+        }
+    }
+
+    private var genresEditor: some View {
+        WithPerceptionTracking {
             LazyVGrid(columns: columns, spacing: 8) {
                 WithPerceptionTracking {
-                ForEach(filter.kind == .tv ? tvGenres : movieGenres, id: \.self) { id in
-                    WithPerceptionTracking {
-                    choice(L10n.text(DiscoverGenres.names[id] ?? (id == 10766 ? "Soap" : "War & Politics")), selected: filter.genres.contains(id)) {
-                        if filter.genres.contains(id) { filter.genres.remove(id) } else if filter.genres.count < 8 { filter.genres.insert(id) }
-                    }.accessibilityIdentifier("discover.filter.genre.\(id)")
+                    ForEach(filter.kind == .tv ? tvGenres : movieGenres, id: \.self) { id in
+                        WithPerceptionTracking {
+                            choice(L10n.text(DiscoverGenres.names[id] ?? (id == 10766 ? "Soap" : "War & Politics")), selected: filter.genres.contains(id)) {
+                                if filter.genres.contains(id) { filter.genres.remove(id) } else if filter.genres.count < 8 { filter.genres.insert(id) }
+                            }.accessibilityIdentifier("discover.filter.genre.\(id)")
 
+                        }
                     }
-                }
 
                 }
             }
-        case .years:
+        }
+    }
+
+    private var yearsEditor: some View {
+        WithPerceptionTracking {
             LazyVGrid(columns: columns, spacing: 8) {
                 WithPerceptionTracking {
-                choice(L10n.text("Any"), selected: filter.from.isEmpty && filter.to.isEmpty) { filter.from = ""; filter.to = "" }
-                ForEach(Array(stride(from: Calendar.current.component(.year, from: Date()), through: Calendar.current.component(.year, from: Date()) - 4, by: -1)), id: \.self) { year in
-                    WithPerceptionTracking {
-                    choice(String(year), selected: filter.from == String(year) && filter.to == String(year)) { filter.from = String(year); filter.to = String(year) }
+                    choice(L10n.text("Any"), selected: filter.from.isEmpty && filter.to.isEmpty) { filter.from = ""; filter.to = "" }
+                    ForEach(Array(stride(from: Calendar.current.component(.year, from: Date()), through: Calendar.current.component(.year, from: Date()) - 4, by: -1)), id: \.self) { year in
+                        WithPerceptionTracking {
+                            choice(String(year), selected: filter.from == String(year) && filter.to == String(year)) { filter.from = String(year); filter.to = String(year) }
 
+                        }
                     }
-                }
-                ForEach(Array(stride(from: 2020, through: 1900, by: -10)), id: \.self) { year in
-                    WithPerceptionTracking {
-                    choice(L10n.text("%@s", String(year)), selected: filter.from == String(year) && filter.to == String(year + 9)) { filter.from = String(year); filter.to = String(year + 9) }
+                    ForEach(Array(stride(from: 2020, through: 1900, by: -10)), id: \.self) { year in
+                        WithPerceptionTracking {
+                            choice(L10n.text("%@s", String(year)), selected: filter.from == String(year) && filter.to == String(year + 9)) { filter.from = String(year); filter.to = String(year + 9) }
 
+                        }
                     }
-                }
 
                 }
             }
-        case .sort:
+        }
+    }
+
+    private var sortEditor: some View {
+        WithPerceptionTracking {
             LazyVGrid(columns: columns, spacing: 8) {
                 WithPerceptionTracking {
-                ForEach(Self.sortOptions(filter.kind), id: \.0) { value, label in
-                    WithPerceptionTracking {
-                    choice(L10n.text(label), selected: filter.sort == value) { filter.sort = value }
+                    ForEach(Self.sortOptions(filter.kind), id: \.0) { value, label in
+                        WithPerceptionTracking {
+                            choice(L10n.text(label), selected: filter.sort == value) { filter.sort = value }
 
+                        }
                     }
-                }
 
                 }
             }
             Text(L10n.text("Minimum Rating")).font(.headline)
             LazyVGrid(columns: columns, spacing: 8) {
                 WithPerceptionTracking {
-                ForEach([0,6,7,8,9], id: \.self) { rating in
-                    WithPerceptionTracking {
-                    choice(rating == 0 ? L10n.text("Any") : "\(rating)+", selected: filter.rating == rating) { filter.rating = rating }
+                    ForEach([0,6,7,8,9], id: \.self) { rating in
+                        WithPerceptionTracking {
+                            choice(rating == 0 ? L10n.text("Any") : "\(rating)+", selected: filter.rating == rating) { filter.rating = rating }
 
+                        }
                     }
-                }
 
                 }
             }
             Text(L10n.text("Minimum Votes")).font(.headline)
             LazyVGrid(columns: columns, spacing: 8) {
                 WithPerceptionTracking {
-                ForEach([0,100,500,1000,5000], id: \.self) { votes in
-                    WithPerceptionTracking {
-                    choice(votes == 0 ? L10n.text("Any") : "\(votes)+", selected: filter.votes == votes) { filter.votes = votes }
+                    ForEach([0,100,500,1000,5000], id: \.self) { votes in
+                        WithPerceptionTracking {
+                            choice(votes == 0 ? L10n.text("Any") : "\(votes)+", selected: filter.votes == votes) { filter.votes = votes }
 
+                        }
                     }
-                }
 
                 }
             }
             range(L10n.text("Runtime (min)"), from: $filter.minRuntime, to: $filter.maxRuntime, hint: "90", id: "runtime")
-        case .platform:
+        }
+    }
+
+    private var platformEditor: some View {
+        WithPerceptionTracking {
             LazyVGrid(columns: columns, spacing: 8) {
                 WithPerceptionTracking {
-                choice(L10n.text("Any"), selected: filter.company.isEmpty) { filter.company = "" }
-                ForEach(Self.platforms(filter.kind), id: \.0) { id, name in
-                    WithPerceptionTracking {
- choice(name, selected: filter.company == id) { filter.company = id }
+                    choice(L10n.text("Any"), selected: filter.company.isEmpty) { filter.company = "" }
+                    ForEach(Self.platforms(filter.kind), id: \.0) { id, name in
+                        WithPerceptionTracking {
+                            choice(name, selected: filter.company == id) { filter.company = id }
+                        }
                     }
-                }
 
                 }
             }
-        case .language:
+        }
+    }
+
+    private var languageEditor: some View {
+        WithPerceptionTracking {
             LazyVGrid(columns: columns, spacing: 8) {
                 WithPerceptionTracking {
-                choice(L10n.text("Any"), selected: filter.originalLanguage.isEmpty) { filter.originalLanguage = "" }
-                ForEach(Self.languages, id: \.self) { code in
-                    WithPerceptionTracking {
-                    choice(Locale(identifier: TMDBMatch.language).localizedString(forLanguageCode: code) ?? code, selected: filter.originalLanguage == code) { filter.originalLanguage = code }
+                    choice(L10n.text("Any"), selected: filter.originalLanguage.isEmpty) { filter.originalLanguage = "" }
+                    ForEach(Self.languages, id: \.self) { code in
+                        WithPerceptionTracking {
+                            choice(Locale(identifier: TMDBMatch.language).localizedString(forLanguageCode: code) ?? code, selected: filter.originalLanguage == code) { filter.originalLanguage = code }
 
+                        }
                     }
-                }
 
                 }
             }
-        case .region:
+        }
+    }
+
+    private var regionEditor: some View {
+        WithPerceptionTracking {
             LazyVGrid(columns: columns, spacing: 8) {
                 WithPerceptionTracking {
-                choice(L10n.text("Any"), selected: filter.region.isEmpty) { filter.region = "" }
-                ForEach(Self.regions, id: \.self) { code in
-                    WithPerceptionTracking {
-                    choice(Locale(identifier: TMDBMatch.language).localizedString(forRegionCode: code) ?? code, selected: filter.region == code) { filter.region = code }
+                    choice(L10n.text("Any"), selected: filter.region.isEmpty) { filter.region = "" }
+                    ForEach(Self.regions, id: \.self) { code in
+                        WithPerceptionTracking {
+                            choice(Locale(identifier: TMDBMatch.language).localizedString(forRegionCode: code) ?? code, selected: filter.region == code) { filter.region = code }
 
+                        }
                     }
-                }
 
                 }
             }
-        case .keywords:
+        }
+    }
+
+    private var keywordsEditor: some View {
+        WithPerceptionTracking {
             TextField(L10n.text("Find a keyword"), text: $keyword)
-                #if os(macOS)
-                .textFieldStyle(.roundedBorder)
-                #else
-                .textFieldStyle(.plain).padding(15).glassSurface(.regular, in: Capsule())
-                #endif
-                .disableAutocorrection().accessibilityIdentifier("discover.filter.keyword")
+            #if os(macOS)
+            .textFieldStyle(.roundedBorder)
+            #else
+            .textFieldStyle(.plain).padding(15).glassSurface(.regular, in: Capsule())
+            #endif
+            .disableAutocorrection(true).accessibilityIdentifier("discover.filter.keyword")
             if !filter.keywords.isEmpty {
                 LazyVGrid(columns: columns, spacing: 8) {
                     ForEach(filter.keywords) { value in
                         WithPerceptionTracking {
- choice(value.name + " ×", selected: true) { filter.keywords.removeAll { $0.id == value.id } }
+                            choice(value.name + " ×", selected: true) { filter.keywords.removeAll { $0.id == value.id } }
                         }
                     }
                 }
@@ -220,12 +259,12 @@ struct DiscoverSearchFilters: View {
             if lookupFailed { Text(L10n.text("Couldn't Load Results")).foregroundStyle(.secondary) }
             ForEach(suggestions) { value in
                 WithPerceptionTracking {
-                Button {
-                    if !filter.keywords.contains(where: { $0.id == value.id }), filter.keywords.count < 8 { filter.keywords.append(value) }
-                } label: {
-                    HStack { Text(value.name); Spacer(); if filter.keywords.contains(where: { $0.id == value.id }) { Image(systemName: "checkmark") } }
+                    Button {
+                        if !filter.keywords.contains(where: { $0.id == value.id }), filter.keywords.count < 8 { filter.keywords.append(value) }
+                    } label: {
+                        HStack { Text(value.name); Spacer(); if filter.keywords.contains(where: { $0.id == value.id }) { Image(systemName: "checkmark") } }
                         .padding(.vertical, 10).contentShape(Rectangle())
-                }
+                    }
 
                 }
             }
@@ -242,6 +281,7 @@ struct DiscoverSearchFilters: View {
             }
         }
     }
+
     private func choice(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
         FilterChoiceButton(title: title, selected: selected, action: action)
     }

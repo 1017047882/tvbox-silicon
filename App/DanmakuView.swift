@@ -318,7 +318,7 @@ struct DanmakuListView: View {
             Image(systemName: "magnifyingglass").foregroundStyle(.white.opacity(0.5))
             TextField(L10n.text("Filter comments"), text: $query)
                 .textFieldStyle(.plain)
-                .disableAutocorrection()
+                .disableAutocorrection(true)
                 #if os(iOS)
                 .textInputAutocapitalization(.never)
                 .submitLabel(.search)

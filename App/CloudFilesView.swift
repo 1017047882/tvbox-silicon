@@ -289,14 +289,14 @@ struct AListServerForm: View {
 
     @ViewBuilder private var fields: some View {
         TextField(L10n.text("Address"), text: $address, prompt: Text(verbatim: "http://192.168.1.10:5244"))
-            .disableAutocorrection()
+            .disableAutocorrection(true)
             #if os(iOS)
             .keyboardType(.URL).textInputAutocapitalization(.never)
             #endif
             .accessibilityIdentifier("alist.address")
         TextField(L10n.text("Name (Optional)"), text: $server.name)
         TextField(L10n.text("User Name (Optional)"), text: $server.username)
-            .disableAutocorrection()
+            .disableAutocorrection(true)
             #if os(iOS)
             .textInputAutocapitalization(.never)
             #endif

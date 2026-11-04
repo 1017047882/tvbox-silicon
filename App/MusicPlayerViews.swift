@@ -558,7 +558,7 @@ struct MusicSettingsView: View {
                         }
                     }
                     TextField(L10n.text("HYW key"), text: $music.preferences.hywKey)
-                        .disableAutocorrection()
+                        .disableAutocorrection(true)
                         #if os(iOS)
                         .textInputAutocapitalization(.never)
                         #endif
@@ -829,7 +829,7 @@ struct MusicLXSourcesSection: View {
             }
             HStack {
                 TextField(L10n.text("Source address"), text: $address)
-                    .disableAutocorrection()
+                    .disableAutocorrection(true)
                     #if os(iOS)
                     .textInputAutocapitalization(.never).keyboardType(.URL)
                     #endif
@@ -991,7 +991,7 @@ struct MusicExtensionsSection: View {
             }
             HStack {
                 TextField(L10n.text("Extension address"), text: $address)
-                    .disableAutocorrection()
+                    .disableAutocorrection(true)
                     #if os(iOS)
                     .textInputAutocapitalization(.never).keyboardType(.URL)
                     #endif

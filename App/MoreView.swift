@@ -366,7 +366,7 @@ private struct TabBarEditor: View {
                     Button(L10n.text("Cancel")) { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(L10n.text("Done")) { save(tabs); dismiss() }.fontWeight(.semibold)
+                    Button(L10n.text("Done")) { save(tabs); dismiss() }.tvFontWeight(.semibold)
                 }
                 ToolbarItem(placement: .bottomBar) {
                     Button(L10n.text("Reset")) { withAnimation(.tvSmooth) { rows = Row.rows(standard) } }

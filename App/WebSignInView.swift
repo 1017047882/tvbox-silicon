@@ -37,6 +37,17 @@ struct WebSignInView<Code: View>: View {
         WithPerceptionTracking {
         NBNavigationStack {
             WithPerceptionTracking {
+                navigationContent
+
+            }
+        }
+        .task { await watch() }
+
+        }
+    }
+
+    private var navigationContent: some View {
+        WithPerceptionTracking {
             Group {
                 if showsCode { code() } else { page }
             }
@@ -50,11 +61,6 @@ struct WebSignInView<Code: View>: View {
                     }
                 }
             }
-
-            }
-        }
-        .task { await watch() }
-
         }
     }
 

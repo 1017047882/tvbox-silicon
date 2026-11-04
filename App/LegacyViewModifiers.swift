@@ -35,7 +35,29 @@ private struct TVChange<Value: Equatable>: ViewModifier {
     }
 }
 
+private struct TVFontWeight: ViewModifier {
+    @Environment(\.font) private var font
+    let weight: Font.Weight?
+    @ViewBuilder func body(content: Content) -> some View {
+        if #available(iOS 16, macOS 13, tvOS 16, *) { content.fontWeight(weight) }
+        else if let weight { content.font((font ?? .body).weight(weight)) }
+        else { content }
+    }
+}
+
 extension View {
+    /// @brief Preserves the inherited font's weight before the generic iOS 16 modifier.
+    func tvFontWeight(_ weight: Font.Weight?) -> some View {
+        modifier(TVFontWeight(weight: weight))
+    }
+    @ViewBuilder func tvBlurReplaceTransition() -> some View {
+        if #available(iOS 17, macOS 14, tvOS 17, *) { transition(.blurReplace) }
+        else { transition(.opacity) }
+    }
+    @ViewBuilder func tvDefaultFocus<Value: Hashable>(_ focus: FocusState<Value>.Binding, _ value: Value) -> some View {
+        if #available(iOS 17, macOS 14, tvOS 17, *) { defaultFocus(focus, value) }
+        else { onAppear { focus.wrappedValue = value } }
+    }
     @ViewBuilder func tvToolbarColorScheme(_ scheme: ColorScheme?, for bar: TVBar) -> some View {
         #if os(iOS) || os(tvOS)
         if #available(iOS 16, tvOS 16, *) {

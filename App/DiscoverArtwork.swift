@@ -136,41 +136,57 @@ struct DiscoverBackdrop: View {
             }
             .frame(width: width, height: heroHeight)
             .offset(y: -max(0, scrollY) * 0.6)
-            .opacity(max(0, 1 - max(0, scrollY) / heroHeight))
+            .opacity(Double(max(0, 1 - max(0, scrollY) / max(heroHeight, 1))))
         }.ignoresSafeArea().accessibilityHidden(true).allowsHitTesting(false)
         #else
-        ZStack(alignment: .top) {
-            (paint?.color ?? Color(white: 0.06))
-            if let paint {
-                Image(decorative: paint.image, scale: 1).resizable().scaledToFill()
-                    .frame(width: width, height: heroHeight)
-                    .scaleEffect(1.2 + max(0, -scrollY) / max(heroHeight, 1), anchor: .center)
-                    .offset(y: -scrollY * 0.78)
-                    .opacity(max(0, 1 - max(0, scrollY - heroHeight * 0.45) / (heroHeight * 0.55)))
-                    .opacity(videoReady ? 0 : 1)
-                    .frame(width: width, height: heroHeight, alignment: .top).clipped()
-                    .mask {
-                        LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: 0.72),
-                                               .init(color: .clear, location: 1)], startPoint: .top, endPoint: .bottom)
-                    }
-            }
-            if let trailer, playsTrailer {
-                DiscoverTrailer(trailer: trailer) { ready in
-                    withAnimation(.easeOut(duration: 0.4)) { videoReady = ready }
-                }
-                    .frame(width: width, height: heroHeight)
-                    .clipped()
-                    .offset(y: -max(0, scrollY) * 0.78)
-                    .opacity(max(0, 1 - max(0, scrollY) / (heroHeight * 0.35)))
-                    .allowsHitTesting(false)
-            }
-        }
-        .discoverFullBleed()
-        .accessibilityHidden(true)
-        .tvOnChange(of: trailer?.key) { _, _ in videoReady = false }
-        .tvOnChange(of: playsTrailer) { _, plays in if !plays { videoReady = false } }
+        mobileBackdrop
         #endif
 
         }
     }
+
+    private var mobileBackdrop: some View {
+        WithPerceptionTracking {
+            ZStack(alignment: .top) {
+                (paint?.color ?? Color(white: 0.06))
+                if let paint {
+                    backdropImage(paint)
+                }
+                if let trailer, playsTrailer {
+                    DiscoverTrailer(trailer: trailer) { ready in
+                        withAnimation(.easeOut(duration: 0.4)) { videoReady = ready }
+                    }
+                    .frame(width: width, height: heroHeight)
+                    .clipped()
+                    .offset(y: -max(0, scrollY) * 0.78)
+                    .opacity(Double(max(0, 1 - max(0, scrollY) / max(heroHeight * 0.35, 1))))
+                    .allowsHitTesting(false)
+                }
+            }
+            .discoverFullBleed()
+            .accessibilityHidden(true)
+            .tvOnChange(of: trailer?.key) { _, _ in videoReady = false }
+            .tvOnChange(of: playsTrailer) { _, plays in if !plays { videoReady = false } }
+        }
+    }
+    private var imageOpacity: Double {
+        let fadeStart = heroHeight * 0.45
+        let fadeLength = max(heroHeight * 0.55, 1)
+        return Double(max(0, 1 - max(0, scrollY - fadeStart) / fadeLength))
+    }
+
+    private func backdropImage(_ paint: DiscoverPaint) -> some View {
+        Image(decorative: paint.image, scale: 1).resizable().scaledToFill()
+            .frame(width: width, height: heroHeight)
+            .scaleEffect(1.2 + max(0, -scrollY) / max(heroHeight, 1), anchor: .center)
+            .offset(y: -scrollY * 0.78)
+            .opacity(imageOpacity)
+            .opacity(videoReady ? 0 : 1)
+            .frame(width: width, height: heroHeight, alignment: .top).clipped()
+            .mask {
+                LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: 0.72),
+                                       .init(color: .clear, location: 1)], startPoint: .top, endPoint: .bottom)
+            }
+    }
+
 }

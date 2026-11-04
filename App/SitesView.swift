@@ -77,7 +77,7 @@ struct SitesView: View {
                     }.pageContainer()
                 }
                 // Picking opens on the current choice rather than the top of a long page.
-                .defaultFocus($focusedSite, picked)
+                .tvDefaultFocus($focusedSite, picked)
                 .onAppear { if pick != nil, let picked { proxy.scrollTo(picked, anchor: .center) } }
 
                     }
@@ -153,11 +153,9 @@ struct SitesView: View {
         #if !os(tvOS)
         if case .subscription = group.kind, query.isEmpty {
             header
-                .draggable(group.id)
-                .dropDestination(for: String.self) { items, _ in
-                    guard query.isEmpty, let address = items.first else { return false }
+                .tvSourceGroupDrag(group.id) { address in
+                    guard query.isEmpty else { return }
                     store.moveSourceGroup(address, onto: group.id, includeHidden: false)
-                    return true
                 }
         } else {
             header
@@ -171,6 +169,34 @@ struct SitesView: View {
     private func applyDefaultFold() {
         collapsed = []
         foldBeforeSearch = nil
+    }
+}
+
+private extension View {
+    /// @brief Source-group reordering retains drag and drop on iOS 15 through item providers.
+    /// @note Provider callbacks decode data off actor; the move always executes on the main actor.
+    @ViewBuilder func tvSourceGroupDrag(_ id: String, move: @escaping @MainActor (String) -> Void) -> some View {
+        #if !os(tvOS)
+        if #available(iOS 16, macOS 13, *) {
+            draggable(id).dropDestination(for: String.self) { items, _ in
+                guard let address = items.first else { return false }
+                move(address)
+                return true
+            }
+        } else {
+            onDrag { NSItemProvider(object: id as NSString) }
+                .onDrop(of: ["public.utf8-plain-text"], isTargeted: nil) { providers in
+                    guard let provider = providers.first(where: { $0.hasItemConformingToTypeIdentifier("public.utf8-plain-text") }) else { return false }
+                    provider.loadDataRepresentation(forTypeIdentifier: "public.utf8-plain-text") { data, _ in
+                        guard let data, let address = String(data: data, encoding: .utf8) else { return }
+                        Task { @MainActor in move(address) }
+                    }
+                    return true
+                }
+        }
+        #else
+        self
+        #endif
     }
 }
 
@@ -396,7 +422,7 @@ struct MonogramIcon: View {
         Group {
             if let systemImage {
                 // Sized by frame rather than font: font-sized symbols sit off-center (baseline/ascent padding) before macOS 26.
-                Image(systemName: systemImage).resizable().scaledToFit().fontWeight(.semibold)
+                Image(systemName: systemImage).resizable().scaledToFit().tvFontWeight(.semibold)
                     .frame(width: size * 0.46, height: size * 0.46).foregroundStyle(.white)
             } else if let symbol = label.symbol {
                 Text(symbol).font(.system(size: size * 0.5))
@@ -744,7 +770,7 @@ struct SourceOrderEditor: View {
                     Button(L10n.text("Cancel")) { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(L10n.text("Done")) { save(); dismiss() }.fontWeight(.semibold)
+                    Button(L10n.text("Done")) { save(); dismiss() }.tvFontWeight(.semibold)
                         .accessibilityIdentifier("sources.order.done")
                 }
                 #if os(iOS)
@@ -935,7 +961,7 @@ struct HiddenSourcesEditor: View {
             .navigationTitle(L10n.text("Hide or Show Sources"))
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(L10n.text("Done")) { dismiss() }.fontWeight(.semibold)
+                    Button(L10n.text("Done")) { dismiss() }.tvFontWeight(.semibold)
                         .accessibilityIdentifier("sources.hidden.done")
                 }
                 #if os(iOS)

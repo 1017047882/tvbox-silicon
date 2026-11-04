@@ -170,7 +170,7 @@ if #available(macOS 26, iOS 26, tvOS 26, *) {
         #if DEBUG
         next.mark = defaults.bool(forKey: "qaEnhanceHUD")
         #endif
-        let current = (next.upscale || next.tvSmooth) ? player.currentItem : nil
+        let current = (next.upscale || next.smooth) ? player.currentItem : nil
         if current !== item || (current != nil && output == nil) {
             if let item, let output { item.remove(output) }
             if let jumpObserver { NotificationCenter.default.removeObserver(jumpObserver) }

@@ -1,6 +1,7 @@
 import Perception
 import SwiftUI
 import AVKit
+@preconcurrency import AVFoundation
 import TVCore
 
 @MainActor @Perceptible final class PlaybackSession {
@@ -452,7 +453,7 @@ import TVCore
         if UserDefaults.standard.bool(forKey: "qaPauseInBackground") {
             NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { _ in
                 Diagnostics.shared.record(.info, "player", "qa background pause at=\(Int(player.currentTime().seconds))s")
-                player.pause()
+                Task { @MainActor in player.pause() }
             }
             NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
                 Diagnostics.shared.record(.info, "player", "qa active play at=\(Int(player.currentTime().seconds))s")
@@ -1108,7 +1109,10 @@ extension PlaybackSession {
     /// Whether the screen is mirrored or recorded right now (`Remux.screenCaptured`).
     static var screenCaptured: Bool {
         #if canImport(UIKit)
-        UIApplication.shared.connectedScenes.contains { ($0 as? UIWindowScene)?.traitCollection.sceneCaptureState == .active }
+        if #available(iOS 17, tvOS 17, *) {
+            return UIApplication.shared.connectedScenes.contains { ($0 as? UIWindowScene)?.traitCollection.sceneCaptureState == .active }
+        }
+        return UIScreen.screens.contains { $0.isCaptured }
         #else
         false
         #endif

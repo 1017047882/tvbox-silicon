@@ -44,10 +44,14 @@ iOS 15 真机回归至少覆盖：订阅导入与恢复、搜索、导航进入�
 完整 App 编译日志补充修复：播放会话保存所选倍速，iOS 15 的各个恢复播放入口使用该值；`AVPlayer.defaultRate` 只在 iOS 16+ 使用。锁屏信息和手机倍速菜单读取会话值。回归需覆盖：暂停后恢复、历史位置恢复、循环播放、下一集及临时加速释放后的倍速；音轨/字幕加载期间切换视频时，应丢弃旧项目的结果。本机没有 Apple SDK，尚未完成这些行为测试或 MC/DC 测量。
 
 [技术债务]
-规则/惯例：在 MobilePlayer.swift 局部使用 `@preconcurrency import AVFoundation`，放宽旧 SDK 的 Sendable 静态诊断。
+规则/惯例：在 MobilePlayer.swift 和 PlaybackView.swift 局部使用 `@preconcurrency import AVFoundation`，放宽旧 SDK 的 Sendable 静态诊断。
 理由：Xcode 16.4 的媒体选择组未声明 Sendable，异步加载返回该对象；应用侧将组和选项限制在 `@MainActor MediaTracks` 中使用，保留取消及当前项目身份检查。
 风险等级：中。
 潜在影响：此文件内部分 AVFoundation 跨隔离访问不能完全由编译器检查，需要人工维护其所有权边界。
 建议重构时机：更新到提供完整并发标注的 SDK 后移除此兼容导入，并重新执行严格并发检查；这不构成给 AVMediaSelectionGroup 添加 Sendable 承诺。
+
+后续 App 编译摘要另列出 29 条独立诊断，已按对应代码修改：旧版自动更正接口显式传入 `true`；路由注册使用导航回移植；模糊过渡、通用字体加粗、默认焦点、屏幕录制状态和弹层背景增加旧系统路径；文本拼接使用返回 Text 的旧颜色接口；来源分组排序使用旧版 item-provider 拖放保留功能；高斯渐变计算明确 Double 类型；修正 `VideoEnhancementOptions.smooth` 的误替换；后台通知通过主 actor 暂停播放器；视频轨道异步读取采用上述局部 AVFoundation 兼容导入。弹幕、筛选、背景、设置、网页登录和音乐界面拆分为独立视图片段，减小类型推断表达式。
+
+[Pulse] 上述修改后，10 项构建准备检查及全部 79 个 App Swift 文件的 iOS 条件/括号结构检查通过。第三方语法解析器仍有 7 个文件解析崩溃，不能充当 Apple 编译证据。新增回归重点为来源分组拖放、筛选切换/关键字、弹幕开关与导入、订阅添加、网页登录、音乐弹层、等待提示、录屏期间 HDR 处理，以及后台暂停。这些 UI 与异步流程需云编译及 iOS 15.5 真机测试，尚无通过结果或 MC/DC 覆盖率数据。
 
 下一步：提交并推送修改后，手动运行 iOS 15 工作流，核对核心与完整 App 的编译日志；随后完成最终应用链接、签名安装与上述真机回归。
