@@ -1,0 +1,98 @@
+name: iOS 15 compatibility preflight
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    name: Inspect sources and Apple toolchain (no IPA)
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Record Apple toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          {
+            git rev-parse HEAD
+            uname -m
+            xcodebuild -version
+            xcrun swift --version
+            xcrun --sdk iphoneos --show-sdk-version
+          } 2>&1 | tee artifacts/toolchain.txt
+
+      - name: Inspect iOS 15 migration requirements
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import pathlib
+          import re
+
+          root = pathlib.Path.cwd()
+          lines = ["# iOS 15 compatibility preflight", "",
+                   "This workflow inventories migration requirements; it does not compile or produce an IPA.",
+                   "", "## Deployment settings"]
+          checks = {
+              "project.yml": r"iOS:\s*['\"]([0-9.]+)",
+              "Package.swift": r"\.iOS\(\.v(\d+)\)",
+          }
+          for name, pattern in checks.items():
+              match = re.search(pattern, (root / name).read_text())
+              version = match.group(1) if match else "unknown"
+              lines.append(f"- {name}: iOS {version}")
+
+          lines.extend(["", "## Shared package symlinks"])
+          for name in ["Package.swift", "Sources", "Vendor", "Tests/TVCoreTests"]:
+              path = root / "Packages/TVCore" / name
+              status = "OK" if path.is_symlink() and path.exists() else "CHECK REQUIRED"
+              lines.append(f"- Packages/TVCore/{name}: {status}")
+
+          patterns = {
+              "Observation declarations (iOS 17+)": r"@Observable\b",
+              "Navigation APIs (iOS 16+)": r"\b(?:NavigationStack|NavigationSplitView|NavigationPath)\b",
+              "Presentation APIs (iOS 17+)": r"\b(?:ContentUnavailableView|scrollPosition|sensoryFeedback|symbolEffect)\b",
+              "iOS 27 API references requiring SDK review": r"iOS 27|UISceneAccessoryRegistration|registerSceneAccessory",
+              "Native iOS 17 build settings": r"ios17\.0|miphoneos-version-min=17\.0|MINIMUM_OS=17\.0|IPHONEOS_DEPLOYMENT_TARGET=17\.0",
+          }
+          files = sorted({p for folder in ["App", "Sources", "Scripts"]
+                          for p in (root / folder).rglob("*")
+                          if p.is_file() and p.suffix in {".swift", ".sh"}})
+          for title, pattern in patterns.items():
+              lines.extend(["", "## " + title])
+              hits = []
+              for path in files:
+                  for number, line in enumerate(path.read_text(errors="replace").splitlines(), 1):
+                      if re.search(pattern, line):
+                          hits.append(f"- {path.relative_to(root).as_posix()}:{number}: `{line.strip()}`")
+              lines.extend(hits or ["No textual matches; compiler and binary checks are still required."])
+
+          lines.extend(["", "## Required next steps",
+                        "- Backport source APIs and rebuild native dependencies for iOS 15.",
+                        "- Inspect NodeMobile and Python binary deployment requirements.",
+                        "- Use an arm64 macOS runner for the upstream native runtime build recipes.",
+                        "- Compile and validate the application before packaging an unsigned IPA.",
+                        "- Sign and test on a physical iOS 15 device."])
+          report = "\n".join(lines) + "\n"
+          (root / "artifacts/ios15-report.md").write_text(report)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write(report)
+          print(report)
+          PY
+
+      - name: Upload compatibility report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios15-preflight-${{ github.run_number }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14
