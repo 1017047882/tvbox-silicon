@@ -142,11 +142,11 @@ jobs:
           bash Scripts/build-apple-libffi.sh ios 2>&1 | tee artifacts/libffi-build.log
           xcrun ar -t build/apple-runtime/libffi-ios-3.4.8/install/lib/libffi.a > artifacts/libffi-members.txt
 
-      - name: Build FFmpeg with iOS 15 deployment targets
+      - name: Build FFmpeg for iPhone arm64 only
         shell: bash
         run: |
           set -euo pipefail
-          bash Scripts/build-apple-ffmpeg.sh 2>&1 | tee artifacts/ffmpeg-build.log
+          bash Scripts/build-apple-ffmpeg.sh ios 2>&1 | tee artifacts/ffmpeg-build.log
           plutil -lint Vendor/FFmpeg/FFmpeg.xcframework/Info.plist
 
       - name: Compile TVCore against the iOS 15 device target

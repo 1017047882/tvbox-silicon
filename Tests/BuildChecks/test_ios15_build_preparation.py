@@ -13,6 +13,30 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
 class DeploymentTests(unittest.TestCase):
+    def test_device_mode_executes_no_other_platform_builds(self):
+        text = (ROOT / "Scripts/build-apple-ffmpeg.sh").read_text()
+        selection = text.split('SCOPE="${1:-all}"', 1)[1].split('CACHE=', 1)[0]
+        calls = text.split('\nbuild_slice ios iphoneos', 1)[1].split('# END', 1)[0]
+        command = ('set -eu\nSCOPE=ios\n' + selection +
+                   '\nbuild_slice() { echo "$*"; }\n' +
+                   'build_slice ios iphoneos' + calls)
+        git_bash = pathlib.Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "Git/bin/bash.exe"
+        bash = str(git_bash) if os.name == "nt" and git_bash.exists() else shutil.which("bash")
+        if not bash:
+            self.skipTest("Bash is required to exercise device slice selection")
+        result = subprocess.run([bash, "-c", command], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), ["ios iphoneos aarch64 arm64-apple-ios15.0"])
+
+    def test_ios_ffmpeg_build_selects_only_device_slice(self):
+        text = (ROOT / "Scripts/build-apple-ffmpeg.sh").read_text()
+        self.assertIn('SCOPE="${1:-all}"', text)
+        self.assertIn('ios) SLICES=(ios)', text)
+        self.assertIn('OUTPUT="$CACHE/$SIGNATURE-$SCOPE/FFmpeg.xcframework"', text)
+        self.assertIn('if [ "$SCOPE" = all ]; then', text)
+        workflow = (ROOT / ".github/workflows/build-ios15.yml").read_text()
+        self.assertIn('bash Scripts/build-apple-ffmpeg.sh ios ', workflow)
+
     def test_app_and_package_target_ios15(self):
         self.assertRegex((ROOT / "project.yml").read_text(), r"iOS: '15\.0'")
         self.assertIn(".iOS(.v15)", (ROOT / "Package.swift").read_text())

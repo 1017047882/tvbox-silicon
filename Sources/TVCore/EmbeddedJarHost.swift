@@ -154,7 +154,7 @@ public actor EmbeddedJarHost {
         // NewCz's upstream cookie challenge is intermittent. Retry once; the spider keeps its cookie.
         if site.api == "csp_NewCzGuard", envelope["errorCode"]?.string == "source_http", envelope["status"]?.int == 403 {
             Diagnostics.shared.record(.warning, "jar.retry", "source=\(site.key) HTTP 403 retry=1")
-            try await Task.sleep(for: .milliseconds(300))
+            try await Task.sleep(nanoseconds: 300_000_000)
             progress?.report(.queued)
             response = try await worker.request(resources: resources, json: json, search: params["wd"] != nil) {
                 progress?.report(.loading)

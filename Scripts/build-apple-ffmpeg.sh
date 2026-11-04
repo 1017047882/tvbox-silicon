@@ -9,9 +9,15 @@
 # build tools also need Python 3).
 set -euo pipefail
 cd "$(dirname "$0")/.."
+SCOPE="${1:-all}"
+case "$SCOPE" in
+  ios) SLICES=(ios) ;;
+  all) SLICES=(macos ios ios-simulator tvos tvos-simulator) ;;
+  *) echo "Usage: $0 [ios|all]" >&2; exit 2 ;;
+esac
 CACHE="${TVBOX_FFMPEG_CACHE:-$HOME/Library/Caches/tvbox-ffmpeg}"
 SIGNATURE="$(shasum -a 256 "$0" | cut -c1-16)"
-OUTPUT="$CACHE/$SIGNATURE/FFmpeg.xcframework"
+OUTPUT="$CACHE/$SIGNATURE-$SCOPE/FFmpeg.xcframework"
 LINK="$PWD/build/FFmpeg/FFmpeg.xcframework"
 link() {
   mkdir -p "$(dirname "$LINK")"
@@ -128,20 +134,24 @@ CROSS
   echo "FFmpeg $name built"
 }
 
-build_slice macos-arm64 macosx aarch64 arm64-apple-macos14.0
-build_slice macos-x86_64 macosx x86_64 x86_64-apple-macos14.0
 build_slice ios iphoneos aarch64 arm64-apple-ios15.0
-build_slice ios-simulator iphonesimulator aarch64 arm64-apple-ios15.0-simulator
-build_slice tvos appletvos aarch64 arm64-apple-tvos17.0
-build_slice tvos-simulator appletvsimulator aarch64 arm64-apple-tvos17.0-simulator
+if [ "$SCOPE" = all ]; then
+  build_slice macos-arm64 macosx aarch64 arm64-apple-macos14.0
+  build_slice macos-x86_64 macosx x86_64 x86_64-apple-macos14.0
+  build_slice ios-simulator iphonesimulator aarch64 arm64-apple-ios15.0-simulator
+  build_slice tvos appletvos aarch64 arm64-apple-tvos17.0
+  build_slice tvos-simulator appletvsimulator aarch64 arm64-apple-tvos17.0-simulator
+fi
 # END
 
-mkdir -p "$WORK/install-macos/lib"
-lipo -create "$WORK/install-macos-arm64/libFFmpeg.a" "$WORK/install-macos-x86_64/libFFmpeg.a" -output "$WORK/install-macos/libFFmpeg.a"
-cp -R "$WORK/install-macos-arm64/include" "$WORK/install-macos/include"
-PARTIAL="$(mktemp -d "$CACHE/$SIGNATURE.partial.XXXXXX")"
+if [ "$SCOPE" = all ]; then
+  mkdir -p "$WORK/install-macos/lib"
+  lipo -create "$WORK/install-macos-arm64/libFFmpeg.a" "$WORK/install-macos-x86_64/libFFmpeg.a" -output "$WORK/install-macos/libFFmpeg.a"
+  cp -R "$WORK/install-macos-arm64/include" "$WORK/install-macos/include"
+fi
+PARTIAL="$(mktemp -d "$CACHE/$SIGNATURE-$SCOPE.partial.XXXXXX")"
 arguments=()
-for slice in macos ios ios-simulator tvos tvos-simulator; do
+for slice in "${SLICES[@]}"; do
   arguments+=(-library "$WORK/install-$slice/libFFmpeg.a" -headers "$WORK/install-$slice/include")
 done
 xcodebuild -create-xcframework "${arguments[@]}" -output "$PARTIAL/FFmpeg.xcframework" > /dev/null

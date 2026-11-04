@@ -1,5 +1,11 @@
 # iOS 15 构建前置操作：上传与运行
 
+## 最新目标范围
+
+用户已限定只需要 iPhone 真机 iOS 15，不构建 Mac、Apple TV 或模拟器产物。Actions 调用 `bash Scripts/build-apple-ffmpeg.sh ios`，只编译 arm64 iPhone 切片；缓存按构建范围隔离。macOS 运行器用于执行 Apple 编译工具，不表示生成 Mac 应用。直接通过 Git 提交和推送本地修改即可，无需使用上传包。
+
+最新日志已确认进入 Swift 源码编译。已将 Downloads 的 URL 路径和默认目录接口、Downloads 与 EmbeddedJarHost 的定时休眠改为 iOS 15 可用接口。`@Observable` 及其他核心和界面 API 兼容问题仍待迁移，VideoToolbox 的 iOS 16 可用性警告也尚未处理。此时重跑仍可能失败，不能视为 IPA 构建完成。
+
 ## 已完成的本地准备
 
 - 应用生成配置和 Swift 包的 iOS 最低版本已设为 15.0。
