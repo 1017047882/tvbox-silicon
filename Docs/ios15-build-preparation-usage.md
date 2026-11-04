@@ -4,7 +4,11 @@
 
 用户已限定只需要 iPhone 真机 iOS 15，不构建 Mac、Apple TV 或模拟器产物。Actions 调用 `bash Scripts/build-apple-ffmpeg.sh ios`，只编译 arm64 iPhone 切片；缓存按构建范围隔离。macOS 运行器用于执行 Apple 编译工具，不表示生成 Mac 应用。直接通过 Git 提交和推送本地修改即可，无需使用上传包。
 
-最新日志已确认进入 Swift 源码编译。已将 Downloads 的 URL 路径和默认目录接口、Downloads 与 EmbeddedJarHost 的定时休眠改为 iOS 15 可用接口。`@Observable` 及其他核心和界面 API 兼容问题仍待迁移，VideoToolbox 的 iOS 16 可用性警告也尚未处理。此时重跑仍可能失败，不能视为 IPA 构建完成。
+最新日志已确认进入 Swift 源码编译。已将 Downloads 的 URL 路径和默认目录接口、Downloads 与 EmbeddedJarHost 的定时休眠改为 iOS 15 可用接口。TVCore 的 17 个状态观察文件已从 Apple Observation 宏迁移到固定版本 Perception 1.6.0，尚待云端编译验证；应用界面的观察跟踪、导航和其他新 API 仍需移植，VideoToolbox 的 iOS 16 可用性警告也尚未处理。此时重跑仍可能失败，不能视为 IPA 构建完成。
+
+Perception 上游 1.6.0 对应提交 `d924c62a70fca5f43872f286dbd7cef0957f1c01`，清单要求最低 iOS 13、Swift tools 5.9。使用其 `@Perceptible`、`@PerceptionIgnored` 和状态变更注册器，不删除观察能力或关闭 API 可用性检查。新系统通过原生 Observation 注册器保持兼容。后续移植旧系统 SwiftUI 页面时，仍必须按上游要求添加 `WithPerceptionTracking`（包括延迟执行的视图闭包）及对应绑定，不能仅修改宏就声称界面兼容。
+
+已补充观察通知、再次注册、忽略回调和新系统原生观察兼容的 Swift 回归用例。当前 Windows 环境无法执行这些 Swift 用例；本地 Python 检查只验证源码迁移完整性，不替代 Swift 编译和运行测试。
 
 ## 已完成的本地准备
 

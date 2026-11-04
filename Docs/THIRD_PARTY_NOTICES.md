@@ -2,6 +2,10 @@
 
 Yingxia's original code is licensed under GPL-3.0-only; see the root [LICENSE](../LICENSE). This project license does not replace or relicense third-party components. Their existing license texts, copyright notices, and redistribution requirements continue to apply.
 
+## Observation compatibility
+
+[Perception](https://github.com/pointfreeco/swift-perception) 1.6.0 (MIT, with Swift-derived sources under Apache-2.0 with Runtime Library Exception) backports state observation to iOS 15. SwiftPM resolves the unmodified upstream dependency. Preserve its license and source-file notices when distributing the app. The shared core uses its observation macros; the iOS 15 view-tracking migration is still in progress.
+
 ## Shared DEX interpreter
 
 [DexLoom](https://github.com/speedyfriend433/DexLoom) is distributed under the MIT License. The vendored license and version record are retained in `Vendor/DexRuntime/`. The app includes its license text in `App/Resources/ThirdPartyNotices.txt`.

@@ -13,6 +13,15 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
 class DeploymentTests(unittest.TestCase):
+    def test_core_has_no_ios17_only_observation_macros(self):
+        violations = []
+        for path in (ROOT / "Sources/TVCore").glob("*.swift"):
+            for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                code = line.split("//", 1)[0]
+                if re.search(r"\bimport Observation\b|@Observable\b|@ObservationIgnored\b", code):
+                    violations.append(f"{path.name}:{number}")
+        self.assertEqual(violations, [], "iOS 17-only observation remains in TVCore")
+
     def test_device_mode_executes_no_other_platform_builds(self):
         text = (ROOT / "Scripts/build-apple-ffmpeg.sh").read_text()
         selection = text.split('SCOPE="${1:-all}"', 1)[1].split('CACHE=', 1)[0]
