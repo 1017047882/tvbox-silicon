@@ -485,7 +485,7 @@ struct MobilePlayerView: View {
                 toolbar
                 optionsMenu
             }
-            .simultaneousGesture(TapGesture().onEnded { poke() })
+            .playerTopBarActivity(poke)
         } else {
             screenTopRow
         }
@@ -510,14 +510,14 @@ struct MobilePlayerView: View {
                 }
             }
         }
-        .simultaneousGesture(TapGesture().onEnded { poke() })
+        .playerTopBarActivity(poke)
     }
 
     private var toolbar: some View {
         HStack(spacing: 10) {
             // With Yingxia found on an Apple TV or Mac, one menu holds those and AirPlay.
             if tvBrowser.receivers.isEmpty {
-                AirPlayButton()
+                AirPlayButton(hold: hold)
                     .frame(width: 44, height: 44)
                     .glassSurface(.regular.interactive(), in: Circle())
                     .contentShape(Circle())
@@ -1059,13 +1059,34 @@ private struct PlayerCircleStyle: ButtonStyle {
 
 /// The system's AirPlay button, which presents the route picker itself.
 private struct AirPlayButton: UIViewRepresentable {
+    let hold: (Bool) -> Void
+    func makeCoordinator() -> Coordinator { Coordinator(hold: hold) }
     func makeUIView(context: Context) -> AVRoutePickerView {
         let view = AVRoutePickerView()
         view.prioritizesVideoDevices = true
         view.tintColor = .white
+        view.delegate = context.coordinator
+        view.accessibilityLabel = L10n.text("AirPlay")
         return view
     }
-    func updateUIView(_ view: AVRoutePickerView, context: Context) {}
+    func updateUIView(_ view: AVRoutePickerView, context: Context) { context.coordinator.hold = hold }
+    @MainActor final class Coordinator: NSObject, AVRoutePickerViewDelegate {
+        var hold: (Bool) -> Void
+        init(hold: @escaping (Bool) -> Void) { self.hold = hold }
+        func routePickerViewWillBeginPresentingRoutes(_ routePickerView: AVRoutePickerView) {
+            hold(true)
+            Diagnostics.shared.record(.info, "player", "AirPlay route picker opening")
+        }
+        func routePickerViewDidEndPresentingRoutes(_ routePickerView: AVRoutePickerView) { hold(false) }
+    }
+}
+
+private extension View {
+    /// @brief iOS 15 UIKit route controls receive touches without an ancestor SwiftUI tap recognizer.
+    @ViewBuilder func playerTopBarActivity(_ action: @escaping () -> Void) -> some View {
+        if #available(iOS 16, *) { simultaneousGesture(TapGesture().onEnded(action)) }
+        else { self }
+    }
 }
 
 /// The picture's own gestures, in UIKit: taps, a touch and hold followed while the finger moves, slides and a pinch.
