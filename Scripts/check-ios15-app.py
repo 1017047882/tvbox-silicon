@@ -17,7 +17,35 @@ def version(value):
 
 
 def check_macho(data, maximum):
-    """Validate a thin arm64 device image and return its deployment requirement."""
+    """Validate arm64 device slices, including FAT wrappers, and return their minimum OS."""
+    fat_formats = {b"\xca\xfe\xba\xbe": (">", False), b"\xbe\xba\xfe\xca": ("<", False),
+                   b"\xca\xfe\xba\xbf": (">", True), b"\xbf\xba\xfe\xca": ("<", True)}
+    if data[:4] in fat_formats:
+        if len(data) < 8:
+            raise ValueError("truncated FAT header")
+        endian, wide = fat_formats[data[:4]]
+        count = struct.unpack_from(endian + "I", data, 4)[0]
+        entry_size = 32 if wide else 20
+        table_end = 8 + count * entry_size
+        if not count or table_end > len(data):
+            raise ValueError("invalid FAT slice table")
+        requirements = []
+        ranges = []
+        for index in range(count):
+            entry = struct.unpack_from(endian + ("IIQQII" if wide else "IIIII"), data, 8 + index * entry_size)
+            cpu, _, offset, size = entry[:4]
+            if cpu != 0x0100000C:
+                raise ValueError("expected arm64 architecture in every FAT slice")
+            if offset < table_end or size < 32 or offset + size > len(data):
+                raise ValueError("invalid FAT slice bounds")
+            if any(offset < end and start < offset + size for start, end in ranges):
+                raise ValueError("overlapping FAT slices")
+            ranges.append((offset, offset + size))
+            image = data[offset:offset + size]
+            if image[:4] != b"\xcf\xfa\xed\xfe":
+                raise ValueError("expected thin arm64 Mach-O inside FAT slice")
+            requirements.append(check_macho(image, maximum))
+        return max(requirements)
     if len(data) < 32 or data[:4] != b"\xcf\xfa\xed\xfe":
         raise ValueError("expected thin arm64 Mach-O")
     _, cpu, _, _, count, size, _, _ = struct.unpack_from("<8I", data)

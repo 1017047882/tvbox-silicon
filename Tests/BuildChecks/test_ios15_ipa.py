@@ -21,6 +21,29 @@ def binary(cpu=0x0100000C, platform=2, minimum=(15, 0, 0)):
 
 
 class IPABinaryTests(unittest.TestCase):
+    def test_arm64_in_fat_container_is_accepted(self):
+        image = binary()
+        header = struct.pack(">2I", 0xCAFEBABE, 1)
+        entry = struct.pack(">5I", 0x0100000C, 0, 28, len(image), 0)
+        self.assertEqual(CHECK.check_macho(header + entry + image, (15, 0, 0)), (15, 0, 0))
+
+    def test_fat_container_rejects_other_architecture(self):
+        image = binary(cpu=0x01000007)
+        data = struct.pack(">7I", 0xCAFEBABE, 1, 0x01000007, 0, 28, len(image), 0) + image
+        with self.assertRaisesRegex(ValueError, "arm64"):
+            CHECK.check_macho(data, (15, 0, 0))
+
+    def test_fat_container_rejects_out_of_bounds_slice(self):
+        data = struct.pack(">7I", 0xCAFEBABE, 1, 0x0100000C, 0, 4096, 56, 0)
+        with self.assertRaises(ValueError):
+            CHECK.check_macho(data, (15, 0, 0))
+
+    def test_fat_arm64_still_rejects_newer_os(self):
+        image = binary(minimum=(16, 0, 0))
+        data = struct.pack(">7I", 0xCAFEBABE, 1, 0x0100000C, 0, 28, len(image), 0) + image
+        with self.assertRaisesRegex(ValueError, "minimum"):
+            CHECK.check_macho(data, (15, 0, 0))
+
     def test_device_ios15_is_accepted(self):
         self.assertEqual(CHECK.check_macho(binary(), (15, 0, 0)), (15, 0, 0))
 
