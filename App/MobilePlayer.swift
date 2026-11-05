@@ -1073,11 +1073,16 @@ private struct AirPlayButton: UIViewRepresentable {
     @MainActor final class Coordinator: NSObject, AVRoutePickerViewDelegate {
         var hold: (Bool) -> Void
         init(hold: @escaping (Bool) -> Void) { self.hold = hold }
-        func routePickerViewWillBeginPresentingRoutes(_ routePickerView: AVRoutePickerView) {
-            hold(true)
-            Diagnostics.shared.record(.info, "player", "AirPlay route picker opening")
+        /// @note Legacy AVKit declares delegate callbacks nonisolated; never transfer the UIKit argument.
+        nonisolated func routePickerViewWillBeginPresentingRoutes(_ routePickerView: AVRoutePickerView) {
+            Task { @MainActor [weak self] in
+                self?.hold(true)
+                Diagnostics.shared.record(.info, "player", "AirPlay route picker opening")
+            }
         }
-        func routePickerViewDidEndPresentingRoutes(_ routePickerView: AVRoutePickerView) { hold(false) }
+        nonisolated func routePickerViewDidEndPresentingRoutes(_ routePickerView: AVRoutePickerView) {
+            Task { @MainActor [weak self] in self?.hold(false) }
+        }
     }
 }
 
