@@ -18,7 +18,9 @@ python3 Scripts/make-iphone-project.py
 xcodegen generate --spec .ios15-project.generated.yml
 # Preserve existing results when invoked locally; cloud runners start with a fresh archive.
 preserve_build_path "$OUT/TVBox-iOS.xcarchive" "$OUT/Payload" "$OUT/Yingxia-iPhone-iOS15-unsigned.ipa"
+# CI cannot confirm Xcode's macro trust dialog; Perception remains pinned in project.yml.
 xcodebuild -project TVBox-iPhone.xcodeproj -scheme TVBox-iOS \
+  -skipMacroValidation \
   -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
   -derivedDataPath "$OUT/DerivedData" -archivePath "$OUT/TVBox-iOS.xcarchive" \
   archive ARCHS=arm64 ONLY_ACTIVE_ARCH=YES IPHONEOS_DEPLOYMENT_TARGET=15.0 \

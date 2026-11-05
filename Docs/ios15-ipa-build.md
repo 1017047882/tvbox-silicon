@@ -17,6 +17,8 @@
 
 失败时下载 `iphone-ipa-logs-运行编号`：`java-device.log`、`python-device.log`、`node-device.log`、`ios15-archive.log` 分别用于定位对应阶段。校验报告为 `ios15-binary-report.json`。只有 **Build iPhone iOS 15 unsigned IPA** 成功且 IPA 上传成功，才表示生成了产物。
 
+云归档使用 `-skipMacroValidation`，跳过 Xcode 对 Perception 宏的交互式信任确认；仍编译并执行宏，Perception 版本继续固定为 1.6.0。该选项不会关闭 Swift 类型检查或并发诊断。
+
 功能边界：保留 Java/DEX、Python、Node 源及播放器现有实现。仓库原有 iOS Python 脚本未包含 cffi/cryptography，这一限制继续存在；依赖这些模块的源未保证可用。官方弹幕 API 需要开发者自有凭据，默认不会包含原作者私密配置；iCloud 权限需要自己的开发者配置。所有源的网络服务、登录和 iOS 15.5 真机行为均需回归，不以打包成功代替测试。
 
 文件安全：构建调用链用到的旧目录保留在 `build/preserved/`，下载临时文件保留；不执行递归删除。GitHub 临时 runner 生命周期结束后，由平台回收工作区。
