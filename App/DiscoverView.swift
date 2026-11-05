@@ -773,8 +773,27 @@ private struct DiscoverHeroCarousel: View {
             DiscoverTVHeroPager(items: items, details: state.details, selection: Binding(get: { selectedID }, set: { state.id = $0 }), focus: tvFocus)
                 .frame(width: width, height: height)
             #elseif os(iOS)
-            DiscoverNativeHeroPager(items: items, details: state.details, dark: state.paint?.isDark ?? true, selection: Binding(get: { selectedID }, set: { state.id = $0 }),
-                                    progress: { state.pageProgress = $0 }, dragging: { state.dragging = $0 })
+            if #available(iOS 16, *) {
+                DiscoverNativeHeroPager(items: items, details: state.details, dark: state.paint?.isDark ?? true, selection: Binding(get: { selectedID }, set: { state.id = $0 }),
+                                        progress: { state.pageProgress = $0 }, dragging: { state.dragging = $0 })
+            } else {
+                // Keep iOS 15 paging inside SwiftUI rather than attaching hosting controllers to reusable cells.
+                TabView(selection: Binding(get: { selectedID }, set: { state.id = $0 })) {
+                    ForEach(items, id: \.key) { item in
+                        WithPerceptionTracking {
+                            RouteLink { DiscoverDetailView(item: item) } label: {
+                                DiscoverHero(item: item, details: state.details[item.key])
+                                    .frame(width: width, height: height)
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(state.paint?.isDark == false ? Color.black : Color.white)
+                            .accessibilityIdentifier("discover.hero.\(item.key)")
+                        }
+                        .tag(Optional(item.key))
+                    }
+                }
+                .tabViewStyle(.page(indexDisplayMode: .never))
+            }
             #elseif os(macOS)
             // One title at a time: in the split view's detail a horizontal scroll view takes the sidebar's width as
             // a content inset, which shifted every page. The arrows and the dots move between titles.
@@ -824,7 +843,7 @@ private struct DiscoverHeroCarousel: View {
                 items.firstIndex { $0.key == (state.id ?? items.first?.key) } ?? 0
             }, set: { index in
                 guard items.indices.contains(index) else { return }
-                state.dragging = true
+                if #available(iOS 16, *) { state.dragging = true }
                 withAnimation(.easeInOut(duration: 0.35)) { state.id = items[index].key }
             })).frame(height: 24).padding(.bottom, 0)
             #elseif os(tvOS)

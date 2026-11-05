@@ -18,11 +18,14 @@ private extension View {
                         .disableAutocorrection(true)
                         .submitLabel(.search)
                 }
+                .frame(height: 24)
                 .padding(10)
                 .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
                 .padding(.horizontal, 16).padding(.vertical, 8)
-                self
+                .fixedSize(horizontal: false, vertical: true)
+                self.frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         #else
         catalogSearchable(text: text, prompt: prompt)

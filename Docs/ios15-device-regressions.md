@@ -24,3 +24,5 @@
 [Argus] 新证据：11:59:42 的 ExcUserFault 记录显示启动时 `NSUbiquitousKeyValueStore.defaultStore` 经 SyncedDefaults 触发 `EXC_GUARD / Application Triggered Fault`，记录带 isSimulated=1，不能直接等同于发现页进程崩溃。侧载构建明确写入 `TVBoxCloudSyncAvailable=false`；Store 检查该标志后跳过 CloudSync 初始化，收藏、历史和订阅继续使用原有本地存储。正常具备权限的工程不设置该标志，沿用原同步行为。
 
 [Pulse] 新回归：未授予 iCloud 权限侧载后冷启动，添加收藏/历史/订阅并重启确认本地持久化，进入发现页，核对是否还有新的崩溃记录。此处不是通过加入无效权限声明来绕过系统检查。
+
+[Nova] 后续 4.9 秒视频显示来源页头部、搜索栏和内容上下跳动。iOS 15 搜索输入区固定自身高度，主体填满剩余空间，防止旧系统在加载时按内容高度重新分配上下区域。发现页旧系统轮播改为 SwiftUI 分页 TabView，避开自建 hosting-controller 单元格生命周期；保留滑动、页码选择和进入详情，新系统沿用原轮播。这两项尚无真机修复证据，发现页崩溃原因仍待最新异常堆栈确认。云端另上传对应提交的 dSYM，便于匹配崩溃 UUID 后符号化。
