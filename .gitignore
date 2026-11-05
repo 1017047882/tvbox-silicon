@@ -1,5 +1,7 @@
 .DS_Store
 .build/
+.ios15-project.generated.yml
+TVBox-iPhone.xcodeproj/
 build/
 DerivedData/
 reference/

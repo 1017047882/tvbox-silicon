@@ -3,6 +3,7 @@
 # Scripts/build-apple-python.sh, and signs its frameworks before Xcode signs the app. A build without it
 # still works: ApplePython.c then reports Python as missing and the app offers no Python sources.
 set -euo pipefail
+source "$(dirname "$0")/preserve-build-path.sh"
 SOURCE="$SRCROOT/build/ApplePython/$PLATFORM_NAME"
 APP="$TARGET_BUILD_DIR/$WRAPPER_NAME"
 # Copying and re-signing the ~100 frameworks takes ~10 s, and signing changes them, so rsync would copy them
@@ -13,7 +14,7 @@ if [ ! -d "$SOURCE" ]; then
     iphoneos) target=ios ;; iphonesimulator) target=ios-simulator ;; appletvos) target=tvos ;; *) target=tvos-simulator ;;
   esac
   echo "warning: This build has no Python runtime, so Python sources won't run. Run Scripts/build-apple-python.sh $target first."
-  rm -rf "$APP/python" "$APP/PythonHost" "$APP/Frameworks/Python.framework" "$STAMP"
+  preserve_build_path "$APP/python" "$APP/PythonHost" "$APP/Frameworks/Python.framework" "$STAMP"
   exit 0
 fi
 SIGN=
@@ -35,11 +36,11 @@ if [ "$(cat "$STAMP" 2>/dev/null)" = "$KEY" ] && embedded; then
   exit 0
 fi
 rm -f "$STAMP"
-rsync -a --delete "$SOURCE/python/" "$APP/python/"
-rsync -a --delete "$SOURCE/PythonHost/" "$APP/PythonHost/"
+rsync -a "$SOURCE/python/" "$APP/python/"
+rsync -a "$SOURCE/PythonHost/" "$APP/PythonHost/"
 mkdir -p "$APP/Frameworks"
 for framework in "$SOURCE/Frameworks/"*.framework; do
-  rsync -a --delete "$framework/" "$APP/Frameworks/$(basename "$framework")/"
+  rsync -a "$framework/" "$APP/Frameworks/$(basename "$framework")/"
 done
 if [ -n "$SIGN" ]; then
   for framework in "$SOURCE/Frameworks/"*.framework; do

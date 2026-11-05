@@ -1,0 +1,103 @@
+#!/usr/bin/env python3
+"""@brief Fail closed on incompatible embedded Mach-O files before IPA packaging.
+
+@note Reads a completed, immutable archive; callers must finish Xcode before checking.
+This checks deployment metadata, not runtime behavior or all imported symbols.
+"""
+import argparse
+import json
+import pathlib
+import plistlib
+import struct
+
+
+def version(value):
+    parts = tuple(map(int, str(value).split(".")))
+    return (parts + (0, 0))[:3]
+
+
+def check_macho(data, maximum):
+    """Validate a thin arm64 device image and return its deployment requirement."""
+    if len(data) < 32 or data[:4] != b"\xcf\xfa\xed\xfe":
+        raise ValueError("expected thin arm64 Mach-O")
+    _, cpu, _, _, count, size, _, _ = struct.unpack_from("<8I", data)
+    if cpu != 0x0100000C:
+        raise ValueError("expected arm64 architecture")
+    end = 32 + size
+    if end > len(data):
+        raise ValueError("truncated Mach-O commands")
+    offset = 32
+    minimum = None
+    for _ in range(count):
+        if offset + 8 > end:
+            raise ValueError("truncated command header")
+        command, length = struct.unpack_from("<2I", data, offset)
+        if length < 8 or offset + length > end:
+            raise ValueError("invalid command length")
+        if command == 0x32:
+            if length < 24:
+                raise ValueError("truncated build version")
+            platform, encoded = struct.unpack_from("<2I", data, offset + 8)
+            if platform != 2:
+                raise ValueError(f"expected iOS device platform, got {platform}")
+        elif command == 0x25:
+            if length < 16:
+                raise ValueError("truncated deployment command")
+            encoded = struct.unpack_from("<I", data, offset + 8)[0]
+        else:
+            offset += length
+            continue
+        found = (encoded >> 16, (encoded >> 8) & 255, encoded & 255)
+        minimum = max(minimum or found, found)
+        offset += length
+    if minimum is None:
+        raise ValueError("missing deployment command")
+    if minimum > maximum:
+        raise ValueError(f"binary minimum {minimum} exceeds app minimum {maximum}")
+    return minimum
+
+
+def check_app(app):
+    """Require all bundled hosts and inspect every embedded executable image."""
+    with (app / "Info.plist").open("rb") as stream:
+        info = plistlib.load(stream)
+    minimum = version(info["MinimumOSVersion"])
+    if minimum != (15, 0, 0) or info.get("UIDeviceFamily") != [1]:
+        raise ValueError("expected iPhone-only app with MinimumOSVersion 15.0")
+    required = [info["CFBundleExecutable"], "lib/lib/modules", "JavaHost/host.jar",
+                "JavaHost/apple-bindings.jar", "PythonHost/host.py", "python/lib/python3.14",
+                "Frameworks/Python.framework/Python", "Frameworks/NodeMobile.framework/NodeMobile",
+                "NodeHost/main.mjs"]
+    for relative in required:
+        if not (app / relative).exists():
+            raise ValueError(f"missing runtime: {relative}")
+    images = []
+    magic = {b"\xcf\xfa\xed\xfe", b"\xfe\xed\xfa\xcf", b"\xce\xfa\xed\xfe",
+             b"\xfe\xed\xfa\xce", b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca",
+             b"\xca\xfe\xba\xbf", b"\xbf\xba\xfe\xca"}
+    for path in sorted(app.rglob("*")):
+        if not path.is_file():
+            continue
+        with path.open("rb") as stream:
+            header = stream.read(4)
+        if header not in magic:
+            continue
+        try:
+            needed = check_macho(path.read_bytes(), minimum)
+        except ValueError as error:
+            raise ValueError(f"{path.relative_to(app)}: {error}") from error
+        images.append({"path": path.relative_to(app).as_posix(), "minimum": ".".join(map(str, needed))})
+    expected = {info["CFBundleExecutable"], "Frameworks/Python.framework/Python", "Frameworks/NodeMobile.framework/NodeMobile"}
+    if not expected.issubset({image["path"] for image in images}):
+        raise ValueError("app, Python or Node executable is not a validated Mach-O")
+    return {"minimumOS": "15.0", "architecture": "arm64", "device": "iPhone", "images": images}
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("app", type=pathlib.Path)
+    args = parser.parse_args()
+    try:
+        print(json.dumps(check_app(args.app), indent=2))
+    except (ValueError, KeyError, OSError, struct.error) as error:
+        parser.exit(1, f"iOS 15 compatibility check failed: {error}\n")

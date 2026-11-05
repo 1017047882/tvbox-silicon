@@ -15,11 +15,14 @@ for platform in "$@"; do
   cp build/JavaHost/host.jar "$OUT/"
   # Strip embedded desktop executables from dependencies; Apple uses static JNI.
   python3 - "$OUT/lib" <<'PY'
-import pathlib,sys,zipfile
+import pathlib,sys,zipfile,tempfile
 out=pathlib.Path(sys.argv[1])
 sources={source.name for source in pathlib.Path('build/JavaHost/lib').glob('*.jar')}
 for stale in out.glob('*.jar'):
- if stale.name not in sources: stale.unlink()
+ if stale.name not in sources:
+  preserved=pathlib.Path('build/preserved')
+  preserved.mkdir(parents=True,exist_ok=True)
+  stale.rename(pathlib.Path(tempfile.mkdtemp(prefix='java-host-',dir=preserved))/stale.name)
 for source in pathlib.Path('build/JavaHost/lib').glob('*.jar'):
  with zipfile.ZipFile(source) as src, zipfile.ZipFile(out/source.name,'w',zipfile.ZIP_DEFLATED) as dst:
   for entry in src.infolist():

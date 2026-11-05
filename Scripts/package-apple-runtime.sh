@@ -2,6 +2,7 @@
 # Prepare signed-in app resources; never bundle Mac executables or native dylibs.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+source Scripts/preserve-build-path.sh
 ROOT="$PWD"; TARGET="${1:-ios-simulator}"
 case "$TARGET" in
  ios) PLATFORM=iphoneos; CONF=ios-aarch64-zero-release ;;
@@ -33,15 +34,15 @@ fi
 # jdk.charsets carries GBK/GB2312/GB18030/Big5, which many Chinese source sites still serve.
 MODULES=java.base,java.management,java.logging,java.naming,java.security.sasl,java.xml,jdk.zipfs,jdk.httpserver,jdk.unsupported,jdk.charsets
 # Exploded java.base has no target platform, which jlink needs; a jmod records it.
-LINK="$WORK/jlink-$TARGET"; rm -rf "$LINK"; mkdir -p "$LINK/jmods"
+LINK="$WORK/jlink-$TARGET"; preserve_build_path "$LINK"; mkdir -p "$LINK/jmods"
 "$HOST/bin/jmod" create --class-path "$JDK/jdk/modules/java.base" --target-platform "$(sed -n 's/^OPENJDK_MODULE_TARGET_PLATFORM := //p' "$JDK/spec.gmk")" "$LINK/jmods/java.base.jmod"
 MODULE_PATH="$LINK/jmods"
 for module in ${MODULES//,/ }; do [ "$module" = java.base ] || MODULE_PATH+=":$JDK/jdk/modules/$module"; done
 "$HOST/bin/jlink" --module-path "$MODULE_PATH" --add-modules "$MODULES" --output "$LINK/image"
-rm -rf "$OUT/Resources/lib/modules"
+preserve_build_path "$OUT/Resources/lib/modules"
 cp "$LINK/image/lib/modules" "$OUT/Resources/lib/lib/modules"
 cp "$BOOT/conf/security/java.security" "$OUT/Resources/lib/conf/security/"
-rsync -a --delete "$BOOT/conf/security/policy/" "$OUT/Resources/lib/conf/security/policy/"
+rsync -a "$BOOT/conf/security/policy/" "$OUT/Resources/lib/conf/security/policy/"
 cp "$BOOT/lib/security/cacerts" "$OUT/Resources/lib/lib/security/"
 cp "$BOOT/lib/tzdb.dat" "$OUT/Resources/lib/lib/"
 cp "$WORK/native-$TARGET/apple-bindings.jar" "$OUT/Resources/JavaHost/"

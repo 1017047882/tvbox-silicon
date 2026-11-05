@@ -9,6 +9,7 @@
 # Usage: Scripts/build-apple-python.sh [ios|ios-simulator|tvos|tvos-simulator]
 set -euo pipefail
 cd "$(dirname "$0")/.."
+source Scripts/preserve-build-path.sh
 TARGET="${1:-ios}"
 case "$TARGET" in
   ios) FAMILY=iOS; PLATFORM=iphoneos; SLICE=ios-arm64 ;;
@@ -40,7 +41,7 @@ if [ ! -d "$SUPPORT_DIR" ]; then
 fi
 XCFRAMEWORK="$SUPPORT_DIR/Python.xcframework"
 DEST="$PWD/build/ApplePython/$PLATFORM"
-rm -rf "$DEST"
+preserve_build_path "$DEST"
 mkdir -p "$DEST/Frameworks" "$DEST/python/lib" "$DEST/PythonHost/site-packages"
 
 # The interpreter. The apps build for arm64 only (project.yml), simulators included.
@@ -49,7 +50,7 @@ if lipo -archs "$DEST/Frameworks/Python.framework/Python" | grep -q ' '; then
   lipo -thin arm64 "$DEST/Frameworks/Python.framework/Python" -output "$DEST/Frameworks/Python.framework/Python.arm64"
   mv "$DEST/Frameworks/Python.framework/Python.arm64" "$DEST/Frameworks/Python.framework/Python"
 fi
-rm -rf "$DEST/Frameworks/Python.framework/Headers"
+preserve_build_path "$DEST/Frameworks/Python.framework/Headers"
 
 # The standard library, without what an app never runs (tests, GUI, installers, the REPL's docs).
 EXCLUDES=(--exclude '__pycache__' --exclude 'test/' --exclude 'idlelib/' --exclude 'tkinter/' --exclude 'turtledemo/'
@@ -63,7 +64,7 @@ rsync -a "${EXCLUDES[@]}" "$XCFRAMEWORK/$SLICE/lib-arm64/" "$DEST/python/lib/"
 grep -E '^[A-Za-z]' Runtime/PythonHost/requirements.txt | grep -v -E '^(cffi|cryptography|lxml|pycryptodome)==' > "$WORK/requirements-pure.txt"
 "$HOST_PYTHON" -m pip install --quiet --disable-pip-version-check --target "$DEST/PythonHost/site-packages" --no-deps \
   --only-binary=:all: --platform any --implementation py --abi none --python-version "$VERSION" -r "$WORK/requirements-pure.txt"
-rm -rf "$DEST/PythonHost/site-packages/bin"
+preserve_build_path "$DEST/PythonHost/site-packages/bin"
 
 # lxml and pycryptodome, compiled for this platform.
 Scripts/build-apple-python-wheels.sh "$TARGET"
@@ -72,9 +73,10 @@ for name in lxml pycryptodome; do
   unzip -qo "$WORK/wheels/$PLATFORM/$name-$version-"*.whl -d "$DEST/PythonHost/site-packages"
 done
 # Cython sources, C headers and type stubs only matter when building against them.
-rm -rf "$DEST/PythonHost/site-packages/lxml/includes"
+preserve_build_path "$DEST/PythonHost/site-packages/lxml/includes"
 find "$DEST/PythonHost/site-packages/lxml" "$DEST/PythonHost/site-packages/Crypto" \
-  \( -name '*.pyx' -o -name '*.pxd' -o -name '*.pxi' -o -name '*.h' -o -name '*.c' -o -name '*.pyi' \) -delete
+  \( -name '*.pyx' -o -name '*.pxd' -o -name '*.pxi' -o -name '*.h' -o -name '*.c' -o -name '*.pyi' \) -print0 |
+  while IFS= read -r -d '' source; do preserve_build_path "$source"; done
 # pycryptodome opens its C code with ctypes from .so files beside its modules. Those become frameworks
 # below, so it follows the .fwork file instead, as importlib does for extension modules.
 "$HOST_PYTHON" -I - "$DEST/PythonHost/site-packages/Crypto/Util/_raw_api.py" <<'PATCH'

@@ -6,6 +6,7 @@
 # Usage: Scripts/build-apple-python-wheels.sh [ios|ios-simulator|tvos|tvos-simulator]
 set -euo pipefail
 cd "$(dirname "$0")/.."
+source Scripts/preserve-build-path.sh
 TARGET="${1:-ios}"
 case "$TARGET" in
   ios) FAMILY=iOS; PLATFORM=iphoneos; SLICE=ios-arm64; COMPILER=arm64-apple-ios ;;
@@ -34,7 +35,7 @@ export PATH="$XCFRAMEWORK/$SLICE/bin:$PATH"
 # pip in this venv believes it runs on the device's platform, so it compiles for it with the wrappers.
 VENV="$WORK/venv-$PLATFORM"
 if [ ! -f "$VENV/lib/python$VERSION/site-packages/_cross_venv.pth" ]; then
-  rm -rf "$VENV"
+  preserve_build_path "$VENV"
   "$HOST_PYTHON" -m venv "$VENV"
   "$HOST_PYTHON" "$XCFRAMEWORK/$SLICE/platform-config/arm64-$PLATFORM/make_cross_venv.py" "$VENV" \
     "$XCFRAMEWORK/$SLICE/platform-config/arm64-$PLATFORM"
@@ -69,7 +70,7 @@ if ! ls "$WHEELS"/lxml-"$LXML"-*.whl >/dev/null 2>&1; then
       tar -xzOf "$SDIST" "lxml-$LXML/libxslt-$LIBXSLT-backport1.patch" | patch -s -p1 -d "$WORK/sources/libxslt-$LIBXSLT"
       touch "$WORK/sources/libxslt-$LIBXSLT/.lxml-patched"
     fi
-    rm -rf "$DEPS" && mkdir -p "$DEPS/build/libxml2" "$DEPS/build/libxslt"
+    preserve_build_path "$DEPS" && mkdir -p "$DEPS/build/libxml2" "$DEPS/build/libxslt"
     COMMON=(--host=aarch64-apple-darwin --prefix="$DEPS" --disable-shared --enable-static --without-python)
     (cd "$DEPS/build/libxml2" && CC="$COMPILER-clang" AR="$COMPILER-ar" CFLAGS="-O2" \
       "$WORK/sources/libxml2-$LIBXML2/configure" "${COMMON[@]}" --with-zlib --with-iconv --without-lzma --without-icu \

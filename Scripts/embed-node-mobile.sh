@@ -3,6 +3,7 @@
 # and the CatPawOpen runner (Runtime/NodeHost), and signs the framework before Xcode signs the app. A build
 # without it still works: EmbeddedNodeHost then reports Node as missing and CatPawOpen sources stay unsupported.
 set -euo pipefail
+source "$(dirname "$0")/preserve-build-path.sh"
 APP="$TARGET_BUILD_DIR/$WRAPPER_NAME"
 case "$PLATFORM_NAME" in
   iphoneos) SLICE=ios-arm64 ;;
@@ -14,10 +15,10 @@ FRAMEWORK="$SRCROOT/build/NodeMobile/NodeMobile.xcframework/$SLICE/NodeMobile.fr
 STAMP="${DERIVED_FILE_DIR:-$TARGET_TEMP_DIR}/embed-node-mobile.stamp"
 if [ ! -d "$FRAMEWORK" ]; then
   echo "warning: This build has no Node.js runtime, so CatPawOpen sources won't run. Run Scripts/fetch-node-mobile.sh first."
-  rm -rf "$APP/Frameworks/NodeMobile.framework" "$APP/NodeHost" "$STAMP"
+  preserve_build_path "$APP/Frameworks/NodeMobile.framework" "$APP/NodeHost" "$STAMP"
   exit 0
 fi
-rsync -a --delete "$SRCROOT/Runtime/NodeHost/" "$APP/NodeHost/"
+rsync -a "$SRCROOT/Runtime/NodeHost/" "$APP/NodeHost/"
 cp "$SRCROOT/build/NodeMobile/LICENSE.node" "$APP/NodeHost/LICENSE.node"
 SIGN=
 if [ "${CODE_SIGNING_ALLOWED:-YES}" = YES ] && [ -n "${EXPANDED_CODE_SIGN_IDENTITY:-}" ]; then SIGN=yes; fi
@@ -33,7 +34,7 @@ fi
 rm -f "$STAMP"
 mkdir -p "$APP/Frameworks"
 # The app opens the framework with dlopen and never compiles against it, so its headers stay out.
-rsync -a --delete --exclude Headers --exclude Modules "$FRAMEWORK/" "$COPY/"
+rsync -a --exclude Headers --exclude Modules "$FRAMEWORK/" "$COPY/"
 # Node links OpenSSL, a commonly used SDK: without a privacy manifest TestFlight review marks the build invalid
 # (ITMS-91061), as it did the Python frameworks.
 cp "$SRCROOT/Config/Python/PrivacyInfo.xcprivacy" "$COPY/"
