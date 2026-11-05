@@ -41,6 +41,10 @@ struct MobilePlayerView: View {
     @State private var tracks = MediaTracks()
     @State private var nowPlaying = VideoNowPlaying()
     @State private var fillsScreen = false
+    /// Avoid cropping a landscape stream to a portrait phone when rotation has not completed.
+    private var fillsPicture: Bool {
+        fillsScreen && (UIDevice.current.userInterfaceIdiom != .phone || verticalSizeClass == .compact)
+    }
     @State private var speed: Float = 1
     @AppStorage(DanmakuArea.key) private var danmakuArea = DanmakuArea.standard
     @State private var showsDanmakuList = false
@@ -75,9 +79,9 @@ struct MobilePlayerView: View {
     var body: some View {
         WithPerceptionTracking {
         ZStack {
-            PlayerLayerView(player: session.player, fills: fillsScreen, pip: pip).playerBleed(!inline)
+            PlayerLayerView(player: session.player, fills: fillsPicture, pip: pip).playerBleed(!inline)
             // The enhanced picture covers the layer's own, under everything else.
-            EnhancedVideoSurface(enhancer: session.enhancer, fills: fillsScreen, bleeds: !inline)
+            EnhancedVideoSurface(enhancer: session.enhancer, fills: fillsPicture, bleeds: !inline)
             if showsDanmaku && !session.danmaku.isEmpty {
                 DanmakuOverlay(player: session.player, comments: session.danmaku, opacity: session.danmakuOpacity, revision: session.danmakuRevision)
                     // Across the whole width, but below the Dynamic Island and above the home indicator when upright.
@@ -555,7 +559,7 @@ struct MobilePlayerView: View {
             if !inline, PlayerOrientation.available, horizontalSizeClass == .compact || verticalSizeClass == .compact {
                 let landscape = verticalSizeClass == .compact
                 Button { PlayerOrientation.set(landscape: !landscape) } label: {
-                    Image(systemName: landscape ? "rectangle.portrait.rotate" : "rectangle.landscape.rotate").font(.headline).frame(width: 22, height: 22)
+                    Image(systemName: "arrow.triangle.2.circlepath").font(.headline).frame(width: 22, height: 22)
                 }
                 .chromeButton()
                 .accessibilityLabel(L10n.text(landscape ? "Rotate to Portrait" : "Rotate to Landscape"))

@@ -10,6 +10,8 @@ def iphone_project(project):
                            if name in {"TVCore", "Perception", "NavigationBackport"}}
     project["options"]["deploymentTarget"] = {"iOS": "15.0"}
     target = project["targets"]["TVBox-iOS"]
+    # Unsigned side-load archives have no iCloud KVS entitlement.
+    target.setdefault("info", {}).setdefault("properties", {})["TVBoxCloudSyncAvailable"] = False
     target["settings"].update({"TARGETED_DEVICE_FAMILY": "1", "SUPPORTED_PLATFORMS": "iphoneos",
                                 "SUPPORTS_MACCATALYST": "NO", "SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD": "NO"})
     for phase in target.get("postBuildScripts", []):

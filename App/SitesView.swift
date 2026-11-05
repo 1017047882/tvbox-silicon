@@ -3,6 +3,33 @@ import NavigationBackport
 import SwiftUI
 import TVCore
 
+private extension View {
+    /// @brief Keep iOS 15 source content below search without navigation-drawer inset updates.
+    @ViewBuilder func sourceCatalogSearchable(text: Binding<String>, prompt: String) -> some View {
+        #if os(iOS)
+        if #available(iOS 16, *) {
+            catalogSearchable(text: text, prompt: prompt)
+        } else {
+            VStack(spacing: 0) {
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    TextField(prompt, text: text)
+                        .textInputAutocapitalization(.never)
+                        .disableAutocorrection(true)
+                        .submitLabel(.search)
+                }
+                .padding(10)
+                .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+                .padding(.horizontal, 16).padding(.vertical, 8)
+                self
+            }
+        }
+        #else
+        catalogSearchable(text: text, prompt: prompt)
+        #endif
+    }
+}
+
 struct SitesView: View {
     @Environment(Store.self) private var store
     @Environment(\.dismiss) private var dismiss
@@ -1123,7 +1150,7 @@ struct SiteView: View {
  if browser.pageCount > 1 { pager }
                     }
                 }
-                .catalogSearchable(text: Binding(get: { query }, set: { value in
+                .sourceCatalogSearchable(text: Binding(get: { query }, set: { value in
                     query = value
                     if value.isEmpty && !browser.query.isEmpty { startRequest { await home() } }
                 }), prompt: L10n.text("Search videos"))

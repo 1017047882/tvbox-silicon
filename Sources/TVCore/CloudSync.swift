@@ -1,7 +1,7 @@
 import Foundation
 
-/// iCloud key-value storage, or a stand-in in tests. Without the iCloud entitlement (a sideloaded
-/// build) the system store keeps values on this device only, so nothing breaks; it just doesn't sync.
+/// iCloud key-value storage, or a stand-in in tests. Callers without the iCloud entitlement must
+/// avoid initializing the system store and keep using their existing local persistence.
 @MainActor public protocol CloudValueStore: AnyObject {
     func data(forKey key: String) -> Data?
     func set(_ data: Data?, forKey key: String)

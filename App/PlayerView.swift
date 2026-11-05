@@ -622,7 +622,17 @@ private struct PlayerSurface: NSViewRepresentable {
                 Diagnostics.shared.record(.warning, "player", "Rotation refused: \(error.localizedDescription)")
             }
         } else {
-            UIViewController.attemptRotationToDeviceOrientation()
+            guard let controller, controller.view.window != nil,
+                  !controller.isBeingPresented, !controller.isBeingDismissed else { return }
+            let request = LegacyRotationController()
+            request.orientations = landscape ? .landscape : .portrait
+            request.orientation = landscape ? .landscapeRight : .portrait
+            request.modalPresentationStyle = .fullScreen
+            controller.present(request, animated: false) {
+                request.dismiss(animated: false) {
+                    UIViewController.attemptRotationToDeviceOrientation()
+                }
+            }
         }
     }
 
@@ -636,6 +646,20 @@ private struct PlayerSurface: NSViewRepresentable {
         guard holdsPortrait != hold else { return }
         holdsPortrait = hold
         if mask != .landscape { set(landscape: false) }
+    }
+}
+
+/// @brief iOS 15 reevaluates orientation when presenting a full-screen controller.
+/// @note UIKit lifecycle and orientation state stay on the main actor; no device KVC is used.
+@MainActor private final class LegacyRotationController: UIViewController {
+    var orientations: UIInterfaceOrientationMask = .portrait
+    var orientation: UIInterfaceOrientation = .portrait
+    override var supportedInterfaceOrientations: UIInterfaceOrientationMask { orientations }
+    override var preferredInterfaceOrientationForPresentation: UIInterfaceOrientation { orientation }
+    override var shouldAutorotate: Bool { true }
+    override func loadView() {
+        view = UIView()
+        view.backgroundColor = .black
     }
 }
 #else

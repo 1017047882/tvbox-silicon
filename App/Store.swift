@@ -127,7 +127,10 @@ import TVCore
         WebSniff.install(WKWebSniffer())
         #endif
         sourceOrder = SourceOrder(defaults: playbackDefaults)
-        cloudSync = defaults === UserDefaults.standard && !defaults.bool(forKey: "qaIsolatedData") ? CloudSync() : nil
+        // @brief Sideload builds retain local stores without initializing entitlement-dependent iCloud KVS.
+        // @note Store initialization is main-actor isolated; do not eagerly evaluate CloudSync here.
+        let cloudAvailable = Bundle.main.object(forInfoDictionaryKey: "TVBoxCloudSyncAvailable") as? Bool ?? true
+        cloudSync = cloudAvailable && defaults === UserDefaults.standard && !defaults.bool(forKey: "qaIsolatedData") ? CloudSync() : nil
         favorites = Favorites(defaults: defaults)
         autoPlayNext = defaults.object(forKey: "autoPlayNextEpisode") == nil || defaults.bool(forKey: "autoPlayNextEpisode")
         let saved = defaults.data(forKey: "subscriptions").flatMap { try? JSONDecoder().decode([SubscriptionEntry].self, from: $0) }

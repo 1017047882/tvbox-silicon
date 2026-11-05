@@ -106,6 +106,7 @@ class IPABinaryTests(unittest.TestCase):
         self.assertEqual(result["targets"]["TVBox-iOS"]["settings"]["TARGETED_DEVICE_FAMILY"], "1")
         self.assertEqual(result["targets"]["TVBox-iOS"]["settings"]["SUPPORTED_PLATFORMS"], "iphoneos")
         self.assertEqual(set(result["packages"]), {"TVCore", "Perception", "NavigationBackport"})
+        self.assertIs(result["targets"]["TVBox-iOS"]["info"]["properties"]["TVBoxCloudSyncAvailable"], False)
 
     def test_stale_outputs_are_preserved_and_outside_paths_rejected(self):
         git_bash = pathlib.Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "Git/bin/bash.exe"
