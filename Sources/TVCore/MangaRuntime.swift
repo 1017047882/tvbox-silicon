@@ -78,8 +78,9 @@ public actor MangaRuntime {
         }
     }
 
-    /// Evaluates a `__venera` call and unwraps its {value} or {error}.
-    private static func call(_ script: ScriptSession, _ expression: String, seconds: Double) async throws -> Any? {
+    /// @brief Evaluates a Venera call and unwraps its JSON on the caller's actor.
+    /// @note The non-Sendable Foundation value stays on that actor; QuickJS work remains on its script thread.
+    private static func call(_ script: ScriptSession, _ expression: String, seconds: Double, isolation: isolated (any Actor)? = #isolation) async throws -> Any? {
         let envelope = await script.evaluate("Promise.resolve(\(expression)).then(value => JSON.stringify(value))", within: seconds)
         if let error = envelope["error"]?.string { throw TVError.unsupported(MangaRuntime.readable(error)) }
         guard let text = envelope["value"]?.string,

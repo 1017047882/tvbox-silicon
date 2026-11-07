@@ -13,6 +13,21 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
 class DeploymentTests(unittest.TestCase):
+    def test_synced_core_uses_legacy_regex_and_locale_interfaces(self):
+        proxy = (ROOT / "Sources/TVCore/CatPawOpen.swift").read_text(encoding="utf-8")
+        locale = (ROOT / "Sources/TVCore/MangaHost.swift").read_text(encoding="utf-8")
+        self.assertNotIn("Int(range.2)", proxy)
+        self.assertNotIn("Locale.current.region?", locale)
+
+    def test_manga_json_helper_inherits_callers_actor(self):
+        text = (ROOT / "Sources/TVCore/MangaRuntime.swift").read_text(encoding="utf-8")
+        signature = next(line for line in text.splitlines() if "private static func call(" in line)
+        self.assertIn("isolated (any Actor)? = #isolation", signature)
+
+    def test_ungrouped_audio_uses_legacy_avfoundation_import(self):
+        text = (ROOT / "Sources/TVCore/UngroupedAudio.swift").read_text(encoding="utf-8")
+        self.assertIn("@preconcurrency import AVFoundation", text)
+
     def test_pixel_transfer_worker_has_no_ios16_type_before_guard(self):
         text = (ROOT / "Sources/TVMedia/TVMedia.c").read_text(encoding="utf-8")
         worker = text.split("static void *map_worker(void *opaque) {", 1)[1].split("static Mapper *mapper_start", 1)[0]

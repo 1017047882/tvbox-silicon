@@ -1,4 +1,4 @@
-import AVFoundation
+@preconcurrency import AVFoundation
 
 /// The sound tracks of an MP4 or MOV that puts none of them in an alternate group, as a file with a Mandarin and a
 /// Cantonese dub often does (#428). AVFoundation then has nothing to choose between: the asset has no audible

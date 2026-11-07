@@ -91,7 +91,7 @@ public enum CatPawOpen {
         request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
         guard let (data, response) = try? await session.data(for: request), let http = response as? HTTPURLResponse, http.statusCode == 206,
               let range = http.value(forHTTPHeaderField: "Content-Range")?.tvFirstMatch(#"^bytes 0-(\d+)/(\d+)$"#),
-              let length = Int(range.2), length > 0, !data.isEmpty else { return nil }
+              let length = Int(range[2]), length > 0, !data.isEmpty else { return nil }
         return (data.prefix(16), length)
     }
 

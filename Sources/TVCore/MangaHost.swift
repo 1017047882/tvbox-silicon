@@ -65,7 +65,7 @@ final class MangaHost: ScriptHostExtension, @unchecked Sendable {
             return language.contains("Hant") || language.hasSuffix("TW") || language.hasSuffix("HK") ? "zh_TW" : "zh_CN"
         }
         let parts = language.split(separator: "-")
-        let region = Locale.current.region?.identifier ?? "US"
+        let region = Locale.current.regionCode ?? "US"
         return "\(parts.first ?? "en")_\(parts.count > 1 && parts.last!.count == 2 ? String(parts.last!) : region)"
     }
 
