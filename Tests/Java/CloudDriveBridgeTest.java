@@ -93,6 +93,10 @@ public class CloudDriveBridgeTest {
             check(bridge.rewriteAddress("https://example.com/proxy?do=quark").startsWith("https://example.com"), "Remote proxy rewritten");
             String array = bridge.playback("{\"url\":[\"HD\",\"http://127.0.0.1:9978/proxy?do=quark\"],\"header\":{\"Referer\":\"https://example.com\"}}");
             check(new JSONObject(array).getJSONArray("url").getString(1).contains("/media?"), "Quality array lost proxy routing");
+            // FongMi's proxy:// shorthand (aowu Bili spiders): Bili ids stay loopback /proxy? addresses for the app's
+            // Bilibili source, other actions go through the plugin's media route.
+            check(bridge.rewriteAddress("proxy://do=bili&aid=1&cid=2&type=mpd").equals("http://127.0.0.1:9978/proxy?do=bili&aid=1&cid=2&type=mpd"), "proxy:// Bili id not kept for the app");
+            check(bridge.rewriteAddress("proxy://do=Hxq&data=x").matches("http://127\\.0\\.0\\.1:\\d+/.+/media\\?do=Hxq&data=x"), "proxy:// not routed to the plugin proxy");
             check(bridge.extension("{\"Cloud-drive\":\"original\"}", new JSONObject()).contains("original"), "Empty credentials replaced existing config");
         }
         cloudFamilyCredentials();
@@ -289,11 +293,13 @@ public class CloudDriveBridgeTest {
                 return bytes == null ? super.getResourceAsStream(name) : new ByteArrayInputStream(bytes);
             }
         }
-        // {account class, singleton, web cookie, mobile ticket, other String, Pan's Quark field}: FTY renames
-        // all of them between releases (N0 until 2026-10-21, k with renamed fields since 2026-10-22).
-        // The last layout's response handler stores two Strings, so which one is the cookie is unclear.
-        for (List<String> layout : List.of(List.of("N0", "Zm", "F5", "W", "ee", "yq"), List.of("k", "OW", "W", "ee", "xa", "Gd"),
-                List.of("k", "OW", "W", "ee", "xa", "ambiguous"))) {
+        // {account class, singleton, web cookie, mobile ticket, other String, Pan's Quark field, the ticket
+        // setter's arguments after (account, String)}: FTY renames all of them between releases (N0 until
+        // 2026-10-21, k with renamed fields since 2026-10-22; since 2026-11 the setter, its QR poll, also
+        // takes a timestamp). The ambiguous layout's response handler stores two Strings, so which one is
+        // the cookie is unclear.
+        for (List<String> layout : List.of(List.of("N0", "Zm", "F5", "W", "ee", "yq", ""), List.of("k", "OW", "W", "ee", "xa", "Gd", ""),
+                List.of("k", "Nl", "W", "ee", "xa", "Gd", "J"), List.of("k", "OW", "W", "ee", "xa", "ambiguous", ""))) {
             String account = "com/github/catvod/spider/merge/" + layout.get(0), self = "L" + account + ";";
             boolean ambiguous = layout.get(5).equals("ambiguous");
             var loader = new Loader();
@@ -312,9 +318,11 @@ public class CloudDriveBridgeTest {
                     response.visitVarInsn(25, 0); response.visitVarInsn(25, 2); response.visitFieldInsn(181, account, field, "Ljava/lang/String;");
                 }
                 response.visitInsn(3); response.visitInsn(172); response.visitMaxs(0, 0); response.visitEnd();
-                // The static setter stores the mobile ticket; a sibling with the same shape stores nothing.
+                // The static setter stores the mobile ticket; a sibling of the old shape (since 2026-11 the QR
+                // dialog) stores nothing.
                 for (String setter : List.of("yq", "SN")) {
-                    var method = w.visitMethod(9, setter, "(" + self + "Ljava/lang/String;)V", null, null);
+                    String extra = setter.equals("yq") ? layout.get(6) : "";
+                    var method = w.visitMethod(9, setter, "(" + self + "Ljava/lang/String;" + extra + ")V", null, null);
                     method.visitCode();
                     if (setter.equals("yq")) { method.visitVarInsn(25, 0); method.visitVarInsn(25, 1); method.visitFieldInsn(181, account, layout.get(3), "Ljava/lang/String;"); }
                     method.visitInsn(177); method.visitMaxs(0, 0); method.visitEnd();
@@ -409,6 +417,27 @@ public class CloudDriveBridgeTest {
         CloudDriveBridge.seedWexCookies(withShared.put("quarkCookie", "__pus=newest"), other);
         check(otherPreferences.getString("Wex_quark_cookie", "").equals("__pus=newest"), "A new app sign-in did not replace the plugin's Quark sign-in");
         check(otherPreferences.getString("Wex_pan115_cookie", "").equals("UID=115"), "The shared 115 sign-in was lost");
+
+        // #408: the app's own 115 sign-in reaches Wex sources, and beats a plugin sign-in made without one.
+        var app115 = new android.content.Context(Files.createTempDirectory("wex-115-test").toFile(), CloudDriveBridgeTest.class.getClassLoader());
+        var app115Preferences = app115.getSharedPreferences(CloudDriveBridge.WEX_PREFERENCES, 0);
+        CloudDriveBridge.seedWexCookies(new JSONObject().put("pan115Cookie", "UID=app; CID=c; SEID=s; KID=k"), app115);
+        check(app115Preferences.getString("Wex_pan115_cookie", "").equals("UID=app; CID=c; SEID=s; KID=k"), "The app's 115 sign-in did not reach the Wex preferences");
+        CloudDriveBridge.seedWexCookies(new JSONObject(withShared.toString()).put("pan115Cookie", "UID=app; CID=c; SEID=s; KID=k"), app115);
+        check(app115Preferences.getString("Wex_pan115_cookie", "").equals("UID=app; CID=c; SEID=s; KID=k"), "A plugin 115 sign-in made without an app one beat the app's");
+        // The plugin refused the app's 115 cookie and signed in itself: that sign-in holds until the app signs in again.
+        var replaced115 = new JSONObject(shared.toString()).put("Wex_pan115_cookie", "UID=plugin")
+            .put("yingxia.replaced.Wex_pan115_cookie", sha256("UID=app; CID=c; SEID=s; KID=k"));
+        CloudDriveBridge.seedWexCookies(new JSONObject().put("pan115Cookie", "UID=app; CID=c; SEID=s; KID=k").put("wexPreferences", replaced115), app115);
+        check(app115Preferences.getString("Wex_pan115_cookie", "").equals("UID=plugin"), "The plugin's 115 sign-in did not replace the app sign-in it refused");
+        CloudDriveBridge.seedWexCookies(new JSONObject().put("pan115Cookie", "UID=again").put("wexPreferences", replaced115), app115);
+        check(app115Preferences.getString("Wex_pan115_cookie", "").equals("UID=again"), "A new app 115 sign-in did not replace the plugin's");
+        var bridge = new CloudDriveBridge(Files.createTempDirectory("wex-115-bridge"));
+        try {
+            bridge.appAccounts(new JSONObject().put("pan115Cookie", "UID=app"));
+            var noted = CloudDriveBridge.class.getDeclaredMethod("appAccountDigest", String.class); noted.setAccessible(true);
+            check(sha256("UID=app").equals(noted.invoke(bridge, "pan115Cookie")), "The app's 115 sign-in was not noted for plugin sign-ins to replace");
+        } finally { bridge.close(); }
     }
 
     static void wexJavaThreads() throws Exception {

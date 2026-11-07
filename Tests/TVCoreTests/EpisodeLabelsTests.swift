@@ -56,6 +56,62 @@ private func labels(_ names: [String], language: String = "zh-Hans") -> [String]
     #expect(labels(["电影《神探之痕迹》高能片段释出 深圳站路演", "电影《神探之痕迹》彩蛋片段重磅释出", "“留痕”版预告"]) == nil)
 }
 
+@Test func episodeLabelsReadOneHistoryName() {
+    // #521, #522: history keeps one name, where a picker keeps the whole line.
+    #expect(labels(["[1.18GB] 海市蜃楼.The.Mirage.2025.S01E05.2160p.WEB-DL.mkv"]) == ["第5集"])
+    #expect(labels(["[1.18GB] 海市蜃楼.The.Mirage.2025.S01E05.2160p.WEB-DL.mkv"], language: "en") == ["Episode 5"])
+    #expect(labels(["HSSL.4K.01.mkv"]) == ["第1集"])
+    #expect(labels(["01.mp4"]) == ["第1集"])
+    #expect(labels(["某剧 第十二集 1080p.mp4"]) == ["第12集"])
+    #expect(labels(["01-04.2160p.HD国语中字无水印.mp4"]) == ["第1-4集"])
+    #expect(labels(["第1集"]) == nil)
+    // Years, dates, codecs and versions are not episodes.
+    #expect(labels(["Movie.2025.2160p.WEB-DL.mkv"]) == nil)
+    #expect(labels(["Variety.20251220.1080p.mp4"]) == nil)
+    #expect(labels(["Show.2026.01.02.mkv"]) == nil)
+    #expect(labels(["Show.AAC2.0.mkv"]) == nil)
+    #expect(labels(["Show.HEVC.1080p.mkv"]) == nil)
+}
+
+@Test func episodeLabelsKeepALoneNamesLaterSeason() {
+    // History and the Watch Now header show one name: S01E05 and S02E05 must not both read 第5集.
+    #expect(EpisodeLabels.historyLabel("[1.18GB] 海市蜃楼.The.Mirage.2025.S01E05.2160p.WEB-DL.mkv", language: "zh-Hans") == "第5集")
+    #expect(EpisodeLabels.historyLabel("[1.18GB] 海市蜃楼.The.Mirage.2025.S02E05.2160p.WEB-DL.mkv", language: "zh-Hans") == "S2 第5集")
+    #expect(EpisodeLabels.historyLabel("Show.S02E05.mkv", language: "en") == "S2 Episode 5")
+    #expect(EpisodeLabels.historyLabel("HSSL.4K.01.mkv", language: "zh-Hans") == "第1集")
+    // Names it can't read, and names already short, keep their text.
+    #expect(EpisodeLabels.historyLabel("Movie.2025.2160p.WEB-DL.mkv", language: "zh-Hans") == "Movie.2025.2160p.WEB-DL.mkv")
+    #expect(EpisodeLabels.historyLabel("第2季 第1集", language: "zh-Hans") == "第2季 第1集")
+    #expect(EpisodeLabels.historyLabel("正片", language: "zh-Hans") == "正片")
+}
+
+@Test func episodeLabelsSeeAFileNameThroughTheShareTagAfterIt() {
+    // #595's screenshot and #599's history: a drive share puts its own tag after the extension, and the line kept
+    // its raw names ("E01.mp4【太阳鱼】"), so neither the label nor the file's details showed.
+    #expect(labels(["E01.mp4【太阳鱼】", "E02.mp4【太阳鱼】", "E03.mp4【太阳鱼】"]) == ["第1集", "第2集", "第3集"])
+    #expect(labels(["E01.mp4【太阳鱼】", "花絮.mp4【太阳鱼】", "E02.mp4【太阳鱼】"]) == ["第1集", "花絮", "第2集"])
+    #expect(EpisodeLabels.historyLabel("[1.9GB]01.mp4【D-达-D-牧-C】", language: "zh-Hans") == "第1集")
+    #expect(EpisodeLabels.historyLabel("[1.9GB]01.mp4【D-达-D-牧-C】", showsDetails: true, language: "zh-Hans") == "第1集 · 1.9GB")
+    #expect(EpisodeLabels.historyLabel("[5.4GB]Where.the.Mask.Ends.2026.S01E01.2160p.HQ.WEB-DL.60fps.H.265.AAC.mp4【J 嫁！金＠钗-】",
+                                       showsDetails: true, language: "zh-Hans") == "第1集 · 5.4GB · 2160p")
+    // A tag inside a short name that isn't a file keeps the line's own names.
+    #expect(labels(["第1集【超清】", "第2集【超清】"]) == nil)
+}
+
+@Test func episodeLabelsAddFileDetailsWhenTheViewerAsks() {
+    // #595: the size tag and resolution the short label would otherwise hide.
+    let name = "[5.4GB]Where.the.Mask.Ends.2026.S01E01.2160p.HQ.WEB-DL.60fps.H.265.AAC.mp4"
+    #expect(EpisodeLabels.historyLabel(name, showsDetails: true, language: "zh-Hans") == "第1集 · 5.4GB · 2160p")
+    #expect(EpisodeLabels.historyLabel(name, language: "zh-Hans") == "第1集")
+    #expect(EpisodeLabels.historyLabel("[4.9GB]LXRG.S01E01.mkv", showsDetails: true, language: "zh-Hans") == "第1集 · 4.9GB")
+    #expect(EpisodeLabels.historyLabel("Show.4K.01.mkv", showsDetails: true, language: "zh-Hans") == "第1集 · 4K")
+    // A name that already reads as itself keeps its text, details included.
+    #expect(EpisodeLabels.historyLabel("Movie.2025.2160p.WEB-DL.mkv", showsDetails: true, language: "zh-Hans") == "Movie.2025.2160p.WEB-DL.mkv")
+    #expect(EpisodeLabels.fileDetails("[1.18GB] 海市蜃楼.The.Mirage.2025.S01E05.2160p.WEB-DL.mkv") == "1.18GB · 2160p")
+    #expect(EpisodeLabels.fileDetails("[1.18GB] Show.S01E01.mkv") == "1.18GB")
+    #expect(EpisodeLabels.fileDetails("Show.S01E01.mkv") == nil)
+}
+
 @Test func episodeLabelsGoByLineAndEpisodeID() {
     let episodes = [Episode(id: "a1", name: "Show.4K.01.mkv", address: "1", flag: "A"),
                     Episode(id: "b1", name: "第1集", address: "2", flag: "B"),

@@ -3,6 +3,9 @@ import Perception
 import AVFoundation
 import SwiftUI
 import TVCore
+#if os(macOS)
+import WebKit
+#endif
 
 /// Debug-only launch hooks for screenshot QA on simulators without input:
 /// `simctl launch <device> <bundle> -qaSection live -qaPage channels:0`.
@@ -15,6 +18,7 @@ enum QALaunch {
         case "discover": .discover
         case "live": .live
         case "music": .music
+        case "manga": .manga
         case "search": .search
         case "sites": .sites
         case "favorites": .favorites
@@ -30,6 +34,14 @@ enum QALaunch {
     static var page: String? { UserDefaults.standard.string(forKey: "qaPage") }
     /// `-qaScroll live` scrolls Watch Now to that section once recommendations have loaded.
     static var scrollTarget: String? { UserDefaults.standard.string(forKey: "qaScroll") }
+
+    #if os(macOS)
+    @MainActor private static func webView(in view: NSView) -> WKWebView? {
+        if let web = view as? WKWebView { return web }
+        for child in view.subviews { if let web = webView(in: child) { return web } }
+        return nil
+    }
+    #endif
 
     @MainActor static func start(_ store: Store) async {
         #if os(iOS)
@@ -54,6 +66,14 @@ enum QALaunch {
                 let size = (UserDefaults.standard.string(forKey: "qaWindowSize") ?? "").split(separator: "x").compactMap { Double($0) }
                 try? await tvSleep(for: .seconds(1))
                 if size.count == 2 { NSApp.windows.first { $0.isVisible }?.setContentSize(NSSize(width: size[0], height: size[1])) }
+                // `-qaResizeSheet 1300x850`: resizes the window showing a web page (a sign-in sheet) as a person would, while it loads.
+                let resize = (UserDefaults.standard.string(forKey: "qaResizeSheet") ?? "").split(separator: "x").compactMap { Double($0) }
+                if resize.count == 2 {
+                    try? await tvSleep(for: .seconds(6))
+                    for window in NSApp.windows where window.isVisible {
+                        if let view = window.contentView?.superview, Self.webView(in: view) != nil { window.setContentSize(NSSize(width: resize[0], height: resize[1])) }
+                    }
+                }
                 let delay = UserDefaults.standard.object(forKey: "qaSnapshotDelay") == nil ? 20 : UserDefaults.standard.double(forKey: "qaSnapshotDelay")
                 try? await tvSleep(for: .seconds(delay))
                 // The main window into the path; each other visible window (a sheet, a popover) beside it as <path>-1.png, -2…
@@ -62,6 +82,16 @@ enum QALaunch {
                     view.cacheDisplay(in: view.bounds, to: rep)
                     let file = index == 0 ? path : (path as NSString).deletingPathExtension + "-\(index).png"
                     try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: file))
+                    // A web view draws in another process, so cacheDisplay leaves it blank: its own snapshot goes beside
+                    // as <file>-web.png, with the window's size limits and the page zoom in <file>.txt.
+                    if let web = Self.webView(in: view) {
+                        let base = (file as NSString).deletingPathExtension
+                        let info = "frame=\(window.frame) resizable=\(window.styleMask.contains(.resizable)) min=\(window.minSize) contentMin=\(window.contentMinSize) web=\(web.bounds.size) pageZoom=\(web.pageZoom)\n"
+                        try? info.write(toFile: base + ".txt", atomically: true, encoding: .utf8)
+                        if let image = try? await web.takeSnapshot(configuration: nil), let tiff = image.tiffRepresentation {
+                            try? NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: base + "-web.png"))
+                        }
+                    }
                 }
             }
         }
@@ -115,9 +145,28 @@ enum QALaunch {
                 store.playing = Channel(name: "Live \(room)", group: platform.name, url: url)
             }
         }
-        // `-qaPlayURL <address>` plays a media link as it is (an MKV on a local server, say).
+        // `-qaSubtitleSource <address>` adds that subtitle-source script (#576 M2) before anything plays, and
+        // `-qaSubtitleSourceKeys '{apiKey=value;}'` gives it its keys (a property-list dictionary: the argument domain
+        // drops a JSON object it can't read).
+        if let address = UserDefaults.standard.string(forKey: "qaSubtitleSource"), let url = URL(string: address) {
+            do {
+                let item = try await SubtitleSourceLibrary.shared.add(address: url)
+                let keys = UserDefaults.standard.dictionary(forKey: "qaSubtitleSourceKeys") as? [String: String]
+                if let keys { await SubtitleSourceLibrary.shared.setValues(keys, for: item.id) }
+                let stored = await SubtitleSourceLibrary.shared.values(for: item.id).count
+                Diagnostics.shared.record(.info, "qa", "subtitle source \(item.id) keys given=\(keys?.count ?? -1) stored=\(stored)")
+            } catch {
+                Diagnostics.shared.record(.warning, "qa", "subtitle source not added: \(error.localizedDescription)")
+            }
+        }
+        // `-qaPlayURL <address>` plays a media link as it is (an MKV on a local server, say); with `-qaResume <seconds>`,
+        // from there, as a saved position resumes. `-qaSubtitleURLs <a,b,...>` are its source's subtitle files, as a
+        // cloud-drive plugin's `subs` would be (#576).
         if let address = UserDefaults.standard.string(forKey: "qaPlayURL"), let url = URL(string: address) {
-            store.playing = Channel(name: url.lastPathComponent, group: "QA", url: url)
+            let resume = UserDefaults.standard.double(forKey: "qaResume")
+            let subtitles = (UserDefaults.standard.string(forKey: "qaSubtitleURLs") ?? "").split(separator: ",").compactMap { URL(string: String($0)) }
+                .map { ExternalSubtitle(name: $0.lastPathComponent, url: $0) }
+            store.playing = Channel(name: url.lastPathComponent, group: "QA", url: url, resumePosition: resume > 0 ? resume : nil, subtitles: subtitles)
         }
         // `-qaPlay <site key>:<video id>[:<episode index>]` opens that source's video in the player.
         if let target = UserDefaults.standard.string(forKey: "qaPlay"), let config = store.subscription {
@@ -224,6 +273,8 @@ enum QALaunch {
         // Pages that need no subscription, so an App Store build (`-qaAppStore 1`) can show them before one is added.
         if section == self.section, store.subscription == nil, page == "cloud-accounts" {
             CloudDriveView()
+        } else if section == self.section, page == "subtitle-style" {
+            SubtitleStyleView()
         } else if section == self.section, let page, let config = store.subscription {
             let parts = page.split(separator: ":", maxSplits: 2).map(String.init)
             switch parts.first {
@@ -239,6 +290,12 @@ enum QALaunch {
                                             "vod_remarks": .string(UserDefaults.standard.string(forKey: "qaVideoRemarks") ?? "更新至 36 集")],
                                      origin: config.origin) {
                     VideoDetailView(video: video, client: CatalogClient(site: site, origin: config.origin, jarURL: config.spiderURL))
+                }
+            // `-qaPage setting:<source key>:<action>` runs one of a plugin's listed settings (`Video.action`).
+            case "setting":
+                if parts.count == 3, let site = config.sites.first(where: { $0.key == parts[1] }),
+                   let video = Video(json: ["vod_id": .string(parts[2]), "vod_name": .string(UserDefaults.standard.string(forKey: "qaVideoName") ?? parts[2]), "action": .string(parts[2])], origin: config.origin) {
+                    PluginActionPage(video: video, client: CatalogClient(site: site, origin: config.origin, jarURL: config.spiderURL), action: parts[2])
                 }
             case "open-detail":
                 if parts.count == 3, let site = config.sites.first(where: { $0.key == parts[1] }),
@@ -289,9 +346,19 @@ enum QALaunch {
                     LivePlatformView(platform: platform, initialQuery: UserDefaults.standard.string(forKey: "qaQuery") ?? "")
                 }
             case "danmaku-list": QADanmakuList()
+            #if !os(tvOS)
+            case "danmaku-settings": QADanmakuSettings()
+            #endif
             // `-qaPage cloud-login:<quark|uc|baidu|aliyun>`; `cloud-accounts` shows the accounts page.
             case "cloud-login": CloudQRLoginView(drive: parts.dropFirst().first.flatMap(CloudDriveQRLogin.Drive.init(rawValue:)) ?? .quark) {}
             case "cloud-accounts": CloudDriveView()
+            #if os(macOS)
+            // `-qaPage drive-sign-in:<quark|uc>`: the Mac's sign-in sheet on the drive's own page.
+            case "drive-sign-in":
+                if let provider = parts.dropFirst().first.flatMap(CloudProvider.init(rawValue:)), provider.signsInOnWeb {
+                    QASheet { CloudLoginView(provider: provider) { _, _ in } }
+                }
+            #endif
             #if os(iOS)
             // `-qaPage web-sign-in:<bilibili|quark|uc|baidu|aliyun>`: the service's sign-in sheet; with
             // `-qaShowCode 1` it opens on the code for another phone.
@@ -309,17 +376,16 @@ enum QALaunch {
             // `-qaPage plugin-sign-in:<baidu|aliyun>`: a source's sign-in prompt with a made-up code.
             case "plugin-sign-in":
                 if let prompt = PluginSignIn.Prompt.sample(drive: parts.dropFirst().first ?? "baidu") { QASheet { PluginSignInView(prompt: prompt) } }
-            #if !os(tvOS)
-            // `-qaPage catpaw-sign-in -qaCatPawBundle <index.js address> -qaCatPawSource /spider/<key>/3`: UC's TV token
-            // sheet against that bundle (on iPhone and iPad, a simulator with NodeMobile).
+            // `-qaPage catpaw-sign-in -qaCatPawBundle <index.js address> -qaCatPawSource /spider/<key>/3 [-qaCatPawProvider quark]`:
+            // the bundle's own sign-in sheet (UC's TV token unless a provider is given), on a simulator with NodeMobile.
             case "catpaw-sign-in":
                 let bundle = UserDefaults.standard.string(forKey: "qaCatPawBundle") ?? ""
                 let source = UserDefaults.standard.string(forKey: "qaCatPawSource") ?? "/spider/wogg/3"
-                let entry = try? JSONSerialization.data(withJSONObject: ["key": "qa_catpaw", "name": "CatPawOpen", "type": 3, "api": bundle, "catPawOpen": source])
-                if let origin = URL(string: bundle), let entry, let site = try? JSONDecoder().decode(Site.self, from: entry) {
-                    QASheet { CatPawSignInView(client: CatalogClient(site: site, origin: origin), provider: "ucToken") {} }
+                let entry = try? JSONSerialization.data(withJSONObject: ["sites": [["key": "qa_catpaw", "name": "CatPawOpen", "type": 3, "api": bundle, "catPawOpen": source]]])
+                if let origin = URL(string: bundle), let entry, let site = (try? Subscription.parse(entry, origin: origin))?.sites.first {
+                    let provider = UserDefaults.standard.string(forKey: "qaCatPawProvider") ?? "ucToken"
+                    QASheet { CatPawSignInView(client: CatalogClient(site: site, origin: origin), provider: provider) {} }
                 }
-            #endif
             #endif
             default: EmptyView()
             }
@@ -328,7 +394,7 @@ enum QALaunch {
 
     static func overrides(_ section: AppSection) -> Bool {
         guard section == self.section, let page else { return false }
-        return ["site", "detail", "open-detail", "channels", "runtime", "logs", "feedback", "telegram", "cache", "playback", "privacy", "licenses", "cloud-login", "cloud-accounts", "bilibili-account", "douyin-account", "douyin-login", "douyin-handoff", "bilibili-live", "live", "danmaku-list", "web-sign-in", "plugin-sign-in", "catpaw-sign-in", "folder", "alist-add"].contains(page.split(separator: ":").first.map(String.init) ?? "")
+        return ["site", "setting", "detail", "open-detail", "channels", "runtime", "logs", "feedback", "telegram", "cache", "playback", "privacy", "licenses", "cloud-login", "cloud-accounts", "subtitle-style", "drive-sign-in", "bilibili-account", "douyin-account", "douyin-login", "douyin-handoff", "bilibili-live", "live", "danmaku-list", "danmaku-settings", "web-sign-in", "plugin-sign-in", "catpaw-sign-in", "folder", "alist-add"].contains(page.split(separator: ":").first.map(String.init) ?? "")
     }
 }
 
@@ -499,6 +565,28 @@ enum QASweep {
 }
 
 private extension Int { var nonZero: Int? { self == 0 ? nil : self } }
+
+#if !os(tvOS)
+/// `-qaPage danmaku-settings`: the player's Danmaku sheet over a page's player, which makes only its own views dark.
+private struct QADanmakuSettings: View {
+    @State private var model = CatalogDanmakuModel()
+    var body: some View {
+        WithPerceptionTracking {
+
+        Color.black.ignoresSafeArea()
+            .sheet(isPresented: .constant(true)) {
+                WithPerceptionTracking {
+
+                CatalogDanmakuSettingsView(model: model, channelName: "仙逆 · 第01集").playerSheet()
+
+                }
+            }
+            .environment(\.colorScheme, .dark)
+
+        }
+    }
+}
+#endif
 
 /// `-qaPage danmaku-list`: the player's 弹幕 tab with sample comments, to check the focused row.
 private struct QADanmakuList: View {

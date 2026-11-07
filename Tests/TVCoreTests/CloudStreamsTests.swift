@@ -91,6 +91,32 @@ struct CloudStreamsTests {
         await stream.clear()
     }
 
+    /// Issue #433: on the iPhone AVPlayer reads a video on two overlapping requests, the newer starting a few chunks
+    /// behind where the older got to, while another request reads its sound further back. The newer one counted as a
+    /// third reader, a seek, which cancelled the chunks the others were reading ahead: a bundle's proxy then fetched them
+    /// again and again, and a 4K episode stalled once the speed fell below its bitrate.
+    @Test func overlappingRequestsDoNotFetchChunksAgain() async throws {
+        let chunk = CloudByteStream.chunkSize
+        let size = chunk * 48
+        var bytes = Data(count: size)
+        bytes.withUnsafeMutableBytes { raw in for i in 0..<size { raw[i] = UInt8(truncatingIfNeeded: i &* 11 &+ i >> 13) } }
+        let name = "overlap-\(UUID().uuidString).mp4"
+        // Answered a little later, so the chunks read ahead are still on their way when the next read comes.
+        let url = RangeServer.add(name, bytes, connections: 64)
+        let stream = CloudByteStream(source: .init(url: url, headers: [:], length: size, name: name), session: RangeServer.session, parallel: 2) { nil }
+        for step in 0..<16 {
+            // The sound, the video, and the video's newer request three chunks behind it.
+            for index in [step, 14 + step, 11 + step] {
+                let at = index * chunk + 5
+                #expect(try await stream.read(at: at, count: 16) == bytes[at..<at + 16])
+            }
+        }
+        // None was dropped on its way, and chunks 0 to 29 plus at most 8 read ahead were each fetched once.
+        #expect(RangeServer.cancels(name) == 0)
+        #expect(RangeServer.requests(name) <= 38)
+        await stream.clear()
+    }
+
     /// AVPlayer opens and plays a real movie through the resource loader. Set TVBOX_CLOUD_MEDIA to
     /// an MP4 (for example one whose moov comes after a large mdat, as on cloud drives).
     @Test(.enabled(if: ProcessInfo.processInfo.environment["TVBOX_CLOUD_MEDIA"] != nil))
@@ -212,6 +238,55 @@ struct CloudStreamsTests {
         #expect(calls.value == 1)
         await stream.clear()
     }
+
+    /// Issue #485: iOS took back the suspended app's sockets, so a bundle's proxy refuses connections on its old port.
+    /// The stream asks where the proxy listens now and reads on from there, instead of failing every read.
+    @Test func aRefusedLoopbackProxyMovesToItsNewPort() async throws {
+        let size = CloudByteStream.chunkSize + 10
+        let (url, bytes) = try await served("moved.mp4", size: size)
+        // Nothing listens on the discard port here, so connecting is refused (NSURLErrorCannotConnectToHost).
+        let stale = URL(string: "http://127.0.0.1:9/spider/wogg/3/proxy/quark/moved.mp4")!
+        let calls = CloudCounter()
+        let stream = CloudByteStream(source: .init(url: stale, headers: [:], length: size, name: "moved.mp4"), session: RangeServer.session, parallel: 1) {
+            calls.add(1)
+            return .init(url: url, headers: [:], length: size, name: "moved.mp4")
+        }
+        #expect(try await stream.read(at: size - 4, count: 4) == bytes[(size - 4)...])
+        #expect(calls.value == 1)
+        #expect(RangeServer.requests("moved.mp4") == 1)
+        await stream.clear()
+    }
+
+    /// The 9280.kstore.vip bundle's drive sites put the drive link and its headers in their proxy addresses (#530).
+    @Test func aBundleProxyRevealsItsDriveLink() throws {
+        let fields = #"{"url":"https://drive.test/file.mp4?sign=a%2Bb~","headers":{"Cookie":"__puus=1","User-Agent":"quark","X-Count":2},"threads":16,"chunkKB":256,"createdAt":1}"#
+        let pst = Data(fields.utf8).base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
+        let proxy = try #require(URL(string: "http://127.0.0.1:61981/spider/huban/3/proxy/quark/c4f07934-2ea1?pst=\(pst)"))
+        let link = try #require(CatPawOpen.revealedLink(proxy))
+        #expect(link.url.absoluteString == "https://drive.test/file.mp4?sign=a%2Bb~")
+        #expect(link.headers == ["Cookie": "__puus=1", "User-Agent": "quark", "X-Count": "2"])
+        #expect(CatPawOpen.revealedLink(try #require(URL(string: "http://127.0.0.1:61981/spider/huban/3/proxy/quark/c4f07934-2ea1"))) == nil)
+        #expect(CatPawOpen.revealedLink(try #require(URL(string: "http://127.0.0.1:61981/spider/huban/3/proxy/quark/1?pst=e30"))) == nil)
+        #expect(CatPawOpen.revealedLink(try #require(URL(string: "https://example.com/spider/huban/3/proxy/quark/1?pst=\(pst)"))) == nil)
+    }
+
+    /// The app reads a drive file itself only when its link serves what the bundle's proxy does.
+    @Test func aDriveLinkStandsInForItsProxyOnlyWhenItServesTheSameFile() async throws {
+        let size = 5000
+        let (link, bytes) = try await served("direct-link.mp4", size: size)
+        let proxied = CloudStreams.Source(url: RangeServer.add("direct-proxy.mp4", bytes), headers: [:], length: size, name: "c4f07934")
+        let direct = try #require(await CatPawOpen.sameFile(proxied, at: link, headers: ["Cookie": "a"], session: RangeServer.session))
+        #expect(direct.url == link && direct.length == size && direct.headers == ["Cookie": "a"] && direct.name == "c4f07934")
+        // A link to a file under a disguise the proxy strips is longer; one the proxy changes has other bytes.
+        let disguised = RangeServer.add("direct-disguised.mp4", Data(repeating: 0x89, count: 100) + bytes)
+        #expect(await CatPawOpen.sameFile(proxied, at: disguised, headers: [:], session: RangeServer.session) == nil)
+        var changed = bytes
+        changed[3] ^= 0xff
+        #expect(await CatPawOpen.sameFile(proxied, at: RangeServer.add("direct-changed.mp4", changed), headers: [:], session: RangeServer.session) == nil)
+        // An expired link.
+        #expect(await CatPawOpen.sameFile(proxied, at: try #require(URL(string: "https://cloud.test/direct-expired.mp4")), headers: [:], session: RangeServer.session) == nil)
+    }
 }
 
 /// Serves registered bytes for https://cloud.test/<name> with HTTP Range, in memory, so these
@@ -227,6 +302,9 @@ final class RangeServer: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) private static var limits: [String: Int] = [:]
     nonisolated(unsafe) private static var active: [String: Int] = [:]
     nonisolated(unsafe) private static var refused: [String: Int] = [:]
+    nonisolated(unsafe) private static var cancelled: [String: Int] = [:]
+    /// Whether this request was answered, so a stop before that is a cancel.
+    private var answered = false
     static let configuration: URLSessionConfiguration = {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [RangeServer.self]
@@ -247,6 +325,8 @@ final class RangeServer: URLProtocol, @unchecked Sendable {
     static func requests(_ name: String) -> Int { lock.withLock { counts[name, default: 0] } }
     /// How many requests a file with a connection limit refused.
     static func refusals(_ name: String) -> Int { lock.withLock { refused[name, default: 0] } }
+    /// How many requests to a file with a connection limit were cancelled before their answer.
+    static func cancels(_ name: String) -> Int { lock.withLock { cancelled[name, default: 0] } }
     override class func canInit(with request: URLRequest) -> Bool { request.url?.host() == "cloud.test" }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
@@ -292,6 +372,7 @@ final class RangeServer: URLProtocol, @unchecked Sendable {
         // Held open for a while, so the stream's other connections overlap it.
         let body = data.subdata(in: range)
         DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(40)) { [self, status, headers] in
+            RangeServer.lock.withLock { self.answered = true }
             if let client = self.client {
                 client.urlProtocol(self, didReceive: HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers)!, cacheStoragePolicy: .notAllowed)
                 client.urlProtocol(self, didLoad: body)
@@ -300,5 +381,8 @@ final class RangeServer: URLProtocol, @unchecked Sendable {
             RangeServer.lock.withLock { RangeServer.active[name, default: 1] -= 1 }
         }
     }
-    override func stopLoading() {}
+    override func stopLoading() {
+        guard let name = request.url?.lastPathComponent else { return }
+        Self.lock.withLock { if Self.limits[name] != nil, !answered { Self.cancelled[name, default: 0] += 1 } }
+    }
 }

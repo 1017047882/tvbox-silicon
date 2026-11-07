@@ -9,6 +9,9 @@ public final class PluginSession {
     private final Spider spider;
     private final Throwable initializationWarning;
     private String detailID;
+    /** The vod_id the plugin's detail answer named, which the app sends back as detailID; 酷狗 answers
+     *  with another id than it was asked for and crashes when asked for details with its own. */
+    private String detailVideoID;
     private final CloudDriveBridge bridge;
 
     public PluginSession(Spider spider) { this(spider, null); }
@@ -38,7 +41,9 @@ public final class PluginSession {
             long deadline = System.currentTimeMillis() + seconds * 1000;
             stopAt.accumulateAndGet(deadline, (current, next) -> current == 0 ? next : Math.min(current, next));
         }
-        String kind = params.has("play") ? "play flag=" + params.optString("flag") : params.has("ids") ? "detail"
+        String kind = params.has("spiderAction") ? "action " + params.optString("spiderAction")
+            : params.has("spiderUI") ? "window"
+            : params.has("play") ? "play flag=" + params.optString("flag") : params.has("ids") ? "detail"
             : params.has("wd") ? "search" : params.has("t") ? "category" : "home";
         System.err.println("PLUGIN_REQUEST " + java.time.LocalTime.now().withNano(0) + " " + kind + " deadline=" + seconds + "s");
         HttpDiagnostics.beginRequest(params.has("play"), stopAt, params.optString("_folder", null));
@@ -48,12 +53,16 @@ public final class PluginSession {
     }
 
     private String performRequest(JSONObject params) throws Exception {
+        if (params.has("spiderAction")) return action(params.getString("spiderAction"));
+        // The app sends string parameters, so the event arrives as JSON text.
+        if (params.has("spiderUI")) return window(params.get("spiderUI") instanceof JSONObject event ? event : new JSONObject(params.getString("spiderUI")));
         if (params.has("play")) {
             String required = params.optString("detailID", "");
-            if (!required.isEmpty() && !required.equals(detailID)) {
+            if (!required.isEmpty() && !required.equals(detailID) && !required.equals(detailVideoID)) {
                 String detail = content(() -> spider.detailContent(List.of(required)), false);
                 if (detail == null || detail.isBlank()) throw new IllegalStateException("The source returned no video details before playback");
                 detailID = required;
+                detailVideoID = videoID(detail);
             }
             Operation play = () -> spider.playerContent(params.optString("flag"), params.getString("play"), List.of());
             String result = content(play, false);
@@ -66,16 +75,58 @@ public final class PluginSession {
             String id = params.getString("ids");
             String result = content(() -> spider.detailContent(List.of(id)), false);
             detailID = id;
+            detailVideoID = videoID(result);
             return result;
         }
         if (params.has("wd")) return content(() -> spider.searchContent(params.getString("wd"), false, params.optString("pg", "1")), true);
         if (params.has("t")) return content(() -> spider.categoryContent(params.getString("t"), params.optString("pg", "1"), true, extend(params)), true);
         JSONObject home = new JSONObject(content(() -> spider.homeContent(true), true, false));
-        JSONObject recommendations = new JSONObject(content(() -> spider.homeVideoContent(), true, false));
+        // Recommendations are optional, and TVBox ignores anything that isn't an object: the aowu
+        // Bili spiders answer "[]" here, which used to fail their whole home page.
+        String recommended = content(() -> spider.homeVideoContent(), true, false);
+        JSONObject recommendations = recommended != null && recommended.trim().startsWith("{") ? new JSONObject(recommended) : new JSONObject();
         var videos = recommendations.optJSONArray("list");
         if (videos != null && videos.length() > 0) home.put("list", videos);
         checkInitialization(home);
         return home.toString();
+    }
+
+    /**
+     * Runs one of the plugin's settings (a list item with "action", as TVBox calls Spider.action). Most
+     * open the plugin's own window on the Activity; its state comes back as "ui" (PluginWindows) with the
+     * plugin's toasts as "notices", and the viewer's input goes back as spiderUI requests. When the setting
+     * shows nothing because the plugin's thread failed, "error" says why.
+     */
+    private String action(String name) throws Exception {
+        PluginErrors.install();
+        long started = System.currentTimeMillis();
+        PluginWindows.closeAll();
+        PluginWindows.settingOpen(true);
+        PluginNotices.take(); // toasts from browsing are not this setting's
+        PluginWindows.activity();
+        String result = content(() -> spider.action(name), true, false);
+        // The window often follows from the plugin's own thread (reading its settings, a request).
+        PluginWindows.await(2_500);
+        JSONObject answer;
+        try { answer = new JSONObject(result); } catch (org.json.JSONException notAnObject) { answer = new JSONObject().put("msg", result); }
+        org.json.JSONArray notices = new org.json.JSONArray(PluginNotices.take());
+        JSONObject ui = PluginWindows.state();
+        boolean silent = answer.optString("msg", "").isBlank() && notices.length() == 0 && ui.getJSONArray("windows").length() == 0 && ui.getJSONArray("links").length() == 0;
+        String error = silent ? PluginErrors.since(started) : null;
+        if (error != null) answer.put("error", error);
+        return answer.put("notices", notices).put("ui", ui).toString();
+    }
+
+    /** The viewer's input to the plugin's window ({"kind": "poll"} only reads it again), then its new state. */
+    private String window(JSONObject event) throws Exception {
+        if ("closeAll".equals(event.optString("kind"))) { PluginWindows.closeAll(); PluginWindows.settingOpen(false); }
+        else PluginWindows.handle(event);
+        if (!"poll".equals(event.optString("kind"))) {
+            // What the tap started on the plugin's threads gets a moment to show (a toast, the next window).
+            PluginWindows.settle();
+            Thread.sleep(300);
+        }
+        return new JSONObject().put("notices", new org.json.JSONArray(PluginNotices.take())).put("ui", PluginWindows.state()).toString();
     }
 
     /** The category's filter choices (`filters`, JSON text) as the spider's `extend` map. */
@@ -146,5 +197,12 @@ public final class PluginSession {
     @FunctionalInterface private interface Operation { String run() throws Exception; }
     public static final class EmptyContentException extends Exception {
         public EmptyContentException() { super("The plugin returned no content"); }
+    }
+
+    private static String videoID(String detail) {
+        try {
+            JSONObject first = new JSONObject(detail).getJSONArray("list").getJSONObject(0);
+            return first.has("vod_id") ? first.get("vod_id").toString() : null;
+        } catch (Exception notADetail) { return null; }
     }
 }

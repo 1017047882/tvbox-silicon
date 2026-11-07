@@ -399,7 +399,8 @@ public struct MusicExtensionLX: MusicExtensionLXBridge {
         for source in sources {
             try Task.checkCancellation()
             let declared = source.sources[key] ?? []
-            let quality = data["type"]?.string.flatMap { declared.contains($0) ? $0 : nil } ?? LXSourceKey.quality(from: declared)
+            let quality = data["type"]?.string.flatMap { declared.contains($0) ? $0 : nil }
+                ?? LXSourceKey.quality(from: declared, for: .lossless) ?? "320k"
             do {
                 return .string(try await runtime.musicURL(source, library: library, key: key, quality: quality, musicInfo: musicInfo).absoluteString)
             } catch { failure = error }
@@ -541,7 +542,8 @@ public struct MusicExtensionProvider: MusicStreamProvider {
         self.library = library; self.runtime = runtime
     }
 
-    public func resolve(_ songID: String, platform: MusicPlatform) async throws -> ResolvedMusicStream {
+    public func resolve(_ songID: String, platform: MusicPlatform, quality: MusicAudioQuality) async throws -> ResolvedMusicStream {
+        // The extension decides what its getSongInfo answer holds; probing tells what it really is.
         guard let reference = MusicExtensionReference.decode(songID), let item = library.item(reference.extensionID), item.enabled else {
             throw MusicProviderError.noResource
         }

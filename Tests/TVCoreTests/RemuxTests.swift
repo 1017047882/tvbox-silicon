@@ -107,7 +107,7 @@ import VideoToolbox
             Stream(index: 0, kind: .video, codec: "h264", width: 1920, height: 1080, frameRate: 23.976),
             Stream(index: 1, kind: .audio, codec: "aac", profile: 1, channels: 2, language: "chi", isDefault: true),
             Stream(index: 2, kind: .audio, codec: "eac3", channels: 6, language: "eng", title: "English"),
-            Stream(index: 3, kind: .audio, codec: "eac3", channels: 6, language: "eng", title: "English"),
+            Stream(index: 3, kind: .audio, codec: "eac3", profile: 30, channels: 6, language: "eng", title: "English"),
             Stream(index: 4, kind: .subtitle, codec: "ass", language: "chi", title: "简体", isForced: true, isText: true),
         ]
         let plan = try #require(RemuxPlan.make(streams: streams, keyframes: [0, 5_000_000, 10_000_000], start: 0, duration: 12_000_000, size: 9_000_000, device: .init()))
@@ -116,6 +116,10 @@ import VideoToolbox
         #expect(master.contains(#"LANGUAGE="zh",DEFAULT=YES,AUTOSELECT=YES,CHANNELS="2",URI="1.m3u8""#))
         #expect(master.contains(#"NAME="English",LANGUAGE="en",DEFAULT=NO,AUTOSELECT=YES,CHANNELS="6",URI="2.m3u8""#))
         #expect(master.contains(#"NAME="English (2)""#))
+        // Dolby Atmos (E-AC-3 JOC) is "16/JOC", as Apple's HLS authoring spec has it.
+        #expect(master.contains(#"DEFAULT=NO,AUTOSELECT=YES,CHANNELS="16/JOC",URI="3.m3u8""#))
+        #expect(RemuxPlan.displayName(.init(stream: Stream(index: 3, kind: .audio, codec: "eac3", profile: 30, channels: 6))) == "E-AC-3 5.1 Atmos")
+        #expect(RemuxPlan.displayName(.init(stream: Stream(index: 2, kind: .audio, codec: "eac3", channels: 6))) == "E-AC-3 5.1")
         #expect(master.contains(#"TYPE=SUBTITLES,GROUP-ID="subtitles",NAME="简体",LANGUAGE="zh",DEFAULT=NO,AUTOSELECT=YES,FORCED=YES,URI="4.m3u8""#))
         #expect(master.contains(#"CODECS="avc1.640028,mp4a.40.2,ec-3",RESOLUTION=1920x1080,FRAME-RATE=23.976,VIDEO-RANGE=SDR,AUDIO="audio",SUBTITLES="subtitles""#))
         #expect(master.contains("AVERAGE-BANDWIDTH=6000000"))
@@ -201,12 +205,18 @@ import VideoToolbox
         #expect(master.contains(#"TYPE=SUBTITLES,GROUP-ID="subtitles",NAME="末世行者.chs.srt",LANGUAGE="zh-Hans",DEFAULT=YES"#))
         #expect(master.contains(#"NAME="末世行者.英文.srt",DEFAULT=NO"#) && master.contains(#"SUBTITLES="subtitles""#))
         #expect(plan.mediaPlaylist(track: 2).contains("2-0.vtt"))
-        // Each cue goes to the segment it starts in; the first and last take what lies outside the picture.
+        // Each cue goes to every segment it shows in (3.9 s runs into the second); the first and last take what lies
+        // outside the picture.
         let cues = [cue(-2_000_000), cue(3_900_000), cue(4_000_000), cue(11_000_000), cue(20_000_000)]
         #expect(plan.segments == 3)
         #expect(plan.cues(cues, segment: 0).map(\.start) == [-2_000_000, 3_900_000])
-        #expect(plan.cues(cues, segment: 1).map(\.start) == [4_000_000])
+        #expect(plan.cues(cues, segment: 1).map(\.start) == [3_900_000, 4_000_000])
         #expect(plan.cues(cues, segment: 2).map(\.start) == [11_000_000, 20_000_000])
+        // A long line from 2 s to 13 s shows in all three, whole.
+        let long = RemuxPlan.Cue(start: 2_000_000, end: 13_000_000, text: "long")
+        #expect((0..<3).allSatisfy { plan.cues([long], segment: $0) == [long] })
+        // One ending exactly where a segment begins isn't in it.
+        #expect(plan.cues([RemuxPlan.Cue(start: 3_000_000, end: 4_000_000, text: "x")], segment: 1).isEmpty)
     }
 
     // MARK: - Playing through FFmpeg
@@ -409,6 +419,34 @@ import VideoToolbox
         #expect(played.status == .readyToPlay && abs(played.duration - 8) < 0.2)
     }
 
+    /// A drive's slow stretch uses up AVPlayer's own buffer, and segments made one at a time as it asked then came
+    /// too late (issue #437). They are made ahead, and AVPlayer catching up with them doesn't start the one being
+    /// made again, which would read its part of the file twice.
+    @Test func segmentsAreMadeAheadOfAVPlayer() async throws {
+        let source = TricklingSource(try Remux.fileSource(fixture("remux-long.mkv")))
+        let url = try await Remux.open(source)
+        defer { Remux.stop(url) }
+        let folder = url.deletingLastPathComponent()
+        #expect(try await playlist(url, track: 0).segments.count >= 8)
+        _ = try await fetch(folder.appending(path: "0-0.m4s"))
+        source.watch()
+        // AVPlayer asks for the next segments while later ones are being made.
+        for _ in 0..<100 where source.furthest < source.length * 4 / 10 { try await Task.sleep(for: .milliseconds(20)) }
+        for index in 1...3 { _ = try await fetch(folder.appending(path: "0-\(index).m4s")) }
+        for _ in 0..<100 where source.furthest < source.length * 9 / 10 { try await Task.sleep(for: .milliseconds(50)) }
+        #expect(source.furthest >= source.length * 9 / 10)
+        #expect(Remux.session(url)?.abandoned == 0)
+    }
+
+    @Test func segmentsAreMadeAheadForAMinute() {
+        let bounds = (0...600).map { Int64($0) * 6_000_000 }
+        #expect(RemuxSession.makesAhead(1, latest: 0, bounds: bounds))
+        #expect(RemuxSession.makesAhead(10, latest: 0, bounds: bounds))
+        #expect(!RemuxSession.makesAhead(11, latest: 0, bounds: bounds))
+        #expect(RemuxSession.makesAhead(110, latest: 100, bounds: bounds) && !RemuxSession.makesAhead(111, latest: 100, bounds: bounds))
+        #expect(RemuxSession.makesAhead(600, latest: 599, bounds: bounds))
+    }
+
     /// The segments a track's playlist lists, and how long they run together.
     private func playlist(_ master: URL, track: Int) async throws -> (segments: [String], seconds: Double) {
         let text = String(decoding: try await fetch(master.deletingLastPathComponent().appending(path: "\(track).m3u8")), as: UTF8.self)
@@ -552,6 +590,15 @@ import VideoToolbox
         #expect(played.size == CGSize(width: 320, height: 180) && played.video)
     }
 
+    /// 4:2:2 HEVC in MPEG-TS decodes on a Mac but not on an iPhone; copied as it is, the iPhone would play its sound
+    /// alone (#585). It is converted to 4:2:0 Main10 (`RemuxPlan.videoTrack`), which every device decodes.
+    @Test func hevcTheDeviceCantDecodeIsConverted() async throws {
+        let master = try await HLSRemux.open(try hevcTransportStream(named: "remux-hevc-422"), headers: [:], network: RangeServer.session)
+        defer { Remux.stop(master) }
+        let text = String(decoding: try await fetch(master), as: UTF8.self)
+        #expect(text.contains("CODECS=\"hvc1.2.") && text.contains("RESOLUTION=320x180"), "\(text)")
+    }
+
     /// A live channel's HEVC in MPEG-TS (an IPTV channel in 4K, #361). The repackaged playlist stays live and follows
     /// the source's as AVPlayer reloads it: segments keep their names as the window moves, a discontinuity's
     /// initialization segment outlasts the segment it began with, and a gap in the media sequence begins one.
@@ -685,4 +732,27 @@ import VideoToolbox
         try #require(status == kCCSuccess)
         return output.prefix(moved)
     }
+}
+
+/// A file read slowly and a little at a time, like a drive in a slow stretch. After `watch` it notes how far it was
+/// read.
+private final class TricklingSource: RemuxSource, @unchecked Sendable {
+    private let file: RemuxSource
+    private let lock = NSLock()
+    private var end: Int64 = 0
+    private var watching = false
+    init(_ file: RemuxSource) { self.file = file }
+    var length: Int64 { file.length }
+    var transfer: (received: Int64, host: String?)? { nil }
+    var furthest: Int64 { lock.withLock { end } }
+    func watch() { lock.withLock { watching = true } }
+
+    func read(at offset: Int64, count: Int) async throws -> Data {
+        try await Task.sleep(for: .milliseconds(150))
+        let data = try await file.read(at: offset, count: min(count, 8192))
+        lock.withLock { if watching { end = max(end, offset + Int64(data.count)) } }
+        return data
+    }
+
+    func close() async { await file.close() }
 }

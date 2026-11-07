@@ -221,7 +221,7 @@ struct PlaybackWaitView: View {
             let stack = VStack(spacing: 10) {
                 if let wait {
                     HStack(spacing: 10) {
-                        ProgressView().controlSize(.small).tint(.white)
+                        ProgressView().appControlSize(.small).tint(.white)
                         // A new message replaces the old with a soft blur rather than two lines crossing.
                         line(wait, inline: layout.inlineCaption).lineLimit(1)
                             .id("\(wait.message)|\(wait.caption ?? "")|\(wait.suggestsLines)").tvBlurReplaceTransition()
@@ -265,7 +265,12 @@ struct PlaybackWaitView: View {
     private func caption(_ wait: PlaybackWait) -> Text? {
         if let caption = wait.caption { return Text(caption) }
         guard wait.suggestsLines else { return nil }
+        #if os(tvOS)
         return Text(L10n.text("Another line may be faster:")) + Text(" ") + Text(Image(systemName: "ellipsis.circle")) + Text(" › " + L10n.text("Episodes"))
+        #else
+        // The player's Episodes button (#524).
+        return Text(L10n.text("Another line may be faster:")) + Text(" ") + Text(Image(systemName: PlayerEpisodesSheet.symbol)) + Text(" " + L10n.text("Episodes"))
+        #endif
     }
 
     #if os(tvOS)

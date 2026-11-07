@@ -46,6 +46,12 @@ private struct TVFontWeight: ViewModifier {
 }
 
 extension View {
+    /// @brief iOS 15 retains the system overlay policy; all presentation stays on the main actor.
+    @ViewBuilder func tvPersistentSystemOverlays(_ visibility: Visibility) -> some View {
+        if #available(iOS 16, macOS 13, tvOS 16, *) { persistentSystemOverlays(visibility) }
+        else { self }
+    }
+
     /// @brief Preserves the inherited font's weight before the generic iOS 16 modifier.
     func tvFontWeight(_ weight: Font.Weight?) -> some View {
         modifier(TVFontWeight(weight: weight))
@@ -87,7 +93,7 @@ extension View {
         #endif
     }
     @ViewBuilder func tvLargeControl() -> some View {
-        if #available(iOS 17, tvOS 17, *) { controlSize(.large) } else { controlSize(.regular) }
+        if #available(iOS 17, tvOS 17, *) { appControlSize(.large) } else { appControlSize(.regular) }
     }
     @ViewBuilder func tvCircleButtonBorder() -> some View {
         if #available(iOS 17, tvOS 17, *) { buttonBorderShape(.circle) } else { buttonBorderShape(.capsule) }

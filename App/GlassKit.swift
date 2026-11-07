@@ -134,6 +134,18 @@ if #available(macOS 26, iOS 26, *) {
     }
     #endif
 
+    #if os(macOS)
+    /// A page whose artwork runs under the window toolbar: the toolbar draws no backing and, on macOS 26, the scroll
+    /// edge is soft, so the art fades under the toolbar instead of stopping at a solid band.
+    @ViewBuilder func artUnderToolbar() -> some View {
+        if #available(macOS 26, *) {
+            toolbarBackgroundVisibility(.hidden, for: .windowToolbar).scrollEdgeEffectStyle(.soft, for: .top)
+        } else {
+            toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+        }
+    }
+    #endif
+
     #if os(iOS)
     @ViewBuilder func minimizesTabBarOnScroll() -> some View {
 
@@ -192,6 +204,17 @@ if #available(iOS 26, *) { tabBarMinimizeBehavior(.onScrollDown) } else { self }
     @ViewBuilder func searchFieldFocused(_ focused: FocusState<Bool>.Binding) -> some View {
         if #available(iOS 18, *) { searchFocused(focused) } else { self }
     }
+    #endif
+
+    /// `controlSize(_:)`, which tvOS 17 can load. SwiftUI's is `@inlinable`: a Release build inlines its key path to
+    /// `EnvironmentValues.controlSize`, and the tvOS 26 and later SDKs name that property as moved to SwiftUICore
+    /// (its `@_originallyDefinedIn` leaves out tvOS), a symbol only tvOS 18 and later export. dyld then stopped the
+    /// app at launch on every tvOS 17 Apple TV (#634). Left unoptimized, this calls SwiftUI's exported function.
+    #if os(tvOS)
+    @inline(never) @_optimize(none)
+    func appControlSize(_ size: ControlSize) -> some View { controlSize(size) }
+    #else
+    func appControlSize(_ size: ControlSize) -> some View { controlSize(size) }
     #endif
 
     /// The breathing symbol effect; iOS 17 and tvOS 17 have no breathe, so the symbol pulses instead.
@@ -723,10 +746,12 @@ private struct FilterChipStyle: ButtonStyle {
 /// white glass lift on focus, as in the TV app.
 private struct TVChipStyle: ButtonStyle {
     let selected: Bool
-    func makeBody(configuration: Configuration) -> some View { Plate(configuration: configuration, selected: selected) }
+    var lift: CGFloat = 1.06
+    func makeBody(configuration: Configuration) -> some View { Plate(configuration: configuration, selected: selected, lift: lift) }
     private struct Plate: View {
         let configuration: ButtonStyleConfiguration
         let selected: Bool
+        let lift: CGFloat
         @Environment(\.isFocused) private var focused
         @Environment(\.isEnabled) private var enabled
         var body: some View {
@@ -738,7 +763,7 @@ private struct TVChipStyle: ButtonStyle {
                 .frame(minHeight: 58)
                 .glassSurface(glass, in: Capsule())
                 .opacity(enabled ? 1 : 0.4)
-                .scaleEffect(configuration.isPressed ? 0.97 : focused ? 1.06 : 1)
+                .scaleEffect(configuration.isPressed ? 0.97 : focused ? lift : 1)
                 .shadow(color: .black.opacity(focused ? 0.35 : 0), radius: 16, y: 10)
                 .animation(.easeOut(duration: 0.18), value: focused)
                 .animation(.tvSmooth(duration: 0.2), value: selected)
@@ -755,7 +780,9 @@ private struct TVChipStyle: ButtonStyle {
 
 extension View {
     /// A Liquid Glass capsule that turns white on focus, like the chips.
-    func glassPill() -> some View { buttonStyle(TVChipStyle(selected: false)) }
+    /// `lift` is how much it grows on focus; 1 keeps a wide pill (the search field) its own size. `selected` gives it the
+    /// chosen chip's lighter glass, for a button that stays on (倒序).
+    func glassPill(lift: CGFloat = 1.06, selected: Bool = false) -> some View { buttonStyle(TVChipStyle(selected: selected, lift: lift)) }
 }
 
 /// The query as a glass pill after a magnifying glass, as in the TV app's search. The remote's
@@ -808,6 +835,8 @@ struct Chip: View {
     var mark = false
     /// A status dot after the title, such as a source's health.
     var dot: Color? = nil
+    /// A small line under the title, such as an episode's file (4K · 5.2G).
+    var subtitle: String? = nil
     let action: () -> Void
     @Environment(\.stripDrag) private var drag
     var body: some View {
@@ -815,7 +844,11 @@ struct Chip: View {
         let button = Button { if drag?.active != true { action() } } label: {
             HStack(spacing: 5) {
                 if mark { BilibiliGlyph(size: 22).foregroundStyle(selected ? AnyShapeStyle(.primary) : AnyShapeStyle(BilibiliMark.blue)) }
-                Text(title).lineLimit(1)
+                if let subtitle {
+                    VStack(spacing: 0) { Text(title).lineLimit(1); EpisodeFileDetail(text: subtitle) }
+                } else {
+                    Text(title).lineLimit(1)
+                }
                 if let dot { Image(systemName: "circle.fill").font(.system(size: 12)).foregroundStyle(dot) }
             }.padding(.horizontal, 4).frame(maxWidth: fill ? .infinity : nil)
         }.accessibilityAddTraits(selected ? [.isSelected] : [])
@@ -1125,7 +1158,7 @@ struct PosterImage: View {
         }
     }
 
-    private static let placeholder: CGImage = UIGraphicsImageRenderer(size: CGSize(width: 1, height: 1)).image { context in
+    static let placeholder: CGImage = UIGraphicsImageRenderer(size: CGSize(width: 1, height: 1)).image { context in
         UIColor(white: 0.2, alpha: 1).setFill(); context.fill(CGRect(x: 0, y: 0, width: 1, height: 1))
     }.cgImage!
 
@@ -1145,7 +1178,7 @@ struct PosterImage: View {
     }
 
     /// The middle of the image at the frame's shape, as a fill would show it.
-    private static func cover(_ image: CGImage?, _ size: CGSize) -> CGImage {
+    static func cover(_ image: CGImage?, _ size: CGSize) -> CGImage {
         guard let image else { return placeholder }
         guard size.width > 0, size.height > 0 else { return image }
         let width = CGFloat(image.width), height = CGFloat(image.height), shape = size.width / size.height
@@ -1227,18 +1260,26 @@ extension View {
 /// @note No mutable phase or asynchronous task; timeline updates stay inside the overlay.
 struct Shimmer: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private static let period = 1.35
     func body(content: Content) -> some View {
         WithPerceptionTracking {
         content.overlay {
             WithPerceptionTracking {
             if !reduceMotion {
-                GeometryReader { proxy in
-                    TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
-                    let phase = CGFloat(timeline.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.35) / 1.35)
-                    LinearGradient(colors: [.clear, .white.opacity(0.20), .clear], startPoint: .leading, endPoint: .trailing)
-                        .frame(width: proxy.size.width * 0.6)
-                        .offset(x: -proxy.size.width * 0.6 + phase * proxy.size.width * 1.6)
+                // The band's place comes from the clock, laid out at the placeholder's current size every frame. A
+                // repeating SwiftUI animation also repeated whatever else changed when it started: the page (#512),
+                // then the band's own size from the grid's first layout, so the glow stopped short of the card's
+                // bottom. No implicit animation is involved now, and every placeholder sweeps in step.
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
+                    let phase = timeline.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: Self.period) / Self.period
+                    GeometryReader { proxy in
+                        WithPerceptionTracking {
 
+                        LinearGradient(colors: [.clear, .white.opacity(0.20), .clear], startPoint: .leading, endPoint: .trailing)
+                            .frame(width: proxy.size.width * 0.6, height: proxy.size.height)
+                            .offset(x: -proxy.size.width * 0.6 + phase * proxy.size.width * 1.6)
+
+                        }
                     }
                 }
                 .allowsHitTesting(false)
@@ -1482,7 +1523,7 @@ struct LoadingCard: View {
         let explains = Double(elapsed) >= Self.patience && state.reason != nil
         return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 14) {
-                ProgressView().controlSize(.small)
+                ProgressView().appControlSize(.small)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(state.title).font(.callout.weight(.semibold)).lineLimit(1)
                     if let detail = state.detail {

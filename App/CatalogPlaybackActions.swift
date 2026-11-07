@@ -3,7 +3,8 @@ import Perception
 import SwiftUI
 import TVCore
 
-/// Catalog-only actions alongside the existing native transport controls.
+/// Catalog-only actions alongside the existing native transport controls. The episodes have their own button
+/// (`PlayerEpisodesButton`, #524).
 struct CatalogPlaybackActions: View {
     let channel: Channel
     let session: PlaybackSession
@@ -15,25 +16,9 @@ struct CatalogPlaybackActions: View {
         WithPerceptionTracking {
         if channel.historyContext != nil {
             Menu {
-                if let catalog = store.catalog(for: channel) {
+                if store.catalog(for: channel) != nil {
                     Toggle(L10n.text("Auto-play next episode"), isOn: Binding(
                         get: { store.autoPlayNext }, set: { store.autoPlayNext = $0 }))
-                    Menu(L10n.text("Episodes")) {
-                        ForEach(catalog.playlist.flags, id: \.self) { flag in
-                            WithPerceptionTracking {
-                            Menu(flag) {
-                                ForEach(catalog.playlist.episodes(for: flag)) { episode in
-                                    WithPerceptionTracking {
-                                    Button(catalog.labels[episode.id] ?? episode.name) { store.selectEpisode(episode, from: channel) }
-
-                                    }
-                                }
-                            }
-
-                            }
-                        }
-                    }
-                    .disabled(store.resolvingEpisode != nil)
                 }
                 Toggle(L10n.text("Automatically skip intro and outro"), isOn: Binding(
                     get: { session.skipSettings.enabled },
@@ -63,7 +48,7 @@ struct CatalogPlaybackActions: View {
             .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
             .fixedSize()
             .glassSurface(.regular.interactive(), in: Circle())
-            .help(L10n.text("Episodes"))
+            .help(L10n.text("Playback Options"))
             #else
             .chromeButton()
             #endif
@@ -71,18 +56,33 @@ struct CatalogPlaybackActions: View {
             .accessibilityIdentifier("player.catalogOptions")
             .sheet(isPresented: $showsSkip) {
                 WithPerceptionTracking {
- EpisodeSkipSettingsView(session: session)
+ EpisodeSkipSettingsView(session: session).playerSheet()
                 }
             }
             .sheet(isPresented: $showsDanmaku) {
                 WithPerceptionTracking {
-                CatalogDanmakuSettingsView(model: session.catalogDanmaku, channelName: channel.name)
+
+                CatalogDanmakuSettingsView(model: session.catalogDanmaku, channelName: channel.name).playerSheet()
 
                 }
             }
         }
 
         }
+    }
+}
+
+extension View {
+    /// A settings sheet over the player, dark like the player. A player at the top of a page makes only its own views
+    /// dark (`PlayerScheme`); before iOS 26 a sheet it opens inherits that for its text but keeps the phone's light
+    /// background, so on a phone in light mode the sheet showed white text on a white form (#533).
+    /// The Mac's sheets keep the window's appearance, as before.
+    @ViewBuilder func playerSheet() -> some View {
+        #if os(iOS)
+        preferredColorScheme(.dark)
+        #else
+        self
+        #endif
     }
 }
 #endif

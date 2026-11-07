@@ -315,6 +315,132 @@ final class TVNavigationUITests: XCTestCase {
                       "Down never reached the downloaded episodes; focus went \(trail.joined(separator: " > "))")
     }
 
+    /// Up from anywhere in Global Search's results reaches the search field beside the sidebar button. The field was
+    /// 560 points wide at the left, nothing sat above most of the results, and once a search had run the field could
+    /// not be reached to search again.
+    func testUpFromSearchResultsReachesTheSearchField() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-qaSection", "search", "-qaQuery", "hello", "-qaIsolatedData", "1",
+                               "-qaSubscription", "http://127.0.0.1:8776/config.json",
+                               "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+        let remote = XCUIRemote.shared
+        if app.buttons["OK"].waitForExistence(timeout: 20) { remote.press(.select); sleep(2) }
+        let field = app.buttons["search.field"]
+        let results = shown("hello 01", in: app).waitForExistence(timeout: 60)
+        if !results { let shot = XCTAttachment(screenshot: app.screenshot()); shot.lifetime = .keepAlways; add(shot) }
+        XCTAssertTrue(results, "The search showed no results")
+        sleep(3)
+        let focused = app.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true")).firstMatch
+        // Into the results, out to their right end and down a row: the posters furthest from the field.
+        // Focus may start in the tab sidebar; right moves it into the page.
+        remote.press(.right); sleep(1)
+        var down: [String] = []
+        for _ in 0..<6 where !focused.label.contains("hello") {
+            down.append("\(focused.elementType.rawValue):\(focused.identifier):\(focused.label)")
+            remote.press(.down); sleep(1)
+        }
+        let near = XCTAttachment(screenshot: app.screenshot()); near.lifetime = .keepAlways; add(near)
+        XCTAssertTrue(focused.label.contains("hello"), "Focus did not reach the results; went \(down.joined(separator: " > ")) then \(focused.debugDescription.prefix(600))")
+        for _ in 0..<8 { remote.press(.right); usleep(600_000) }
+        remote.press(.down); sleep(1)
+        if !focused.label.contains("hello") { remote.press(.up); sleep(1) }
+        let far = XCTAttachment(screenshot: app.screenshot()); far.lifetime = .keepAlways; add(far)
+        XCTAssertTrue(focused.label.contains("hello"), "Focus left the results; it is on \(focused.label)")
+        var trail: [String] = []
+        for _ in 0..<10 where !field.hasFocus {
+            trail.append(focused.exists ? focused.label : "-")
+            remote.press(.up); usleep(800_000)
+        }
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.lifetime = .keepAlways; add(shot)
+        XCTAssertTrue(field.hasFocus, "Up never reached the search field; focus went \(trail.joined(separator: " > "))")
+        remote.press(.select)
+        XCTAssertTrue(app.searchFields.firstMatch.waitForExistence(timeout: 10), "Selecting the field did not open the keyboard")
+    }
+
+    /// A search whose results fit in one row (#481): Down from the search field, and from the far end of the rows
+    /// above the results, reaches them. Without Yingxia's own sources, which
+    /// would add more results.
+    func testDownReachesASingleRowOfSearchResults() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-qaSection", "search", "-qaQuery", "few", "-qaIsolatedData", "1", "-qaNoCloudSources", "1",
+                               "-qaSubscription", "http://127.0.0.1:8776/config.json",
+                               "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+        let remote = XCUIRemote.shared
+        if app.buttons["OK"].waitForExistence(timeout: 20) { remote.press(.select); sleep(2) }
+        let field = app.buttons["search.field"]
+        let results = shown("few 01", in: app).waitForExistence(timeout: 60)
+        let first = XCTAttachment(screenshot: app.screenshot()); first.lifetime = .keepAlways; add(first)
+        XCTAssertTrue(results, "The search showed no results")
+        XCTAssertFalse(shown("few 03", in: app).exists, "The fixture should give two results per source")
+        // Wait for the slow source too, so the rows above the results stop changing.
+        sleep(5)
+        let focused = app.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true")).firstMatch
+        remote.press(.right); sleep(1)
+        for _ in 0..<8 where !field.hasFocus { remote.press(.up); usleep(800_000) }
+        XCTAssertTrue(field.hasFocus, "Up never reached the search field")
+        var trail: [String] = []
+        for _ in 0..<8 where !focused.label.contains("few") {
+            trail.append("\(focused.identifier):\(focused.label)")
+            remote.press(.down); sleep(1)
+        }
+        let down = XCTAttachment(screenshot: app.screenshot()); down.lifetime = .keepAlways; add(down)
+        XCTAssertTrue(focused.label.contains("few"), "Down from the field never reached the results; went \(trail.joined(separator: " > "))")
+        // Now from the far right of each row above the results.
+        for _ in 0..<8 where !field.hasFocus { remote.press(.up); usleep(800_000) }
+        remote.press(.down); sleep(1)
+        for _ in 0..<8 { remote.press(.right); usleep(600_000) }
+        trail = []
+        for _ in 0..<8 where !focused.label.contains("few") {
+            trail.append("\(focused.identifier):\(focused.label)")
+            remote.press(.down); sleep(1)
+        }
+        let far = XCTAttachment(screenshot: app.screenshot()); far.lifetime = .keepAlways; add(far)
+        XCTAssertTrue(focused.label.contains("few"), "Down from the right end never reached the results; went \(trail.joined(separator: " > "))")
+    }
+
+    /// Back on the sidebar of any section other than Watch Now goes to Watch Now; only Back on Watch Now's sidebar
+    /// leaves the app (#499). Back from a page still moves to the sidebar first (#404).
+    func testBackOnTheSidebarGoesToWatchNowBeforeLeaving() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-qaSection", "sites", "-qaIsolatedData", "1", "-qaResetHistory", "1", "-qaSeedHistory", "qa-standard:1",
+                               "-qaSubscription", "http://127.0.0.1:8776/config.json",
+                               "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+        let remote = XCUIRemote.shared
+        if app.buttons["OK"].waitForExistence(timeout: 20) { remote.press(.select); sleep(2) }
+        let sources = app.buttons["sources.order.toggle"], watchNow = app.buttons["home.upNext.resume"]
+        XCTAssertTrue(sources.waitForExistence(timeout: 60), "Sources did not appear")
+        sleep(3)
+        let focused = app.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true")).firstMatch
+        func focus() -> String { focused.exists ? "\(focused.elementType.rawValue):\(focused.identifier):\(focused.label)" : "none" }
+        func snap(_ name: String) { let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = name; shot.lifetime = .keepAlways; add(shot) }
+        // Focus starts in the page (the source filter); Back moves it to the sidebar and Sources stays.
+        let inPage = focus()
+        remote.press(.menu); sleep(2)
+        snap("sidebar on Sources")
+        XCTAssertEqual(app.state, .runningForeground, "Back from the page (focus was \(inPage)) left the app")
+        XCTAssertTrue(sources.exists, "Back from the page (focus was \(inPage)) left Sources; focus is \(focus())")
+        let onSidebar = focus()
+        // Back on Sources' sidebar goes to Watch Now.
+        remote.press(.menu)
+        let landed = watchNow.waitForExistence(timeout: 10)
+        sleep(2)
+        snap("Watch Now")
+        XCTAssertEqual(app.state, .runningForeground, "Back on Sources' sidebar (focus was \(onSidebar)) left the app")
+        XCTAssertTrue(landed && !sources.exists, "Back on Sources' sidebar (focus was \(onSidebar)) did not go to Watch Now; focus is \(focus())")
+        let onWatchNow = focus()
+        // Back on Watch Now's sidebar leaves.
+        var presses = 0, trail: [String] = []
+        for _ in 0..<4 where app.state == .runningForeground {
+            remote.press(.menu); presses += 1
+            for _ in 0..<6 where app.state == .runningForeground { sleep(1) }
+            if app.state == .runningForeground { trail.append(focus()); snap("after \(presses)") }
+        }
+        XCTAssertEqual(presses, 1, "Back on Watch Now's sidebar (focus was \(onWatchNow)) left after \(presses) presses: \(trail) state \(app.state.rawValue)")
+    }
+
     /// Poster titles are part of their card's label, so look for the text anywhere in a label.
     private func shown(_ text: String, in app: XCUIApplication) -> XCUIElement {
         app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch

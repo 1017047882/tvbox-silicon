@@ -35,7 +35,7 @@ import Testing
 }
 @Test func formattedTranslationsPreserveArguments() {
     #expect(L10n.text("The source %@ returned HTTP %lld.", "example.com", 403, language: "en") == "The source example.com returned HTTP 403.")
-    #expect(L10n.text("Page %lld of %lld", 2, 12, language: "ja") == "2 / 12 ページ")
+    #expect(L10n.text("Searched %lld of %lld sources", 2, 12, language: "ja") == "2 / 12 ソースを検索済み")
     #expect(L10n.text("Channels: %lld", 1, language: "en") == "Channels: 1")
     #expect(L10n.text("Remove %@ from favorites", "100% 日本語", language: "zh-Hant") == "取消收藏 100% 日本語")
 }
@@ -57,6 +57,10 @@ import Testing
     #expect(PluginFailure.message(screen, language: "zh-Hans") == "此条目会打开来源自带的设置或登录界面（例如二维码），映匣无法显示。请改在“设置 → 网盘账号”中登录。")
     #expect(PluginFailure.inPlugin(screen))
     #expect(PluginFailure.message(["error": .string("boom")], language: "en") == "Plugin error: boom")
+    let told: [String: JSONValue] = ["error": .string("java.lang.Exception: 还没有配置115 Cookie，请先到配置中心登录"), "errorCode": .string("plugin_message"),
+                                     "message": .string("还没有配置115 Cookie，请先到配置中心登录")]
+    #expect(PluginFailure.message(told, language: "zh-Hans") == "来源提示：还没有配置115 Cookie，请先到配置中心登录")
+    #expect(!PluginFailure.inPlugin(told))
 }
 @Test func embeddedPluginFailuresAreLocalizedAndKeepTheNativeReason() {
     let failure: [String: JSONValue] = ["error": .string("The embedded plugin request failed. See diagnostic logs."), "errorCode": .string("embedded_request")]
@@ -83,7 +87,7 @@ import Testing
 @Test func cloudLoginHandoffKeepsTheProviderWithoutDependingOnEpisodeFlags() {
     let failure: [String: JSONValue] = ["error": .string("plugin QR login"), "errorCode": .string("cloud_login_required"), "drive": .string("quark")]
     #expect(CloudDriveLoginRequired(envelope: failure) == .quark)
-    #expect(PluginFailure.message(failure, language: "en") == "Your Quark sign-in is missing or has expired. Sign in again to play this episode.")
+    #expect(PluginFailure.message(failure, language: "en") == "This line plays from Quark, but its sign-in code couldn't be shown. Choose another line.")
     #expect(!PluginFailure.inPlugin(failure))
     #expect(CloudDriveLoginRequired(envelope: ["errorCode": .string("cloud_login_required"), "drive": .string("unknown")]) == nil)
 }

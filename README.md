@@ -12,8 +12,8 @@
 <p align="center">
   <a href="https://yingxia.getmegaportal.com"><b>yingxia.getmegaportal.com</b></a>
   &nbsp;·&nbsp;
-  <a href="https://download.getmegaportal.com/yingxia/1.8.8/Yingxia-1.8.8-macos-arm64.dmg">Download for Mac</a>
-  (<a href="https://download.getmegaportal.com/yingxia/1.8.8/Yingxia-1.8.8-macos-x86_64.dmg">Intel</a>)
+  <a href="https://download.getmegaportal.com/yingxia/1.8.13/Yingxia-1.8.13-macos-arm64.dmg">Download for Mac</a>
+  (<a href="https://download.getmegaportal.com/yingxia/1.8.13/Yingxia-1.8.13-macos-x86_64.dmg">Intel</a>)
   &nbsp;·&nbsp;
   <a href="#-get-it">iPhone, iPad &amp; Apple TV beta</a>
   &nbsp;·&nbsp;
@@ -74,15 +74,15 @@ Yingxia (映匣) plays your TVBox subscriptions the way an Apple app should: liv
 
 | Platform | How |
 | --- | --- |
-| **Mac** (macOS 15+, Apple silicon or Intel) | ✅ Free download for [Apple silicon](https://download.getmegaportal.com/yingxia/1.8.8/Yingxia-1.8.8-macos-arm64.dmg) or [Intel](https://download.getmegaportal.com/yingxia/1.8.8/Yingxia-1.8.8-macos-x86_64.dmg), signed and notarized. It updates itself. |
-| **iPhone & iPad** (iOS 17+) | 🧪 Public beta: [join on TestFlight](https://testflight.apple.com/join/dU6UNbzp). Or [download the IPA](https://download.getmegaportal.com/yingxia/1.8.8/Yingxia-1.8.8-ios.ipa) and [sideload it](Docs/INSTALL.md#install-on-iphone-or-ipad), or add the [AltStore source](Docs/INSTALL.md#altstore-and-sidestore). |
-| **Apple TV** (tvOS 17+) | 🧪 Public beta: [join on TestFlight](https://testflight.apple.com/join/SSgWEwSr) (open the invite on an iPhone or iPad signed in to the same Apple Account, then install from TestFlight on the TV). Or [download the IPA](https://download.getmegaportal.com/yingxia/1.8.8/Yingxia-1.8.8-tvos.ipa) and [sideload it](Docs/INSTALL.md#install-on-apple-tv). |
+| **Mac** (macOS 15+, Apple silicon or Intel) | ✅ Free download for [Apple silicon](https://download.getmegaportal.com/yingxia/1.8.13/Yingxia-1.8.13-macos-arm64.dmg) or [Intel](https://download.getmegaportal.com/yingxia/1.8.13/Yingxia-1.8.13-macos-x86_64.dmg), signed and notarized. It updates itself. |
+| **iPhone & iPad** (iOS 17+) | 🧪 Public beta: [join on TestFlight](https://testflight.apple.com/join/dU6UNbzp). Or [download the IPA](https://download.getmegaportal.com/yingxia/1.8.13/Yingxia-1.8.13-ios.ipa) and [sideload it](Docs/INSTALL.md#install-on-iphone-or-ipad), or add the [AltStore source](Docs/INSTALL.md#altstore-and-sidestore). |
+| **Apple TV** (tvOS 17+) | 🧪 Public beta: [join on TestFlight](https://testflight.apple.com/join/SSgWEwSr) (open the invite on an iPhone or iPad signed in to the same Apple Account, then install from TestFlight on the TV). Or [download the IPA](https://download.getmegaportal.com/yingxia/1.8.13/Yingxia-1.8.13-tvos.ipa) and [sideload it](Docs/INSTALL.md#install-on-apple-tv). |
 
 TestFlight is the easiest way: no computer needed, and new builds arrive on their own. TestFlight builds are always numbered 1.7.7 with the release's build number, for example 1.7.7 (31) for 1.7.12. The beta and a sideloaded copy use the same app ID, so keep one or the other. The [install guide](Docs/INSTALL.md) covers sideloading with your own Apple Account (a free one works), keeping the app signed, and fixing common problems.
 
 ## 🛠️ Build from source
 
-You'll need Xcode, [XcodeGen](https://github.com/yonaskolb/XcodeGen), JDK 19 with Maven, a standalone Node.js binary, and [uv](https://docs.astral.sh/uv/).
+You'll need Xcode, [XcodeGen](https://github.com/yonaskolb/XcodeGen), JDK 19 with Maven, and [uv](https://docs.astral.sh/uv/). You don't need Node.js: the scripts download prebuilt copies once per Mac, the official Mac build for the JavaScript host and, on the first iPhone, iPad or Apple TV build, our [Node.js for iOS and tvOS](https://github.com/jo32/nodejs-mobile/releases) for CatPawOpen sources.
 
 ```sh
 export JAVA_HOME="$(/usr/libexec/java_home -v 19)"

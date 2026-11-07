@@ -135,7 +135,7 @@ public actor EmbeddedJarHost {
         input["deadline"] = .number(Self.deadline(kind))
         let json = String(decoding: try encoder.encode(input), as: UTF8.self)
         Diagnostics.shared.record(.info, "jar.request", "source=\(site.key) \(kind)\(params["flag"].map { " flag=\($0)" } ?? "") begin")
-        // A Baidu or Aliyun line may wait for its sign-in code to be scanned: the app shows it meanwhile.
+        // A drive line may wait for the plugin's own sign-in code to be scanned: the app shows it meanwhile.
         let signIn = params["wd"] == nil ? PluginSignIn.watch(folder: job, source: site.name) : nil
         var response: String
         do {
@@ -258,7 +258,7 @@ public actor EmbeddedJarHost {
     }
 
     static func kind(_ params: [String: String]) -> String {
-        params["catLogin"] != nil ? "sign-in" : params["play"] != nil ? "play" : params["ids"] != nil ? "detail" : params["wd"] != nil ? "search" : params["t"] != nil ? "category" : "home"
+        params["spiderAction"] != nil ? "action" : params["spiderUI"] != nil ? "window" : params["catLogin"] != nil ? "sign-in" : params["catDanmaku"] != nil ? "danmaku" : params["play"] != nil ? "play" : params["ids"] != nil ? "detail" : params["wd"] != nil ? "search" : params["t"] != nil ? "category" : "home"
     }
 
     /// Seconds a spider may work on a request. Generous: drive sources list many shares for a

@@ -19,6 +19,36 @@
       "category": "entertainment",
       "versions": [
         {
+          "version": "1.8.13",
+          "buildVersion": "51",
+          "date": "2026-11-07",
+          "localizedDescription": "• Apple TV 支持猫源\n• 播放器视频标签\n• 字幕延迟\n• 源里的设置项\n• 源自己的网盘登录\n• 播放接对剧集\n• 其他修复\n\n• CatPawOpen on Apple TV\n• Video tags in the player\n• Subtitle Delay\n• Settings inside sources\n• Drive sign-ins from the source\n• Play picks up the right episode\n• Other fixes",
+          "downloadURL": "https://download.getmegaportal.com/yingxia/1.8.13/Yingxia-1.8.13-ios.ipa",
+          "size": 124619585,
+          "sha256": "93fcba7f5b74bbd2cd0796b3df6f9d8d61182083d84fc7547841e46be7c3510e",
+          "minOSVersion": "17.0"
+        },
+        {
+          "version": "1.8.11",
+          "buildVersion": "49",
+          "date": "2026-11-06",
+          "localizedDescription": "• 阅读漫画\n• 字幕样式\n• 播放器里的选集\n• CatPawOpen 源播放更稳\n• 其他修复\n\n• Read manga\n• Subtitle Style\n• Episodes in the player\n• CatPawOpen sources play better\n• Other fixes",
+          "downloadURL": "https://download.getmegaportal.com/yingxia/1.8.11/Yingxia-1.8.11-ios.ipa",
+          "size": 119203076,
+          "sha256": "9039e98597546e388071b50ad5b0dee8c84d6c7b93d39ac4f2d399d5f05b873f",
+          "minOSVersion": "17.0"
+        },
+        {
+          "version": "1.8.9",
+          "buildVersion": "47",
+          "date": "2026-11-05",
+          "localizedDescription": "• 发现页新增今日播出\n• 全局搜索可以用列表显示\n• 网盘视频播放更顺畅\n• 可以选择音乐音质\n• 更清爽的筛选和 Mac 下载\n• 横过手机即可全屏\n• 其他修复\n\n• Airing Today in Discover\n• Global Search as a list\n• Smoother cloud-drive playback\n• Choose your music quality\n• Tidier filters and Mac downloads\n• Turn sideways for Full Screen\n• Other fixes",
+          "downloadURL": "https://download.getmegaportal.com/yingxia/1.8.9/Yingxia-1.8.9-ios.ipa",
+          "size": 118106652,
+          "sha256": "f751de0653dcf5363b032954728345f0da4d14403f11b1e43f35c2fa5dbc3fe4",
+          "minOSVersion": "17.0"
+        },
+        {
           "version": "1.8.8",
           "buildVersion": "46",
           "date": "2026-11-04",
@@ -36,36 +66,6 @@
           "downloadURL": "https://download.getmegaportal.com/yingxia/1.8.7/Yingxia-1.8.7-ios.ipa",
           "size": 117758042,
           "sha256": "1a34c38b43b2464687f7d9e4832fc551b0931871cfa5cee853f34a2f10030f85",
-          "minOSVersion": "17.0"
-        },
-        {
-          "version": "1.8.6",
-          "buildVersion": "44",
-          "date": "2026-11-02",
-          "localizedDescription": "• 全新的“现在观看”\n• 更多 4K 视频有画面了\n• 预告片全屏播放\n• CatPawOpen 源可用百度网盘登录\n• 其他修复\n\n• A new Watch Now\n• Picture for more 4K videos\n• Trailers play full screen\n• Baidu Netdisk sign-in for CatPawOpen\n• Other fixes",
-          "downloadURL": "https://download.getmegaportal.com/yingxia/1.8.6/Yingxia-1.8.6-ios.ipa",
-          "size": 117329114,
-          "sha256": "199d9dd2b049d84fe59f5a359322410c687d3818cf18a941920be8dafd5ffede",
-          "minOSVersion": "17.0"
-        },
-        {
-          "version": "1.8.5",
-          "buildVersion": "43",
-          "date": "2026-11-01",
-          "localizedDescription": "• 官方弹弹play弹幕\n• 更多网盘视频可以播放\n• 显示视频信息\n• 反馈可附图片和视频\n• JAR 源打开更快\n• 其他修复\n\n• Official Dandanplay danmaku\n• More videos from cloud drives play\n• Show Video Info\n• Pictures and videos in feedback\n• JAR sources open faster\n• Other fixes",
-          "downloadURL": "https://download.getmegaportal.com/yingxia/1.8.5/Yingxia-1.8.5-ios.ipa",
-          "size": 117006225,
-          "sha256": "2757f3c59c7a3aeab5b120580fee956e88fcd2c59bc21e4a7c0fda3dc6c3bd45",
-          "minOSVersion": "17.0"
-        },
-        {
-          "version": "1.8.4",
-          "buildVersion": "42",
-          "date": "2026-10-31",
-          "localizedDescription": "• 发现\n• 你的 NAS 和媒体服务器\n• 弹幕区域可调\n• 其他修复\n\n• Discover\n• Your NAS and media server\n• Choose where danmaku go\n• Other fixes",
-          "downloadURL": "https://download.getmegaportal.com/yingxia/1.8.4/Yingxia-1.8.4-ios.ipa",
-          "size": 116425308,
-          "sha256": "133309eeb1827acbc2b5ac1b5567838185d9c460921794927b1e7022ecbfcea3",
           "minOSVersion": "17.0"
         }
       ],

@@ -118,6 +118,8 @@ struct DiscoverBackdrop: View {
     let trailer: TMDBMatch.Trailer?
     let playsTrailer: Bool
     @State private var videoReady = false
+    /// Mac: the floating sidebar's width, which the split view reports as a leading inset.
+    @State private var leadingInset: CGFloat = 0
     var body: some View {
         WithPerceptionTracking {
         #if os(tvOS)
@@ -153,16 +155,19 @@ struct DiscoverBackdrop: View {
                     backdropImage(paint)
                 }
                 if let trailer, playsTrailer {
-                    DiscoverTrailer(trailer: trailer) { ready in
+                    DiscoverTrailer(trailer: trailer, mirrorWidth: leadingInset) { ready in
                         withAnimation(.easeOut(duration: 0.4)) { videoReady = ready }
                     }
-                    .frame(width: width, height: heroHeight)
+                    .frame(width: width + leadingInset, height: heroHeight)
                     .clipped()
                     .offset(y: -max(0, scrollY) * 0.78)
                     .opacity(Double(max(0, 1 - max(0, scrollY) / max(heroHeight * 0.35, 1))))
                     .allowsHitTesting(false)
                 }
             }
+            #if os(macOS)
+            .tvOnGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.leading } action: { leadingInset = $0 }
+            #endif
             .discoverFullBleed()
             .accessibilityHidden(true)
             .tvOnChange(of: trailer?.key) { _, _ in videoReady = false }

@@ -109,6 +109,21 @@ private func episode(_ id: String, flag: String, name: String, episodeID: String
     #expect(saved.resumePosition(in: [finished]) == 0)
 }
 
+@Test @MainActor func likedSongsListNewestFirstAndSurviveAReload() throws {
+    let suite = "favorites." + UUID().uuidString
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let favorites = Favorites(defaults: defaults)
+    let first = MusicTrack(platform: .qq, songID: "1", title: "First", artists: ["A"])
+    let second = MusicTrack(platform: .netease, songID: "2", title: "Second", artists: ["B"])
+    favorites.toggle(.music(first))
+    favorites.toggle(.music(second))
+    #expect(favorites.musicTracks.map(\.title) == ["Second", "First"])
+    #expect(Favorites(defaults: defaults).musicTracks.map(\.id) == [second.id, first.id])
+    favorites.toggle(.music(second))
+    #expect(favorites.musicTracks.map(\.title) == ["First"])
+}
+
 @Test @MainActor func emptyKindsStayEmptyUntilSomethingIsSaved() {
     let favorites = Favorites(defaults: UserDefaults(suiteName: "favorites." + UUID().uuidString)!)
     favorites.toggle(.video(video("show", origin: origin)))
@@ -117,6 +132,18 @@ private func episode(_ id: String, flag: String, name: String, episodeID: String
     #expect(favorites.items(.music).isEmpty)
     #expect(favorites.items(.cloud).isEmpty)
     #expect(favorites.items(.live).isEmpty)
+}
+
+@Test @MainActor func filterKindsAreThoseSavedInSectionOrder() {
+    let favorites = Favorites(defaults: UserDefaults(suiteName: "favorites." + UUID().uuidString)!)
+    #expect(favorites.kinds.isEmpty)
+    favorites.toggle(.music(MusicTrack(platform: .qq, songID: "9", title: "Song", artists: ["A"])))
+    favorites.toggle(.video(video("show", origin: origin)))
+    favorites.toggle(.live(channel("News")))
+    favorites.toggle(.video(video("other", origin: origin)))
+    #expect(favorites.kinds == [.live, .video, .music])
+    favorites.toggle(.live(channel("News")))
+    #expect(favorites.kinds == [.video, .music])
 }
 
 @Test func listingVideoKeepsPosterTransportHeaders() throws {

@@ -127,7 +127,7 @@ struct XunleiSignInView: View {
                         .settingsButton(prominent: true).disabled(busy || code.trimmingCharacters(in: .whitespaces).isEmpty)
                     Button(L10n.text("Send Again")) { code = ""; challenge = nil; Task { await send() } }.settingsButton().disabled(busy)
                 }
-                if busy { ProgressView().controlSize(.small) }
+                if busy { ProgressView().appControlSize(.small) }
                 Spacer(minLength: 0)
                 Button(L10n.text("Cancel")) { dismiss() }.settingsButton()
             }

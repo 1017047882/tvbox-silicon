@@ -1,5 +1,6 @@
 package tvbox.runtime;
 
+import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import org.json.*;
 import org.objectweb.asm.ClassReader;
@@ -49,14 +50,57 @@ public final class CloudDriveBridge implements AutoCloseable {
     private HttpServer listen(int port) throws IOException {
         HttpServer listener = HttpServer.create(new InetSocketAddress("127.0.0.1", port), 16);
         listener.setExecutor(workers);
-        listener.createContext("/", exchange -> {
+        listener.createContext("/", this::serve);
+        listener.start();
+        ports.add(listener.getAddress().getPort());
+        return listener;
+    }
+
+    /**
+     * A plugin setting's page for another device (TVBox's "remote input": a QR code with this device's network
+     * address, where a phone types a cookie): plugins build it from {@link #getUrl()} with the Wi-Fi address in place
+     * of 127.0.0.1, and it answers through TVBox's {@code /proxy}. Served on the network only while a setting is open
+     * (TVBox serves it always), GET only, the same requests as on loopback.
+     */
+    public static synchronized void openToNetwork(boolean open) {
+        CloudDriveBridge bridge = current;
+        if (network != null && (!open || bridge == null || network.getAddress().getPort() != bridge.server.getAddress().getPort())) {
+            network.stop(0); network = null;
+        }
+        if (!open || bridge == null || network != null) return;
+        byte[] address = android.net.wifi.WifiInfo.lanAddress();
+        if (address == null || address[0] == 127) return;
+        try {
+            HttpServer listener = HttpServer.create(new InetSocketAddress(java.net.InetAddress.getByAddress(address), bridge.server.getAddress().getPort()), 16);
+            listener.setExecutor(bridge.workers);
+            listener.createContext("/", bridge::serve);
+            Thread starter = new Thread(listener::start, "tvbox-proxy-network");
+            starter.setDaemon(true); starter.start(); starter.join();
+            network = listener;
+        } catch (Exception unavailable) {
+            System.err.println("CLOUD_PROXY_NETWORK_UNAVAILABLE " + unavailable.getClass().getSimpleName());
+        }
+    }
+    private static HttpServer network;
+
+    /** An {@code Origin} the page's own requests carry: the address it was served from. */
+    private static boolean sameOrigin(HttpExchange exchange) {
+        String origin = exchange.getRequestHeaders().getFirst("Origin"), host = exchange.getRequestHeaders().getFirst("Host");
+        return origin == null || (host != null && origin.equals("http://" + host));
+    }
+
+    private void serve(HttpExchange exchange) {
             try {
                 String path = exchange.getRequestURI().getPath();
-                if (!path.startsWith("/" + capability + "/") || exchange.getRequestHeaders().containsKey("Origin")) {
+                // A setting's page answers through TVBox's /proxy path, on the port it was served from.
+                boolean settingPage = path.equals("/proxy") && PluginWindows.settingOpen();
+                if (!(settingPage || path.startsWith("/" + capability + "/")) || !sameOrigin(exchange)
+                        || (!PluginWindows.settingOpen() && exchange.getRequestHeaders().containsKey("Origin"))) {
                     exchange.sendResponseHeaders(403, -1); return;
                 }
                 String method = exchange.getRequestMethod();
                 if (!method.equals("GET") && !method.equals("HEAD")) { exchange.sendResponseHeaders(405, -1); return; }
+                if (settingPage) { relay(exchange, "media", method); return; }
                 String resource = path.substring(capability.length() + 2);
                 if (resource.equals("health")) { exchange.sendResponseHeaders(204, -1); return; }
                 if (files.containsKey(resource)) {
@@ -74,10 +118,6 @@ public final class CloudDriveBridge implements AutoCloseable {
                 System.err.println("CLOUD_PROXY_ERROR " + error.getClass().getSimpleName());
                 try { exchange.sendResponseHeaders(502, -1); } catch (IOException ignored) { }
             } finally { exchange.close(); }
-        });
-        listener.start();
-        ports.add(listener.getAddress().getPort());
-        return listener;
     }
 
     /** Apple can invalidate sockets while the app is suspended without destroying its JVM. */
@@ -339,21 +379,20 @@ public final class CloudDriveBridge implements AutoCloseable {
     public void setDriveProxy(DriveProxy value) { driveProxy = value; }
     public void setProxy(Proxy value) { proxy = value; }
 
-    /** The drive cookies (quarkCookie, ucCookie, baiduCookie) the app holds a sign-in in, with their digests. */
+    /** The drive cookies (quarkCookie, ucCookie, baiduCookie, pan115Cookie) the app holds a sign-in in, with their digests. */
     private volatile Map<String, String> appAccounts = Map.of();
     /** The source's context, whose Wex preferences OwnDriveSignIn reads after the plugin signs in. */
     private volatile android.content.Context context;
     public void appAccounts(JSONObject accounts) { appAccounts(accounts, null); }
     public void appAccounts(JSONObject accounts, android.content.Context value) {
         var held = new HashMap<String, String>();
-        for (String key : List.of("quarkCookie", "ucCookie", "baiduCookie")) {
+        for (String key : WEX_APP_KEYS.values()) {
             String cookie = accounts == null ? "" : accounts.optString(key).trim();
             if (!cookie.isEmpty()) held.put(key, digest(cookie));
         }
         appAccounts = Map.copyOf(held);
         context = value;
     }
-    boolean hasAppAccount(String field) { return appAccounts.containsKey(field); }
     /** The digest of the app's sign-in in this field, or "" without one. */
     String appAccountDigest(String field) { return appAccounts.getOrDefault(field, ""); }
     android.content.Context context() { return context; }
@@ -436,17 +475,19 @@ public final class CloudDriveBridge implements AutoCloseable {
     public static final String WEX_PREFERENCES = "NewWexFnw_preferences";
 
     /** The Wex preferences that hold the drives the app signs in to, and the app's account field for each. */
-    static final Map<String, String> WEX_APP_KEYS = Map.of("Wex_quark_cookie", "quarkCookie", "Wex_ucpan_cookie", "ucCookie", "Wex_baidu_cookie", "baiduCookie");
+    static final Map<String, String> WEX_APP_KEYS = Map.of("Wex_quark_cookie", "quarkCookie", "Wex_ucpan_cookie", "ucCookie",
+        "Wex_baidu_cookie", "baiduCookie", "Wex_pan115_cookie", "pan115Cookie");
     /** In the shared {@code wexPreferences}: the digest of the app sign-in that a plugin sign-in replaced. */
     static final String WEX_REPLACED = "yingxia.replaced.";
 
     /**
-     * Wex spiders read raw drive cookies from {@code Wex_quark_cookie}, {@code Wex_ucpan_cookie} and
-     * {@code Wex_baidu_cookie} in {@link #WEX_PREFERENCES}, which only their config center fills. Each app
-     * sign-in goes there once (a digest marks what was given), so the plugin's own cookie refreshes stay
-     * until the user signs in again. A sign-in one Wex source made through its own code
-     * ({@code wexPreferences}, see OwnDriveSignIn) reaches every source the same way, also after a new jar
-     * version; one that replaced an app sign-in the plugin refused holds until the app signs in again.
+     * Wex spiders read raw drive cookies from {@code Wex_quark_cookie}, {@code Wex_ucpan_cookie},
+     * {@code Wex_baidu_cookie} and {@code Wex_pan115_cookie} in {@link #WEX_PREFERENCES}, which only their
+     * config center fills. Each app sign-in goes there once (a digest marks what was given), so the plugin's
+     * own cookie refreshes stay until the user signs in again. A sign-in one Wex source made through its own
+     * code ({@code wexPreferences}, see OwnDriveSignIn) reaches every source the same way, also after a new
+     * jar version; one that replaced an app sign-in the plugin refused holds until the app signs in again,
+     * and one made while the app had no sign-in for that drive (115) holds until the app gets one.
      */
     public static void seedWexCookies(JSONObject accounts, android.content.Context context) {
         if (accounts == null) return;
@@ -460,7 +501,7 @@ public final class CloudDriveBridge implements AutoCloseable {
             String key = String.valueOf(keys.next()), value = shared.optString(key);
             if (!key.startsWith("Wex_") || value.isEmpty()) continue;
             String field = WEX_APP_KEYS.get(key);
-            if (field != null && !digest(accounts.optString(field).trim()).equals(shared.optString(WEX_REPLACED + key))) continue;
+            if (field != null && !accountDigest(accounts.optString(field).trim()).equals(shared.optString(WEX_REPLACED + key))) continue;
             values.put(key, value);
         }
         if (values.isEmpty()) return;
@@ -492,6 +533,9 @@ public final class CloudDriveBridge implements AutoCloseable {
             System.err.println("CLOUD_ACCOUNT_SEED_FAILED " + WEX_THREAD_PROXY_MODE);
         }
     }
+
+    /** The digest of an app sign-in, or "" when there is none (what {@link #appAccountDigest} gives then). */
+    static String accountDigest(String cookie) { return cookie.isEmpty() ? "" : digest(cookie); }
 
     static String digest(String text) {
         try { return HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8))); }
@@ -586,8 +630,9 @@ public final class CloudDriveBridge implements AutoCloseable {
      * Z, N0, then k), so the account is found by what its code does, not by name. Cloud_quark keeps
      * its name and fetches the account through exactly one static singleton. In the account class,
      * the sign-in response handler {@code (okhttp3.Response, String) -> boolean} stores the web cookie
-     * and the static {@code (account, String)} setter stores the mobile ticket. Each must store exactly
-     * one public String field, or nothing is restored. Only these two classes are read.
+     * and a static {@code (account, String, ...)} method stores the mobile ticket: the QR poll, which
+     * took {@code (account, String)} until 2026-11 and also takes a timestamp since. Each must store
+     * exactly one public String field, or nothing is restored. Only these two classes are read.
      */
     static FtyQuarkAccount ftyQuarkAccount(Class<?> quark) throws ReflectiveOperationException, IOException {
         byte[] code = classBytes(quark);
@@ -613,7 +658,7 @@ public final class CloudDriveBridge implements AutoCloseable {
             @Override public MethodVisitor visitMethod(int access, String name, String descriptor, String signature, String[] exceptions) {
                 boolean instance = (access & Opcodes.ACC_STATIC) == 0;
                 Set<String> stored = instance && descriptor.equals("(Lokhttp3/Response;Ljava/lang/String;)Z") ? web
-                    : !instance && descriptor.equals("(L" + owner + ";Ljava/lang/String;)V") ? mobile : null;
+                    : !instance && descriptor.startsWith("(L" + owner + ";Ljava/lang/String;") && descriptor.endsWith(")V") ? mobile : null;
                 return stored == null ? null : new MethodVisitor(Opcodes.ASM9) {
                     @Override public void visitFieldInsn(int opcode, String fieldOwner, String field, String fieldType) {
                         if (opcode == Opcodes.PUTFIELD && fieldOwner.equals(owner) && fieldType.equals("Ljava/lang/String;")) stored.add(field);
@@ -657,6 +702,9 @@ public final class CloudDriveBridge implements AutoCloseable {
     }
 
     public String rewriteAddress(String address) {
+        // FongMi's player turns proxy://<query> into its local /proxy?<query> server; the aowu Bili spiders
+        // (合集, 歌曲, 教育...) answer with these. Give it the loopback form the rules below already route.
+        if (address.startsWith("proxy://")) address = "http://127.0.0.1:9978/proxy?" + address.substring("proxy://".length());
         for (int port : ports) {
             String prior = "http://127.0.0.1:" + port + "/" + capability + "/";
             if (address.startsWith(prior)) return base() + address.substring(prior.length());

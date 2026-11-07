@@ -1,4 +1,5 @@
 import Perception
+import NavigationBackport
 import SwiftUI
 import TVCore
 import UniformTypeIdentifiers
@@ -242,6 +243,8 @@ private struct FeedbackPage: View {
     /// Chosen files still being prepared.
     @State private var adding = 0
     @State private var attachError: String?
+    /// The picture the viewer tapped in the strip, shown at full size (#468).
+    @State private var previewing: Feedback.Attachment?
     #if os(iOS)
     @State private var pickingPhotos = false
     #else
@@ -300,6 +303,13 @@ private struct FeedbackPage: View {
         }
         #endif
         .screenTitle(L10n.text("Send Feedback"), width: Layout.settingsWidth)
+        .sheet(item: $previewing) { attachment in
+            WithPerceptionTracking {
+
+            FeedbackAttachmentPreview(attachment: attachment)
+
+            }
+        }
 
         }
     }
@@ -393,7 +403,7 @@ private struct FeedbackPage: View {
                     Text(progress.formatted(.percent.precision(.fractionLength(0))))
                         .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                 } else if sending {
-                    ProgressView().controlSize(.small)
+                    ProgressView().appControlSize(.small)
                 }
                 #if os(macOS)
                 Text(verbatim: "⌘↩").font(.callout).foregroundStyle(.tertiary)
@@ -433,7 +443,9 @@ private struct FeedbackPage: View {
             HStack(spacing: 10) {
                 ForEach(attachments) { attachment in
                     WithPerceptionTracking {
-                    FeedbackAttachmentTile(attachment: attachment, side: tileSide, removable: !sending) {
+
+                    FeedbackAttachmentTile(attachment: attachment, side: tileSide, removable: !sending,
+                                           preview: attachment.kind == .image ? { previewing = attachment } : nil) {
                         attachments.removeAll { $0.id == attachment.id }
                         Feedback.discard([attachment])
                     }
@@ -442,7 +454,8 @@ private struct FeedbackPage: View {
                 }
                 ForEach(0..<adding, id: \.self) { _ in
                     WithPerceptionTracking {
-                    ProgressView().controlSize(.small).frame(width: tileSide, height: tileSide)
+
+                    ProgressView().appControlSize(.small).frame(width: tileSide, height: tileSide)
                         .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
                     }
@@ -542,7 +555,7 @@ private struct FeedbackPage: View {
                     .font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
             }
             #if os(macOS)
-            .toggleStyle(.switch).controlSize(.small)
+            .toggleStyle(.switch).appControlSize(.small)
             #endif
             .settingsSwitch()
             .padding(.top, 6)
@@ -647,11 +660,14 @@ private struct FeedbackPage: View {
     }
 }
 
-/// A picture or video going with the message: its thumbnail, a video's size, and a button to remove it.
+/// A picture or video going with the message: its thumbnail (a picture's opens at full size), a video's
+/// size, and a button to remove it.
 private struct FeedbackAttachmentTile: View {
     let attachment: Feedback.Attachment
     let side: CGFloat
     let removable: Bool
+    /// Opens the picture at full size; nil for a video, which the strip doesn't enlarge (#468).
+    let preview: (() -> Void)?
     let remove: () -> Void
     @State private var image: Image?
     private let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -675,9 +691,11 @@ private struct FeedbackAttachmentTile: View {
                     .background(.black.opacity(0.55), in: Capsule()).padding(4)
             }
         }
+        .contentShape(shape)
+        .onTapGesture { preview?() }
         .overlay {
             WithPerceptionTracking {
- shape.strokeBorder(Color.primary.opacity(0.1))
+ shape.strokeBorder(Color.primary.opacity(0.1)).allowsHitTesting(false)
             }
         }
         .overlay(alignment: .topTrailing) {
@@ -691,17 +709,63 @@ private struct FeedbackAttachmentTile: View {
 
             }
         }
+        .accessibilityActions {
+            if let preview { Button(L10n.text("Open"), action: preview) }
+        }
         .task(id: attachment.id) {
             guard let data = attachment.thumbnail else { return }
-            #if os(macOS)
-            image = NSImage(data: data).map { Image(nsImage: $0) }
-            #else
-            image = UIImage(data: data).map { Image(uiImage: $0) }
-            #endif
+            image = feedbackImage(from: data)
         }
 
         }
     }
+}
+
+/// The picture the viewer tapped in the strip, at full size.
+private struct FeedbackAttachmentPreview: View {
+    let attachment: Feedback.Attachment
+    @Environment(\.dismiss) private var dismiss
+    @State private var image: Image?
+
+    var body: some View {
+        WithPerceptionTracking {
+
+        NBNavigationStack {
+            WithPerceptionTracking {
+
+            ZStack {
+                Color.black
+                if let image {
+                    image.resizable().scaledToFit()
+                } else {
+                    ProgressView().tint(.white)
+                }
+            }
+            .ignoresSafeArea(edges: .bottom)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button(L10n.text("Done")) { dismiss() } }
+            }
+            .preferredColorScheme(.dark)
+
+            }
+        }
+        .discoverSheetSize(width: 1000, height: 680)
+        .task(id: attachment.id) {
+            guard let data = try? Data(contentsOf: attachment.file, options: .mappedIfSafe) else { return }
+            image = feedbackImage(from: data)
+        }
+
+        }
+    }
+}
+
+/// The picture in `data`, on whichever platform this builds for.
+private func feedbackImage(from data: Data) -> Image? {
+    #if os(macOS)
+    NSImage(data: data).map { Image(nsImage: $0) }
+    #else
+    UIImage(data: data).map { Image(uiImage: $0) }
+    #endif
 }
 
 #if os(iOS)
@@ -743,7 +807,7 @@ private struct FeedbackHistory: View {
                 Label(L10n.text("Your Feedback"), systemImage: "tray.full")
                     .font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
                 Spacer()
-                if checking { ProgressView().controlSize(.small) }
+                if checking { ProgressView().appControlSize(.small) }
             }
             .padding(.horizontal, 4)
             VStack(spacing: 0) {
@@ -843,9 +907,9 @@ private extension View {
     /// The page's buttons: capsules on iPhone and iPad, like the app's other buttons there.
     @ViewBuilder func feedbackButton(_ size: ControlSize) -> some View {
         #if os(iOS)
-        controlSize(size).buttonBorderShape(.capsule)
+        appControlSize(size).buttonBorderShape(.capsule)
         #else
-        controlSize(size)
+        appControlSize(size)
         #endif
     }
 }

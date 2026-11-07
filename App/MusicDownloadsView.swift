@@ -355,7 +355,7 @@ private struct MusicPendingActions: View {
         .controlButton()
         #else
         .font(.subheadline.weight(.semibold))
-        .buttonStyle(.bordered).buttonBorderShape(.capsule).controlSize(.small)
+        .buttonStyle(.bordered).buttonBorderShape(.capsule).appControlSize(.small)
         #endif
         .fixedSize()
 
@@ -494,6 +494,13 @@ struct MusicDownloadMenuItems: View {
             // A source's episode (#289) downloads from its video page.
             EmptyView()
         } else if !tracks.isEmpty, saved.count == tracks.count {
+            #if os(iOS)
+            if tracks.count == 1, let file = library.file(for: tracks[0]) {
+                Button { DownloadSharing.share(file, named: MusicDownloadLibrary.exportName(for: tracks[0])) } label: {
+                    Label(L10n.text("Save or Share"), systemImage: "square.and.arrow.up")
+                }
+            }
+            #endif
             Button(role: .destructive) { library.remove(saved.map(\.id)) } label: {
                 Label(L10n.text(saved.allSatisfy { $0.status == .completed } ? "Remove Download" : "Cancel Download"), systemImage: "trash")
             }

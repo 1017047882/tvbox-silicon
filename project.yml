@@ -10,8 +10,14 @@ options:
 settings:
   base:
     SWIFT_VERSION: '6.0'
-    MARKETING_VERSION: '1.8.8'
-    CURRENT_PROJECT_VERSION: '46'
+    # SwiftUI sometimes builds ForEach/LazyVGrid content off the main thread (crash reports from iOS 18,
+    # 26 and 27). Swift 6's runtime isolation check then traps in those @MainActor view closures
+    # (_dispatch_assert_queue_fail in SitesView/SiteView grids). Swift 5 had no such check, and building
+    # a view there is safe, so keep the compile-time checks and drop the runtime trap.
+    # https://developer.apple.com/forums/thread/802729
+    OTHER_SWIFT_FLAGS: $(inherited) -Xfrontend -disable-dynamic-actor-isolation
+    MARKETING_VERSION: '1.8.13'
+    CURRENT_PROJECT_VERSION: '51'
     GENERATE_INFOPLIST_FILE: YES
     INFOPLIST_KEY_CFBundleDisplayName: Yingxia
     INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.entertainment
@@ -98,6 +104,11 @@ targets:
       - package: ColorfulX
     info:
       properties:
+        # yingxia://import, the link a web page uses to hand over a subscription (#167). The same scheme
+        # carries the Douyin sign-in on iPhone, where the target below registers it.
+        CFBundleURLTypes:
+          - CFBundleURLName: com.tvbox.yingxia.handoff
+            CFBundleURLSchemes: [yingxia]
         # Sparkle (App/MacUpdater.swift) picks the appcast for the package in code. Every update must be signed
         # with this key (private half: ~/.sparkle/yingxia_ed25519.key on the release Mac), and so must the appcast.
         SUPublicEDKey: GH90e0snzIFHgk1wn+91KyrD6jbOnOu7sC7GJPWdG6c=
@@ -132,6 +143,7 @@ targets:
           RUNTIME="$SRCROOT/build/AppleRuntime/$PLATFORM_NAME"
           test -f "$RUNTIME/lib/libTVAppleRuntime.a"
           "$SRCROOT/Scripts/check-java-host.sh" "$RUNTIME/Resources/JavaHost/host.jar"
+          bash "$SRCROOT/Scripts/check-apple-runtime.sh" "$RUNTIME"
           rsync -a --delete "$RUNTIME/Resources/lib/" "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/lib/"
           rsync -a --delete "$RUNTIME/Resources/JavaHost/" "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/JavaHost/"
         basedOnDependencyAnalysis: false
@@ -202,11 +214,15 @@ targets:
           RUNTIME="$SRCROOT/build/AppleRuntime/$PLATFORM_NAME"
           test -f "$RUNTIME/lib/libTVAppleRuntime.a"
           "$SRCROOT/Scripts/check-java-host.sh" "$RUNTIME/Resources/JavaHost/host.jar"
+          bash "$SRCROOT/Scripts/check-apple-runtime.sh" "$RUNTIME"
           rsync -a --delete "$RUNTIME/Resources/lib/" "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/lib/"
           rsync -a --delete "$RUNTIME/Resources/JavaHost/" "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/JavaHost/"
         basedOnDependencyAnalysis: false
       - name: Embed on-device Python runtime
         script: '"$SRCROOT/Scripts/embed-apple-python.sh"'
+        basedOnDependencyAnalysis: false
+      - name: Embed on-device Node runtime
+        script: '"$SRCROOT/Scripts/embed-node-mobile.sh"'
         basedOnDependencyAnalysis: false
     settings:
       HEADER_SEARCH_PATHS: $(inherited) $(SRCROOT)/build/AppleRuntime/$(PLATFORM_NAME)/include

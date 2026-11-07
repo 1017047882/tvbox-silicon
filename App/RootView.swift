@@ -4,7 +4,7 @@ import SwiftUI
 import TVCore
 
 enum AppSection: String, CaseIterable, Identifiable, Hashable {
-    case home = "Watch Now", discover = "Discover", live = "Live TV", music = "Music", search = "Global Search", sites = "Sources", files = "Cloud Files", favorites = "Favorites", history = "Playback History", downloads = "Downloads", settings = "Settings", more = "More"
+    case home = "Watch Now", discover = "Discover", live = "Live TV", music = "Music", manga = "Manga", search = "Global Search", sites = "Sources", files = "Cloud Files", favorites = "Favorites", history = "Playback History", downloads = "Downloads", settings = "Settings", more = "More"
     /// Messages from the website (App/Announcements.swift); only the phone lists it, in More.
     case messages = "Messages"
     /// Apple TV's sidebar item for the song playing, first while one is loaded; it opens the player.
@@ -20,6 +20,7 @@ enum AppSection: String, CaseIterable, Identifiable, Hashable {
         case .search: "magnifyingglass"
         case .live: "dot.radiowaves.left.and.right"
         case .music: "music.note"
+        case .manga: "book.fill"
         case .sites: "square.grid.2x2.fill"
         case .files: "folder.fill"
         case .favorites: "heart.fill"
@@ -52,6 +53,11 @@ struct RootView: View {
     @State private var detailPath = NBNavigationPath()
     @State private var nowPlayingShown = false
     @State private var hidesToolbar = false
+    #if os(macOS)
+    @State private var columns: NavigationSplitViewVisibility = .all
+    /// What the viewer had before the reader folded the sidebar away.
+    @State private var columnsBefore: NavigationSplitViewVisibility = .all
+    #endif
     #endif
     private var tabs: [AppSection] {
         #if os(iOS)
@@ -63,7 +69,11 @@ struct RootView: View {
         return sections
     }
     private var sections: [AppSection] {
-        let sections = [AppSection.home, .discover, .live, .music, .search, .sites, .files, .history, .favorites, .downloads, .settings]
+        #if os(iOS)
+        // The iPad's sidebar, in the order set in Settings > Edit Tab Bar (#427).
+        return PhoneTabs.sidebar(stored: storedTabs, hiding: store.hiddenSections)
+        #else
+        let sections = [AppSection.home, .discover, .live, .music, .manga, .search, .sites, .files, .history, .favorites, .downloads, .settings]
             .filter { !store.hiddenSections.contains($0) }
         #if os(tvOS)
         // Where the remote already goes to change section, so the song is one move away from anywhere.
@@ -71,6 +81,7 @@ struct RootView: View {
         if store.music.track != nil, !MusicSidebarNowPlaying.inSidebarHeader { return [.nowPlaying] + sections }
         #endif
         return sections
+        #endif
     }
     #if os(tvOS)
     /// tvOS 17 has no sidebar, only the tab bar along the top, and selecting its eighth or a later tab does
@@ -94,7 +105,7 @@ struct RootView: View {
         @Perception.Bindable var store = store
         Group {
             #if os(macOS)
-            NavigationSplitView {
+            NavigationSplitView(columnVisibility: $columns) {
                 MacSidebar()
                     .navigationSplitViewColumnWidth(min: 190, ideal: 216, max: 260)
             } detail: {
@@ -109,6 +120,10 @@ struct RootView: View {
                     .environment(\.openRoute, RouteOpener { detailPath.append($0) })
             }
             .tvOnChange(of: store.section) { detailPath = NBNavigationPath() }
+            .tvOnChange(of: store.hidesSidebar) { _, hide in
+                if hide { columnsBefore = columns }
+                withAnimation(.tvSmooth(duration: 0.3)) { columns = hide ? .detailOnly : columnsBefore }
+            }
             .overlay {
                 WithPerceptionTracking {
                 if nowPlayingShown { MusicMacNowPlaying().ignoresSafeArea().transition(.move(edge: .bottom)) }
@@ -191,7 +206,7 @@ struct RootView: View {
     private var barSlots: Int { PhoneTabs.slots(horizontal: sizeClass, vertical: verticalSizeClass) }
     #endif
     private var platformTabs: some View {
-        tabView
+        rootTabs
             #if os(tvOS)
             .musicSidebarHeader()
             // Now Playing is not a page: choosing it opens the full-screen player over the section
@@ -236,6 +251,21 @@ struct RootView: View {
                 }
             }
             #endif
+    }
+
+    /// On Apple TV, Back on the sidebar leaves the app, which is easy to do by mistake (#499). From any other section it
+    /// goes to Watch Now first, and only Back on Watch Now's sidebar leaves.
+    /// `onExitCommand` on the tab view hears Back only while the sidebar has focus: pages, pushed pages, sheets and the
+    /// player handle their own, and Back from a page still moves to the sidebar (#404). An empty handler would keep the
+    /// press too, so on Watch Now there is none (`nil`) and Back leaves as usual. The modifier stays in place rather than
+    /// in an `if`: swapping views would rebuild the tab view and every section's state with it when moving to or from
+    /// Watch Now. tvOS 17's tab bar with More is left as it was.
+    @ViewBuilder private var rootTabs: some View {
+        #if os(tvOS)
+        tabView.onExitCommand(perform: store.section == .home || !tvMore.isEmpty ? nil : { store.section = .home })
+        #else
+        tabView
+        #endif
     }
 
     @ViewBuilder private var tabView: some View {
@@ -324,6 +354,7 @@ struct RootView: View {
         case .search: GlobalSearchView()
         case .live: LiveView()
         case .music: MusicView()
+        case .manga: MangaView()
         case .sites: SitesView()
         case .files: CloudFilesView()
         case .favorites: FavoritesView()
@@ -400,7 +431,9 @@ private struct PlayerPresentation: ViewModifier {
         // An iPhone watch page plays its own video at the top of the page (`VideoDetailView`).
         content.fullScreenCover(item: Binding(get: { store.playsInWatchPage(playing) ? nil : playing.map(PlayerSlot.init) },
                                               set: { if $0 == nil, !store.playsInWatchPage(playing) { playing = nil } })) {
-            PlaybackView(channel: $0.channel)
+            // Handed in: the iPad app on a Mac presents a full-screen cover without the presenter's environment
+            // objects, and every video stopped the app there ("No Observable object of type Store found").
+            PlaybackView(channel: $0.channel).environment(store)
         }
         #endif
 
@@ -414,7 +447,7 @@ private struct MacSidebar: View {
     @Environment(Store.self) private var store
     @Environment(Updates.self) private var updates
     private var groups: [(title: String, items: [AppSection])] {
-        let groups: [(title: String, items: [AppSection])] = [(L10n.text("Browse"), [.home, .discover, .search, .live, .music, .sites, .files]),
+        let groups: [(title: String, items: [AppSection])] = [(L10n.text("Browse"), [.home, .discover, .search, .live, .music, .manga, .sites, .files]),
                                                              (L10n.text("Library"), [.history, .favorites, .downloads, .settings])]
         return groups.map { (title: $0.title, items: $0.items.filter { !store.hiddenSections.contains($0) }) }
     }

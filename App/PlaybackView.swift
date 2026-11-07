@@ -3,6 +3,9 @@ import SwiftUI
 import AVKit
 @preconcurrency import AVFoundation
 import TVCore
+#if os(macOS)
+import IOKit.pwr_mgt
+#endif
 
 @MainActor @Perceptible final class PlaybackSession {
     /// A queue, so the next episode can wait behind this one and play straight on.
@@ -18,6 +21,10 @@ import TVCore
     /// Upscaling and 60 fps smoothing, drawn over AVKit's picture when switched on in Settings.
     let enhancer: VideoEnhancer
     let catalogDanmaku = CatalogDanmakuModel()
+    #if os(macOS)
+    /// Keeps the Mac from dimming, starting the screen saver and locking while a video plays (#565).
+    private let displayAwake = DisplayAwake()
+    #endif
     var history = PlaybackHistory.shared
     var skipDefaults = UserDefaults.standard
     private var historyContext: PlaybackHistoryContext?
@@ -126,6 +133,10 @@ import TVCore
     private var switchNotice: String?
     /// Qualities the stream can switch between (Bilibili), and the one chosen; nil is automatic.
     private(set) var qualities: [StreamQuality] = []
+    /// The sound tracks of a file that groups none of them (`UngroupedAudio`), for the player's Audio choice, and the
+    /// one playing. Empty when AVFoundation offers the choice itself, or there is none.
+    private(set) var audioChoices: [UngroupedAudio.Choice] = []
+    private(set) var audioChoice: CMPersistentTrackID?
     /// A live stream: played at the live edge, without scrubbing.
     private(set) var isLive = false
     /// The item is ready and has a finite duration, so there is a timeline to scrub. A live stream that
@@ -139,9 +150,11 @@ import TVCore
     /// The episode plays from a download on this device, which no server or connection holds up.
     private var savedDownload = false
     private var automatic: URL?
-    /// The live room playing (at the quality chosen), and whether it was already given a fresh address.
+    /// The live room playing (at the quality chosen), when it opens again with a fresh address (`LiveReopen`), and
+    /// when its stream last became ready.
     private var liveRoom: Channel?
-    private var liveRetried = false
+    private var liveReopen = LiveReopen()
+    private var liveReadyAt: TVInstant?
     private var liveRetrying = false
     /// The episode was already asked for again after its server ignored AVPlayer's byte range.
     private var rangeRetried = false
@@ -157,7 +170,7 @@ import TVCore
     /// A live stream is being moved to its live edge (`catchUpLive`).
     private var catchingUpLive = false
     /// A live room's chat, whose comments join `danmaku` as they are sent.
-    private var chat: BilibiliLiveChat?
+    private var chat: (any LiveChat)?
     /// Download state while connecting or buffering, sampled once a second from AVFoundation's logs.
     struct Transfer {
         var received: Int64 = 0
@@ -217,8 +230,7 @@ import TVCore
     }
 
     /// Shows a live room's chat as danmaku: each comment enters as it arrives.
-    private func listen(room: Int, generation active: UUID) {
-        let chat = BilibiliLiveChat(room: room)
+    private func listen(_ chat: any LiveChat, generation active: UUID) {
         self.chat = chat
         chat.start { text, color, position in
             Task { @MainActor [weak self] in
@@ -230,6 +242,13 @@ import TVCore
                 if self.sourceDanmaku.count > 4000 { self.sourceDanmaku.removeFirst(1000) }
             }
         }
+    }
+
+    /// Plays the sound track `id` of a file whose tracks AVFoundation offers no choice between (`audioChoices`).
+    func chooseAudio(_ id: CMPersistentTrackID) {
+        guard let item else { return }
+        UngroupedAudio.play(id, in: item)
+        audioChoice = UngroupedAudio.playing(item)
     }
 
     /// Plays the stream at `quality` (nil: automatic) from where it is now.
@@ -265,16 +284,18 @@ import TVCore
         sampler?.cancel(); sampler = nil
     }
 
-    /// A live room whose playlist contradicted itself (CoreMedia -12312) gets one fresh address before
-    /// the error shows: a platform's edge server can do this while it starts serving the room.
+    /// A live room that stopped asks its platform for a fresh address and plays on, instead of waiting for the viewer
+    /// to try again: one that played a while each time (Huya refuses an address about two minutes in, #488), one
+    /// that hasn't once for a playlist that contradicted itself (`LiveReopen`).
     private func retryLive(after failure: Error?) -> Bool {
         if liveRetrying { return true } // The failed item's other report of the same failure.
-        guard let room = liveRoom, !liveRetried, let failure = failure as NSError?,
-              failure.domain == "CoreMediaErrorDomain", failure.code == -12312 else { return false }
-        liveRetried = true; liveRetrying = true; loading = true
+        let played = liveReadyAt.map { $0.duration(to: .now) }
+        guard let room = liveRoom, liveReopen.shouldReopen(after: failure, playedFor: played) else { return false }
+        liveRetrying = true; loading = true
         detachItem(); observation = nil
         let active = generation
-        Diagnostics.shared.record(.warning, "player", "live retry room=\(room.url.absoluteString)")
+        Diagnostics.shared.record(.warning, "player", "live retry room=\(room.url.absoluteString) played=\(played.map { "\(Int($0.seconds))s" } ?? "-")")
+        note(L10n.text("The connection dropped. Reconnecting"))
         Task {
             do {
                 let resolved = try await LiveCatalog.resolve(room)
@@ -362,6 +383,11 @@ import TVCore
         return nil
     }
 
+    #if os(tvOS)
+    /// Whether Match Dynamic Range was on when AVPlayer refused HDR (`Remux.refusesHDR`).
+    private static var refusedMatching = false
+    #endif
+
     /// An Apple TV can report HDR playback and still refuse a repackaged HDR10 file (-11868 with Core Media
     /// -17223, "cannot be played on this device"). The file opens again with its picture converted to SDR,
     /// and so do the files opened after it. A mirrored or recorded screen refuses HDR the same way, but only
@@ -373,6 +399,9 @@ import TVCore
         let captured = Self.screenCaptured
         guard captured ? !Remux.screenCaptured : !Remux.refusesHDR else { return false }
         if captured { Remux.screenCaptured = true } else { Remux.refusesHDR = true }
+        #if os(tvOS)
+        Self.refusedMatching = HDRDisplay.matching
+        #endif
         detachItem(); observation = nil
         Diagnostics.shared.record(.warning, "player", "hdr refused captured=\(captured); converting to sdr \(failure.map(Self.describe) ?? "-")")
         Remux.stop(url)
@@ -461,10 +490,61 @@ import TVCore
             }
         }
         #endif
+        // `-qaSubtitleStyle <JSON>` saves that subtitle style, as Settings › Subtitle Style does.
+        if let json = UserDefaults.standard.string(forKey: "qaSubtitleStyle"),
+           let style = try? JSONDecoder().decode(SubtitleStyle.self, from: Data(json.utf8)) { style.save() }
         #endif
         queueObservation = player.observe(\.currentItem, options: [.new]) { [weak self] _, _ in
-            Task { @MainActor [weak self] in self?.queueMoved() }
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.subtitles.follow(self.player.currentItem)
+                self.queueMoved()
+            }
         }
+        // A style chosen while a video plays (the Mac shows Settings beside the player) also reaches AVPlayer's own
+        // subtitles, drawn in Picture in Picture.
+        styleObserver = NotificationCenter.default.addObserver(forName: SubtitleStyle.changed, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let rules = Self.subtitleRules()
+                for item in self.player.items() { item.textStyleRules = rules }
+            }
+        }
+        delayObserver = NotificationCenter.default.addObserver(forName: SubtitleDelay.changed, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.followSubtitleDelay() }
+        }
+        externalSubtitles.cues = subtitles
+        externalSubtitles.player = player
+        externalSubtitles.changed = { [weak self] in self?.followSubtitleDelay() }
+        subtitles.nativeChosen = { [weak self] in self?.externalSubtitles.nativeChosen() }
+        followSubtitleDelay()
+    }
+    private var styleObserver: NSObjectProtocol?
+    @PerceptionIgnored private var delayObserver: NSObjectProtocol?
+    /// Shows delayed subtitle lines at the player's clock (`SubtitleCues.advance`), only while a delay is set.
+    @PerceptionIgnored private var subtitleTimeObserver: Any?
+    /// Delayed subtitles (#599) reach the screen on a quarter-second clock rather than on the once-a-second sample.
+    /// A subtitle file the app shows itself (#576) has a twentieth-of-a-second one, so its lines are on time to a
+    /// frame or so. Otherwise the lines go up as AVPlayer hands them over, so no clock runs: it would only wake the
+    /// main thread.
+    private func followSubtitleDelay() {
+        let interval: Double? = subtitles.document != nil ? 0.05 : SubtitleDelay.load() > 0 ? 0.25 : nil
+        guard interval != subtitleClockInterval else { return }
+        if let observer = subtitleTimeObserver { player.removeTimeObserver(observer); subtitleTimeObserver = nil }
+        subtitleClockInterval = interval
+        guard let interval else { return }
+        subtitleTimeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: interval, preferredTimescale: 600), queue: .main) { [weak self] time in
+            MainActor.assumeIsolated { self?.subtitles.advance(to: time.seconds) }
+        }
+    }
+    @PerceptionIgnored private var subtitleClockInterval: Double?
+    /// Subtitle files beside the video, or added while it plays, that the app shows itself (#576).
+    let externalSubtitles = ExternalSubtitles()
+    /// The subtitle lines the player's overlay draws (`SubtitleOverlay`).
+    let subtitles = SubtitleCues()
+    /// The saved subtitle style as the rule AVPlayer lays over every subtitle cue it draws itself.
+    private static func subtitleRules() -> [AVTextStyleRule] {
+        AVTextStyleRule(textMarkupAttributes: SubtitleStyle.load().attributes).map { [$0] } ?? []
     }
     private var observation: NSKeyValueObservation?
     private var failureObserver: NSObjectProtocol?
@@ -482,7 +562,7 @@ import TVCore
         stop(); error = nil; errorSymbol = "play.slash.fill"; loading = true; showsPicture = false; sourceDanmaku = []; qualities = []; quality = nil; switchNotice = nil
         begin(channel)
         isLive = LiveCatalog.isRoom(channel.url) || channel.group == L10n.text("Bilibili Live")
-        liveRoom = LiveCatalog.isRoom(channel.url) ? channel : nil; liveRetried = false; liveRetrying = false; rangeRetried = false
+        liveRoom = LiveCatalog.isRoom(channel.url) ? channel : nil; liveReopen = LiveReopen(); liveRetrying = false; rangeRetried = false
         loopbackRecovered = nil; dropRecovery = PlaybackDropRecovery(); reopenedAfterDrop = false
         ErrorReports.shared.playing(live: isLive, format: channel.url.pathExtension, source: channel.historyContext?.sourceKey,
                                     danmaku: UserDefaults.standard.object(forKey: DanmakuPreference.key) == nil || UserDefaults.standard.bool(forKey: DanmakuPreference.key),
@@ -494,7 +574,7 @@ import TVCore
             // A live room becomes its current stream address now; the address expires.
             var channel = channel
             var liveQualities: [StreamQuality] = [], liveQuality: Int?
-            if let (platform, id) = LiveCatalog.room(channel.url), platform.chat == "bilibili", let room = Int(id) { self.listen(room: room, generation: activeGeneration) }
+            if let (platform, id) = LiveCatalog.room(channel.url), let chat = LiveChats.make(platform.chat, room: id) { self.listen(chat, generation: activeGeneration) }
             if LiveCatalog.isRoom(channel.url) {
                 self.note(L10n.text("Finding the live stream"))
                 do { (channel, liveQualities, liveQuality) = try await LiveCatalog.resolve(channel) }
@@ -531,6 +611,7 @@ import TVCore
             let address = prepared.url
             self.configure(channel, url: address, generation: activeGeneration)
             self.playing = channel; self.automatic = address
+            self.externalSubtitles.begin(channel, playing: address)
             self.qualities = liveQualities.isEmpty ? DashStreams.qualities(for: address) : liveQualities
             self.quality = liveQuality
             if DanmakuSource.has(channel.url), let comments = await DanmakuSource.comments(for: channel.url),
@@ -547,6 +628,21 @@ import TVCore
         if !url.isFileURL {
             note(L10n.text("Connecting to %@", Self.server(CloudStreams.transfer(for: url)?.host ?? Remux.transfer(for: url)?.host ?? url.host)))
         }
+        #if os(tvOS)
+        // In SDR mode AVPlayer refuses a repackaged HDR stream before it loads, so before AVKit could ask for HDR.
+        if let picture = Remux.hdrPicture(url), HDRDisplay.needsSwitch(to: picture) {
+            Task { [weak self] in
+                await HDRDisplay.switchTo(picture)
+                guard let self, self.generation == activeGeneration, !Task.isCancelled else { return }
+                self.attach(channel, url: url, generation: activeGeneration)
+            }
+            return
+        }
+        #endif
+        attach(channel, url: url, generation: activeGeneration)
+    }
+
+    private func attach(_ channel: Channel, url: URL, generation activeGeneration: UUID) {
         let item = makeItem(channel, url: url)
         watch(item, channel: channel, url: url, generation: activeGeneration)
         // A repackaged file is served on this device's loopback, which an AirPlay receiver can't reach.
@@ -574,6 +670,20 @@ import TVCore
             ?? AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": channel.headers])
         let item = AVPlayerItem(asset: asset)
         if url.scheme == HongguoStreams.scheme { item.preferredForwardBufferDuration = HongguoStreams.forwardBufferDuration }
+        item.textStyleRules = Self.subtitleRules()
+        subtitles.attach(item)
+        #if DEBUG
+        // `-qaSubtitle <n>` turns on the item's nth subtitle track, for screenshots of how subtitles look.
+        if let index = UserDefaults.standard.string(forKey: "qaSubtitle").flatMap(Int.init) {
+            // Or the system's own choice (subtitles off) replaces it once the item loads.
+            player.appliesMediaSelectionCriteriaAutomatically = false
+            Task { @MainActor in
+                if let group = try? await asset.loadMediaSelectionGroup(for: .legible), group.options.indices.contains(index) {
+                    item.select(group.options[index], in: group)
+                }
+            }
+        }
+        #endif
         return item
     }
 
@@ -623,12 +733,13 @@ import TVCore
                 }
             }
             var remuxed: URL?
-            if let source { remuxed = await Self.remux(source, channel: channel) }
+            if let source { remuxed = try? await Self.remux(source, channel: channel) }
             guard let self, self.generation == active, !Task.isCancelled, self.item === item else {
                 if let remuxed { Remux.stop(remuxed) }
                 return
             }
             guard let remuxed else {
+                self.checkingPicture = false
                 self.restorePositionIfNeeded(item)
                 self.loading = self.pendingResume != nil || self.restoringPosition
                 if self.pendingResume == nil { self.startPlayback() }
@@ -636,30 +747,55 @@ import TVCore
             }
             self.detachItem(); self.observation = nil
             self.configure(channel, url: remuxed, generation: active)
+            self.externalSubtitles.playing(remuxed)
             self.automatic = remuxed
         }
     }
 
     /// HLS whose MPEG-TS segments carry HEVC plays its sound alone: AVPlayer drops that picture without an error (#292).
-    /// For the first seconds after an HLS stream is ready, an item that plays sound with no picture track opens again
-    /// repackaged (`HLSRemux`) where it was. A stream it can't repackage plays on as it is. Only the tracks tell: such a
-    /// stream can still report a presentation size (1280x720 for a 4K channel whose master names its resolution, #394).
+    /// An item that plays sound without a picture opens again repackaged (`HLSRemux`) where it was; a stream that can't
+    /// be repackaged plays on as it is. A presentation size doesn't count as a picture (1280x720 for a 4K channel whose
+    /// master names its resolution, #394), and neither does a video track that decodes no frames: an iOS that lists the
+    /// HEVC track but doesn't show it, and a 4K stream that takes longer than eight seconds to start, both play sound
+    /// alone otherwise (#585). Only frames count, watched for a minute so a slow 4K stream isn't given up on.
     private func checkSegmentedPicture(_ item: AVPlayerItem, channel: Channel, url: URL, generation active: UUID) {
         guard checkingSegments != ObjectIdentifier(item), !Remux.isRemuxed(url), ["http", "https"].contains(url.scheme) else { return }
         checkingSegments = ObjectIdentifier(item)
         Task { [weak self] in
-            for _ in 0..<16 {
+            var pictureless = 0
+            for _ in 0..<120 {
                 try? await tvSleep(for: .milliseconds(500))
                 guard let self, self.generation == active, self.item === item, item.status == .readyToPlay else { return }
-                let kinds = item.tracks.compactMap { $0.assetTrack?.mediaType }
-                if kinds.contains(.video) { return }
-                guard kinds.contains(.audio), self.player.timeControlStatus == .playing else { continue }
+                let video = item.tracks.filter { $0.assetTrack?.mediaType == .video }
+                if video.contains(where: { $0.isEnabled && $0.currentVideoFrameRate > 0 }) { return }
+                // The rate counts frames drawn, so it reads 0 too for a picture nothing draws (a hidden or minimized
+                // window). Only HEVC is listed without being shown; any other listed picture plays, as before #585.
+                if !video.isEmpty, await !Self.mayBeHEVC(video) { return }
+                guard self.generation == active, self.item === item else { return }
+                // The first frames land a beat after sound starts; four checks without any is no picture.
+                guard self.player.timeControlStatus == .playing else { pictureless = 0; continue }
+                pictureless += 1
+                guard pictureless >= 4 else { continue }
+                // Only a playlist can be repackaged; a plain file mustn't be read whole to find that out.
                 let playback = item.accessLog()?.events.last?.playbackType ?? ""
-                guard ["VOD", "LIVE"].contains(playback) || url.absoluteString.lowercased().contains("m3u8") else { return }
+                guard ["VOD", "LIVE"].contains(playback) || url.absoluteString.lowercased().contains("m3u8") else { continue }
                 self.repackageSegments(item, channel: channel, url: url, generation: active)
                 return
             }
         }
+    }
+
+    /// Whether a listed picture is HEVC, or its codec is not known yet.
+    private static func mayBeHEVC(_ tracks: [AVPlayerItemTrack]) async -> Bool {
+        for track in tracks {
+            guard let asset = track.assetTrack, let formats = try? await asset.load(.formatDescriptions), !formats.isEmpty else { return true }
+            let codecs = formats.map { format -> String in
+                let code = CMFormatDescriptionGetMediaSubType(format)
+                return String(decoding: [24, 16, 8, 0].map { UInt8((code >> $0) & 0xff) }, as: UTF8.self)
+            }
+            if codecs.contains(where: { ["hvc1", "hev1", "dvh1", "dvhe"].contains($0) }) { return true }
+        }
+        return false
     }
 
     private func repackageSegments(_ item: AVPlayerItem, channel: Channel, url: URL, generation active: UUID) {
@@ -680,6 +816,7 @@ import TVCore
             self.loading = true
             self.detachItem(); self.observation = nil
             self.configure(channel, url: remuxed, generation: active)
+            self.externalSubtitles.playing(remuxed)
             self.automatic = remuxed
         }
     }
@@ -687,6 +824,7 @@ import TVCore
     /// Follows the episode's item (ready, failed, ended), the player's state, and the transfer, for this playback.
     private func watch(_ item: AVPlayerItem, channel: Channel, url: URL, generation activeGeneration: UUID) {
         self.item = item
+        audioChoices = []; audioChoice = nil; liveReadyAt = nil
         hasTimeline = item.status == .readyToPlay && item.duration.isNumeric
         observation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
             let status = item.status
@@ -700,6 +838,14 @@ import TVCore
                 guard let self, self.generation == activeGeneration else { return }
                 self.hasTimeline = timeline
                 if status == .readyToPlay {
+                    if self.isLive { self.liveReadyAt = .now }
+                    if UngroupedAudio.playOne(item) { Diagnostics.shared.record(.info, "player", "ungrouped audio tracks; playing the first") }
+                    Task { [weak self] in
+                        let choices = await UngroupedAudio.choices(item)
+                        guard let self, self.generation == activeGeneration, self.item === item else { return }
+                        self.audioChoices = choices
+                        self.audioChoice = choices.isEmpty ? nil : UngroupedAudio.playing(item)
+                    }
                     self.checkingPicture = Self.repackagable(url)
                     self.restorePositionIfNeeded(item)
                     self.loading = self.pendingResume != nil || self.restoringPosition
@@ -707,9 +853,10 @@ import TVCore
                     Task { [weak self] in
                         let refused = await Self.recordVideoFormat(item)
                         guard let self, self.generation == activeGeneration, self.item === item, self.checkingPicture else { return }
-                        self.checkingPicture = false
+                        // While it is repackaged, `checkingPicture` stays on: the once-a-second resume would otherwise
+                        // jump to the saved position and play this item's sound with no picture until then (#515).
                         if Remux.showsPicture(refused) { self.repackage(item, channel: channel, url: url, generation: activeGeneration) }
-                        else { self.restorePositionIfNeeded(item) }
+                        else { self.checkingPicture = false; self.restorePositionIfNeeded(item) }
                     }
                     self.checkSegmentedPicture(item, channel: channel, url: url, generation: activeGeneration)
                 }
@@ -760,8 +907,12 @@ import TVCore
             let playing = player.timeControlStatus == .playing
             Task { @MainActor [weak self] in
                 guard let self, self.generation == activeGeneration else { return }
+                Diagnostics.shared.record(.info, "player", "transport waiting=\(waiting) paused=\(paused) playing=\(playing) reason=\(self.player.reasonForWaitingToPlay?.rawValue ?? "-")")
                 self.buffering = waiting
                 self.paused = paused
+                #if os(macOS)
+                self.displayAwake.hold(!paused)
+                #endif
                 if paused { self.clearBoost() }
                 // The first frame lands a beat after playback starts; keep the artwork until then, so no black flashes between.
                 if playing, !self.showsPicture {
@@ -901,15 +1052,23 @@ import TVCore
         return text
     }
     func stop() {
+        #if os(macOS)
+        displayAwake.hold(false)
+        #endif
         saveHistory()
         discardUpcoming()
         upcomingAttempted = false; skipsToUpcoming = false; advanced = nil
         upcomingEpisode = nil; onAdvance = nil; playsOn = { false }; clearBoost()
         if let url = playing?.url { HongguoStreams.stop(url) }
         if let automatic { CloudStreams.stop(automatic); Remux.stop(automatic) }
+        #if os(tvOS)
+        HDRDisplay.reset()
+        #endif
         if playing != nil { ErrorReports.shared.stoppedPlaying() }
         playing = nil
         catalogDanmaku.clear()
+        externalSubtitles.stop()
+        subtitles.follow(nil)
         historyContext = nil; pendingResume = nil; restoringPosition = false
         requestedResumePosition = nil; restoredPosition = nil
         skipScope = nil; skipSettings = EpisodeSkipSettings(); skipPass = EpisodeSkipPass()
@@ -1003,6 +1162,10 @@ extension PlaybackSession {
     }
 
     fileprivate func prepare(_ channel: Channel) async throws -> Prepared {
+        #if os(tvOS)
+        // An HDR refusal while the TV stayed in SDR says nothing once Match Dynamic Range is switched (and back).
+        if Remux.refusesHDR, Self.refusedMatching != HDRDisplay.matching { Remux.refusesHDR = false }
+        #endif
         var address = channel.url
         do { address = try await EmbeddedJarHost.shared.recoverProxy(address) }
         catch {
@@ -1030,11 +1193,20 @@ extension PlaybackSession {
             Diagnostics.shared.record(.info, "player", "cloud direct host=\(media.url.host ?? "-") length=\(media.length)")
         } else if let media = await CatPawOpen.proxiedMedia(address, headers: channel.headers) {
             try Task.checkCancellation()
-            // The bundle downloads each request with 10 to 16 threads of its own: reading ahead on six at once ran its
-            // Node out of memory, and on one a 4K episode stalled whenever the drive slowed.
-            address = CloudStreams.register(media, parallel: 2) { nil }
+            if let direct = await CatPawOpen.directMedia(media) {
+                try Task.checkCancellation()
+                // A drive file whose link the bundle's proxy reveals streams straight from the drive, like the plugins'
+                // (above): through the bundle, a 4K file filled the heap of the phone's Node until it stopped (#530).
+                address = CloudStreams.register(direct) { await CatPawOpen.directMedia(media) }
+                Diagnostics.shared.record(.info, "player", "catpaw direct host=\(direct.url.host ?? "-") length=\(direct.length)")
+            } else {
+                // The bundle downloads each request with 10 to 16 threads of its own: reading ahead on six at once ran its
+                // Node out of memory, and on one a 4K episode stalled whenever the drive slowed.
+                // Its proxy moves to a new port when iOS took back the sockets of the suspended app (#485).
+                address = CloudStreams.register(media, parallel: 2) { await CatPawOpen.relocated(media) }
+                Diagnostics.shared.record(.info, "player", "catpaw stream length=\(media.length)")
+            }
             prepared.url = address
-            Diagnostics.shared.record(.info, "player", "catpaw stream length=\(media.length)")
         } else if EmbeddedJarHost.isPluginProxy(address) {
             Diagnostics.shared.record(.warning, "player", "plugin proxy stream \(EmbeddedJarHost.proxyRoute(address))")
             prepared.pluginProxy = true
@@ -1043,7 +1215,7 @@ extension PlaybackSession {
         if address.scheme == CloudStreams.scheme, await CloudStreams.needsRemux(address) {
             try Task.checkCancellation()
             note(L10n.text("Repackaging the video for this device"))
-            if let source = await CloudStreams.remuxSource(for: address), let url = await Self.remux(source, channel: channel) {
+            if let source = await CloudStreams.remuxSource(for: address), let url = try await Self.remux(source, channel: channel) {
                 prepared.url = url
                 return prepared
             }
@@ -1067,9 +1239,10 @@ extension PlaybackSession {
             }
             prepared.url = address
         }
-        // A link or saved file whose name says MKV and the like is repackaged too; when that fails AVPlayer
-        // tries it as it is.
-        if Remux.handles(name: address.lastPathComponent), ["http", "https", "file"].contains(address.scheme) {
+        // A link or saved file whose name says MKV, a disc image and the like is repackaged too; when that fails
+        // AVPlayer tries it as it is.
+        if Remux.handles(name: address.lastPathComponent) || DiscImage.handles(name: address.lastPathComponent),
+           ["http", "https", "file"].contains(address.scheme) {
             note(L10n.text("Repackaging the video for this device"))
             let source: RemuxSource?
             if address.isFileURL { source = try? Remux.fileSource(address) }
@@ -1081,7 +1254,7 @@ extension PlaybackSession {
                 }
             }
             try Task.checkCancellation()
-            if let source, let url = await Self.remux(source, channel: channel) {
+            if let source, let url = try await Self.remux(source, channel: channel) {
                 prepared.url = url
                 return prepared
             }
@@ -1102,7 +1275,13 @@ extension PlaybackSession {
 
     /// Why a Dolby Vision 5 file was refused: while the screen is mirrored or recorded iOS plays no HDR stream.
     private static var dolbyVisionRefused: String {
-        screenCaptured ? L10n.text("Dolby Vision video can't play while the screen is mirrored or recorded. Stop mirroring or recording, then try again.")
+        #if os(tvOS)
+        // Dolby Vision 5 has no HDR10 picture to convert to SDR: only an HDR display mode shows it.
+        if !HDRDisplay.matching {
+            return L10n.text("This Dolby Vision video needs HDR. To keep your Apple TV in SDR and still play it, turn on Settings › Video and Audio › Match Content › Match Dynamic Range: the TV then switches to HDR only while such a video plays.")
+        }
+        #endif
+        return screenCaptured ? L10n.text("Dolby Vision video can't play while the screen is mirrored or recorded. Stop mirroring or recording, then try again.")
             : L10n.text("This device can't play this Dolby Vision video. Try another line.")
     }
 
@@ -1118,11 +1297,18 @@ extension PlaybackSession {
         #endif
     }
 
-    /// The repackaged file's address, nil when FFmpeg can't read it.
-    fileprivate static func remux(_ source: RemuxSource, channel: Channel) async -> URL? {
+    /// The repackaged file's address, nil when FFmpeg can't read it. A disc image that can't play says why:
+    /// AVPlayer can't open it either.
+    fileprivate static func remux(_ source: RemuxSource, channel: Channel) async throws -> URL? {
         Remux.screenCaptured = screenCaptured
-        do { return try await Remux.open(source, subtitles: channel.subtitles, headers: channel.headers) }
-        catch {
+        // Only the files for this episode: a drive's folder holds every episode's.
+        let video = SubtitleMatch.episode(channel.name) != nil ? channel.name : channel.url.lastPathComponent.removingPercentEncoding ?? channel.name
+        let files = Array(SubtitleMatch.candidates(channel.subtitles, video: video).prefix(8))
+        do { return try await Remux.open(source, subtitles: files, headers: channel.headers) }
+        catch let error as DiscImage.Failure {
+            Diagnostics.shared.record(.warning, "player", "disc image \(error)")
+            throw error
+        } catch {
             if !Task.isCancelled { Diagnostics.shared.failure("player", "remux source=\(channel.historyContext?.sourceKey ?? "-")", error) }
             return nil
         }
@@ -1179,9 +1365,13 @@ extension PlaybackSession {
                     if status == .failed {
                         Diagnostics.shared.record(.warning, "player", "upcoming failed \(failure.map(Self.describe) ?? "-")")
                         self.discardUpcoming()
-                    } else if status == .readyToPlay, let intro, intro.enabled, intro.introEnd > 0,
-                              intro.validationError(duration: queued.duration.seconds) == nil, queued.currentTime().seconds < intro.introEnd {
-                        queued.seek(to: CMTime(seconds: intro.introEnd, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero, completionHandler: nil)
+                    } else if status == .readyToPlay {
+                        // Before it plays, so a file with ungrouped dubs starts with one of them.
+                        UngroupedAudio.playOne(queued)
+                        if let intro, intro.enabled, intro.introEnd > 0,
+                           intro.validationError(duration: queued.duration.seconds) == nil, queued.currentTime().seconds < intro.introEnd {
+                            queued.seek(to: CMTime(seconds: intro.introEnd, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero, completionHandler: nil)
+                        }
                     }
                 }
             }
@@ -1242,6 +1432,7 @@ extension PlaybackSession {
         begin(channel)
         loading = upcoming.item.status != .readyToPlay
         playing = channel; automatic = upcoming.prepared.url
+        externalSubtitles.begin(channel, playing: upcoming.prepared.url)
         player.allowsExternalPlayback = !Remux.isRemuxed(upcoming.prepared.url)
         qualities = DashStreams.qualities(for: upcoming.prepared.url)
         watch(upcoming.item, channel: channel, url: upcoming.prepared.url, generation: activeGeneration)
@@ -1412,3 +1603,87 @@ extension PlaybackSession {
         return L10n.text("Getting it ready · from %@", TVDelay.seconds(Int(resume)).clock(hours: showHours))
     }
 }
+
+#if os(macOS)
+/// Our own hold on the Mac's display while a video plays. AVPlayer's `preventsDisplaySleepDuringVideoPlayback`
+/// leaves it to Core Media, which holds the display only while it counts the picture as on screen, so a Mac
+/// could still dim, start the screen saver and lock mid-film (#565). IINA and VLC hold one of their own too.
+final class DisplayAwake {
+    private var assertion: IOPMAssertionID?
+
+    func hold(_ on: Bool) {
+        if on, assertion == nil {
+            var id = IOPMAssertionID(0)
+            let made = IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleDisplaySleep as CFString,
+                                                   IOPMAssertionLevel(kIOPMAssertionLevelOn), "Yingxia is playing a video" as CFString, &id)
+            if made == kIOReturnSuccess { assertion = id }
+        } else if !on, let id = assertion {
+            IOPMAssertionRelease(id)
+            assertion = nil
+        }
+    }
+
+    deinit { if let assertion { IOPMAssertionRelease(assertion) } }
+}
+#endif
+
+#if os(tvOS)
+/// With Match Dynamic Range on, an Apple TV kept in SDR switches to HDR for an HDR video. AVKit asks for the switch
+/// once the item has loaded, but AVPlayer refuses the HDR variant of a repackaged HLS stream (-11868/-17223) while the
+/// display is still in SDR, before it loads. So the player asks for the switch itself first, and waits for it.
+@MainActor enum HDRDisplay {
+    /// The picture the display was last asked to show, until the player stops.
+    private(set) static var requested: Remux.HDRPicture?
+
+    private static var manager: AVDisplayManager? {
+        UIApplication.shared.connectedScenes.compactMap { scene -> UIWindow? in
+            guard let scene = scene as? UIWindowScene else { return nil }
+            return scene.keyWindow ?? scene.windows.first
+        }.first?.avDisplayManager
+    }
+
+    /// Settings › Video and Audio › Match Content › Match Dynamic Range.
+    static var matching: Bool { manager?.isDisplayCriteriaMatchingEnabled ?? false }
+
+    /// Only with Match Dynamic Range on: otherwise tvOS keeps the mode, and waiting for a switch only costs a second.
+    static func needsSwitch(to picture: Remux.HDRPicture) -> Bool { matching && requested != picture }
+
+    /// Asks for `picture`'s dynamic range (and frame rate, with Match Frame Rate on) and returns once the TV has
+    /// switched, or when it doesn't begin to (already in that mode).
+    static func switchTo(_ picture: Remux.HDRPicture) async {
+        guard let manager, manager.isDisplayCriteriaMatchingEnabled, let format = format(picture) else { return }
+        requested = picture
+        manager.preferredDisplayCriteria = AVDisplayCriteria(refreshRate: Float(picture.frameRate), formatDescription: format)
+        let start = Date()
+        var began = false
+        while Date().timeIntervalSince(start) < 10 {
+            if manager.isDisplayModeSwitchInProgress { began = true }
+            else if began || Date().timeIntervalSince(start) > 1 { break }
+            try? await tvSleep(for: .milliseconds(100))
+        }
+        Diagnostics.shared.record(.info, "player", "display hdr matching=\(manager.isDisplayCriteriaMatchingEnabled) transfer=\(picture.transfer) dv=\(picture.dolbyVision) rate=\(picture.frameRate) switched=\(began) ms=\(Int(Date().timeIntervalSince(start) * 1000))")
+    }
+
+    /// Back to the mode chosen in Settings.
+    static func reset() {
+        guard requested != nil else { return }
+        requested = nil
+        manager?.preferredDisplayCriteria = nil
+    }
+
+    private static func format(_ picture: Remux.HDRPicture) -> CMFormatDescription? {
+        let extensions: [CFString: Any] = [
+            kCMFormatDescriptionExtension_ColorPrimaries: kCMFormatDescriptionColorPrimaries_ITU_R_2020,
+            kCMFormatDescriptionExtension_TransferFunction: picture.transfer == 18
+                ? kCMFormatDescriptionTransferFunction_ITU_R_2100_HLG : kCMFormatDescriptionTransferFunction_SMPTE_ST_2084_PQ,
+            kCMFormatDescriptionExtension_YCbCrMatrix: kCMFormatDescriptionYCbCrMatrix_ITU_R_2020,
+        ]
+        var format: CMFormatDescription?
+        CMVideoFormatDescriptionCreate(allocator: kCFAllocatorDefault,
+                                       codecType: picture.dolbyVision ? kCMVideoCodecType_DolbyVisionHEVC : kCMVideoCodecType_HEVC,
+                                       width: Int32(max(picture.width, 1)), height: Int32(max(picture.height, 1)),
+                                       extensions: extensions as CFDictionary, formatDescriptionOut: &format)
+        return format
+    }
+}
+#endif

@@ -122,7 +122,9 @@ struct DiscoverDetailView: View {
         // The movie player, full screen: SwiftUI's VideoPlayer in a sheet had no full screen, Fill or speed (#300).
         .fullScreenCover(isPresented: $trailerShown) {
             WithPerceptionTracking {
-            if let trailer = details?.trailer { DiscoverMobileTrailerScreen(trailer: trailer, title: details?.name ?? item.name) }
+
+            // Store handed in, as for every full-screen cover: the iPad app on a Mac leaves environment objects behind.
+            if let trailer = details?.trailer { DiscoverMobileTrailerScreen(trailer: trailer, title: details?.name ?? item.name).environment(store) }
 
             }
         }
@@ -180,7 +182,9 @@ struct DiscoverDetailView: View {
         .environment(\.colorScheme, dark ? .dark : .light)
         .ignoresSafeArea(edges: .top)
         .navigationTitle("")
-        #if !os(macOS)
+        #if os(macOS)
+        .artUnderToolbar()
+        #else
         .tvToolbar(.visible, for: .navigationBar)
         .tvToolbarBackground(.hidden, for: .navigationBar)
         .tvToolbarColorScheme(dark ? .dark : .light, for: .navigationBar)
@@ -609,9 +613,10 @@ struct DiscoverSearchPresentation: ViewModifier {
     func body(content: Content) -> some View {
         WithPerceptionTracking {
         #if os(iOS)
+        // Store handed in: the iPad app on a Mac presents a full-screen cover without the presenter's environment objects.
         content.fullScreenCover(isPresented: $isPresented) {
             WithPerceptionTracking {
- DiscoverSearchView()
+ DiscoverSearchView().environment(store)
             }
         }
             // Search Sources on a detail page opened from here switches to the Search tab, which is behind this
@@ -636,11 +641,16 @@ struct DiscoverSearchPresentation: ViewModifier {
 }
 
 extension View {
-    /// Artwork that runs under the bars. On the Mac it stops at the sidebar: the split view's detail reports the
-    /// sidebar's width as a leading inset, so ignoring every edge stretched the art under the sidebar.
-    func discoverFullBleed() -> some View {
+    /// Artwork that runs under the bars. On the Mac it is laid out beside the sidebar: the split view's detail reports
+    /// the sidebar's width as a leading inset, so ignoring every edge stretched the art under the sidebar. On macOS 26
+    /// a mirrored, blurred copy fills the space under the floating sidebar instead, so the page has no hard edge there.
+    @ViewBuilder func discoverFullBleed() -> some View {
         #if os(macOS)
-        ignoresSafeArea(edges: .top)
+        if #available(macOS 26, *) {
+            backgroundExtensionEffect().ignoresSafeArea(edges: .top)
+        } else {
+            ignoresSafeArea(edges: .top)
+        }
         #else
         ignoresSafeArea()
         #endif

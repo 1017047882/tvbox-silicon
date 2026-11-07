@@ -16,6 +16,7 @@ public struct CategoryFilter: Identifiable, Hashable, Sendable {
     public struct Option: Hashable, Sendable {
         public let name: String
         public let value: String
+        public init(name: String, value: String) { self.name = name; self.value = value }
     }
     public let key: String
     public let name: String
@@ -77,10 +78,14 @@ public struct Video: Identifiable, Hashable, Sendable, Codable {
     public let episodes: [Episode]
     /// The source's category and genre tags (type_name, vod_class, vod_tag), comma-separated; nil when it gave none.
     public let category: String?
+    /// A plugin setting listed among titles (`action`, e.g. FTY's "LoginShow" or "quarkClean"): TVBox runs
+    /// `Spider.action` for it instead of opening details, which the plugin can't answer for such an item.
+    public let action: String?
     public init(id: String, name: String, poster: URL? = nil, posterHeaders: [String: String] = [:], year: String? = nil,
-                remarks: String = "", synopsis: String = "", episodes: [Episode] = [], category: String? = nil) {
+                remarks: String = "", synopsis: String = "", episodes: [Episode] = [], category: String? = nil, action: String? = nil) {
         self.id = id; self.name = name; self.poster = poster; self.posterHeaders = posterHeaders
         self.year = year; self.remarks = remarks; self.synopsis = synopsis; self.episodes = episodes; self.category = category
+        self.action = action
     }
     /// A folder of a drive source (AList, 小雅 and other cloud-drive spiders tag it `vod_tag: "folder"`). As in
     /// TVBox it opens as a listing of its own (the category request with the folder's id), not as details.
@@ -90,7 +95,7 @@ public struct Video: Identifiable, Hashable, Sendable, Codable {
     public func keepingPoster(_ poster: URL?, headers: [String: String]? = nil) -> Video {
         guard self.poster == nil, let poster else { return self }
         return Video(id: id, name: name, poster: poster, posterHeaders: headers ?? [:], year: year,
-                     remarks: remarks, synopsis: synopsis, episodes: episodes, category: category)
+                     remarks: remarks, synopsis: synopsis, episodes: episodes, category: category, action: action)
     }
     public init?(json: [String: JSONValue], origin: URL) {
         guard let id = json["vod_id"]?.string, !id.isEmpty else { return nil }
@@ -99,9 +104,10 @@ public struct Video: Identifiable, Hashable, Sendable, Codable {
         let artwork = json["vod_pic"]?.string.flatMap { PosterResource(address: $0, origin: origin) }
         poster = artwork?.url; posterHeaders = artwork?.headers ?? [:]
         remarks = HTMLText.plain(json["vod_remarks"]?.string ?? "")
-        synopsis = HTMLText.plain(json["vod_content"]?.string ?? "")
+        synopsis = HTMLText.synopsis(json["vod_content"]?.string ?? "")
         let labels = ["type_name", "vod_class", "vod_tag"].compactMap { json[$0]?.string.map(HTMLText.name) }.filter { !$0.isEmpty }
         category = labels.isEmpty ? nil : labels.joined(separator: ",")
+        action = json["action"]?.string.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
         let flags = (json["vod_play_from"]?.string ?? "").components(separatedBy: "$$$")
         var groups: [[Episode]] = []
         for (groupIndex, group) in (json["vod_play_url"]?.string ?? "").components(separatedBy: "$$$").enumerated() {
@@ -142,6 +148,21 @@ enum HTMLText {
             .replacingOccurrences(of: " *\n\\s*", with: "\n", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
+
+    /// A synopsis (`vod_content`): `plain`, minus the lines that hold nothing but a 线路 label ("线路1", "播放线路")
+    /// or a quality word ("蓝光", "1080P"), which aggregator pages leave behind as layout. Everything else is the
+    /// provider's own text and stays as written, links and promotion included: a plugin's synopsis can carry the
+    /// address the app opens (the Wex config center, #360), and a plot can mention 地址 or 弹幕.
+    static func synopsis(_ html: String) -> String {
+        let text = plain(html)
+        return text.split(separator: "\n").filter { line in
+            line.count > 12 || layoutLabel.firstMatch(in: String(line), range: NSRange(line.startIndex..., in: line)) == nil
+        }.joined(separator: "\n")
+    }
+    /// A whole line that is only a 线路 label or a quality word. Anchored at both ends, so plot text never matches.
+    private static let layoutLabel = try! NSRegularExpression(
+        pattern: "^\\s*(?:(?:播放|高清|蓝光|超清|备用|高速)?\\s*线路[一二三四五六七八九十0-9]*[:：]?|超清|高清|蓝光|标清|流畅|4k|1080p|720p|2160p)\\s*$",
+        options: [.caseInsensitive])
 
     /// A title or name: entities decoded ("太阳&amp;月亮" is "太阳&月亮"), spaces tidied, and nothing else touched,
     /// so a name that reads like markup after decoding ("&lt;3") keeps its text.
@@ -239,11 +260,19 @@ public struct CatalogClient: Sendable {
     /// Every answer, or failure, feeds the source's `SourceHealth`.
     private func request(_ params: [String: String]) async throws -> [String: JSONValue] {
         let started = TVInstant.now
+        // Trace detail requests without logging video ids, signed URLs or account cookies.
+        let details = params["ids"] != nil
+        if details { Diagnostics.shared.record(.info, "catalog.playback", "request begin source=\(site.key) type=\(site.type) runtime=\(site.runtime)") }
+        defer {
+            if details { Diagnostics.shared.record(.info, "catalog.playback", "request end source=\(site.key) elapsed=\(started.duration(to: .now).seconds)s cancelled=\(Task.isCancelled)") }
+        }
         do {
             let json = try await perform(params)
+            if details { Diagnostics.shared.record(.info, "catalog.playback", "request returned source=\(site.key)") }
             await SourceHealth.shared.record(site, origin: origin, seconds: started.duration(to: .now).seconds, error: nil)
             return json
         } catch {
+            if details { Diagnostics.shared.failure("catalog.playback", "request source=\(site.key)", error) }
             if !Task.isCancelled {
                 await SourceHealth.shared.record(site, origin: origin, seconds: started.duration(to: .now).seconds, error: error)
             }
@@ -281,7 +310,7 @@ public struct CatalogClient: Sendable {
             return try await LocalJarHost.shared.request(site: site, jarURL: site.scriptURL(origin: origin), params: params, http: http, scriptOrigin: origin)
         }
         #else
-        #if os(iOS)
+        #if os(iOS) || os(tvOS)
         if site.raw["catPawOpen"] != nil, site.runtime == .javascript {
             return try await EmbeddedNodeHost.shared.request(site: site, bundleURL: site.scriptURL(origin: origin), params: params, http: http, origin: origin)
         }
@@ -338,12 +367,51 @@ public struct CatalogClient: Sendable {
         }
     }
     public func home() async throws -> CatalogPage {
-        CatalogPage(json: try await request(site.type == 4 ? ["filter": "true"] : [:]), origin: origin)
+        CatalogPage(json: try await homeJSON(), origin: origin)
+    }
+    /// The source's home answer. A CMS API (type 1) answers its plain home call like `ac=list`: names and remarks
+    /// but no `vod_pic`. As other TVBox clients do, the posters then come from one `ac=detail` call for those ids.
+    private func homeJSON() async throws -> [String: JSONValue] {
+        let json = try await request(site.type == 4 ? ["filter": "true"] : [:])
+        guard site.type == 1, let list = json["list"]?.array else { return json }
+        let ids = Self.idsMissingPosters(list)
+        guard !ids.isEmpty else { return json }
+        let details: [String: JSONValue]
+        do { details = try await request(["ac": "detail", "ids": ids.joined(separator: ",")]) }
+        catch {
+            if error is CancellationError || Task.isCancelled { throw CancellationError() }
+            Diagnostics.shared.record(.warning, "catalog", "\(reportContext) home posters: \(error.localizedDescription)")
+            return json
+        }
+        var result = json
+        result["list"] = .array(Self.fillingPosters(list, from: details["list"]?.array ?? []))
+        return result
+    }
+    static func idsMissingPosters(_ list: [JSONValue]) -> [String] {
+        list.compactMap { entry in
+            guard let fields = entry.object, (fields["vod_pic"]?.string ?? "").trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+            return fields["vod_id"]?.string
+        }
+    }
+    /// `list` with each entry's missing `vod_pic` taken from the detail entry with the same `vod_id`.
+    static func fillingPosters(_ list: [JSONValue], from details: [JSONValue]) -> [JSONValue] {
+        var posters: [String: JSONValue] = [:]
+        for entry in details {
+            guard let fields = entry.object, let id = fields["vod_id"]?.string,
+                  let pic = fields["vod_pic"], !(pic.string ?? "").isEmpty else { continue }
+            posters[id] = pic
+        }
+        return list.map { entry in
+            guard var fields = entry.object, (fields["vod_pic"]?.string ?? "").trimmingCharacters(in: .whitespaces).isEmpty,
+                  let id = fields["vod_id"]?.string, let pic = posters[id] else { return entry }
+            fields["vod_pic"] = pic
+            return .object(fields)
+        }
     }
     public func recommendations() async throws -> [Recommendation] { try await recommendationPage().items }
     /// The home answer as recommendations plus the source's categories, from one plugin call.
     public func recommendationPage() async throws -> (items: [Recommendation], categories: [Category]) {
-        let json = try await request(site.type == 4 ? ["filter": "true"] : [:])
+        let json = try await homeJSON()
         var seen = Set<String>()
         let items = (json["list"]?.array ?? []).compactMap { entry in
             entry.object.flatMap { Recommendation(json: $0, origin: origin, isIndex: (site.raw["indexs"]?.int ?? 0) == 1) }
@@ -390,6 +458,21 @@ public struct CatalogClient: Sendable {
         guard let video = result.videos.first else { throw TVError.unsupported(L10n.text("The API did not return video details.")) }
         return video
     }
+    /// Runs a listed plugin setting (`Video.action`) with the source's JAR spider, as TVBox does with
+    /// `Spider.action`: what the plugin then shows (its own window, its toasts, the pages it opens).
+    public func runAction(_ action: String) async throws -> PluginScreen {
+        guard site.type == 3, site.runtime == .jar else { throw TVError.unsupported(L10n.text("This plugin setting only works in Android TVBox.")) }
+        // Settings are not browsing: they stay out of the source's health (`request`).
+        let result = try await perform(["spiderAction": action])
+        if let failure = result["errMsg"]?.string?.trimmingCharacters(in: .whitespacesAndNewlines), !failure.isEmpty {
+            throw TVError.unsupported(failure)
+        }
+        return PluginScreen(json: result)
+    }
+    /// Sends the viewer's input to the plugin window a setting opened, and returns what it shows then.
+    public func pluginWindow(_ event: PluginEvent) async throws -> PluginScreen {
+        PluginScreen(json: try await perform(["spiderUI": event.json]))
+    }
     public func playback(_ episode: Episode) async throws -> Channel {
         let plan = try await preparePlayback(episode)
         return try await resolvePlayback(plan, choice: plan.choices[0])
@@ -404,6 +487,7 @@ public struct CatalogClient: Sendable {
     public func preparePlayback(_ episode: Episode, forDownload: Bool = false) async throws -> PlaybackPlan {
         var headers = site.raw["header"]?.object?.compactMapValues(\.string) ?? [:]
         if site.type == 4 || site.type == 3 {
+            if !forDownload { CatPawDanmaku.remember(self) }
             var params = ["play": episode.address, "flag": episode.flag]
             if site.type == 3 { params["detailID"] = episode.videoID }
             let result = try await request(params)
@@ -549,9 +633,7 @@ public struct CatalogClient: Sendable {
 
     /// `aid_cid[_ep]` from a Bili spider's proxy address (`…/proxy?do=bili&aid=…&cid=…&ep=…`).
     static func bilibiliProxyID(_ address: String) -> String? {
-        guard isPluginProxy(address), let marker = address.range(of: "/proxy?") else { return nil }
-        var proxy = URLComponents(); proxy.percentEncodedQuery = String(address[marker.upperBound...])
-        let items = proxy.queryItems ?? []
+        let items = pluginProxyQuery(address)
         func parameter(_ name: String) -> String? { items.first(where: { $0.name == name })?.value.flatMap { UInt64($0) != nil ? $0 : nil } }
         guard items.first(where: { $0.name == "do" })?.value == "bili", let aid = parameter("aid"), let cid = parameter("cid") else { return nil }
         return [aid, cid, parameter("ep")].compactMap { $0 }.joined(separator: "_")
@@ -628,13 +710,20 @@ public struct CatalogClient: Sendable {
         }
         return false
     }
+    /// The query of a plugin proxy address, split by hand. Plugins don't always percent-encode the wrapped
+    /// address (spaces, CJK, `|` headers, a bare `%`), and `URLComponents.percentEncodedQuery` traps on those.
+    static func pluginProxyQuery(_ address: String) -> [URLQueryItem] {
+        guard isPluginProxy(address), let marker = address.range(of: "/proxy?") else { return [] }
+        func decode(_ text: Substring) -> String { String(text).removingPercentEncoding ?? String(text) }
+        return address[marker.upperBound...].split(separator: "&", omittingEmptySubsequences: false).map { pair in
+            let parts = pair.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+            return URLQueryItem(name: decode(parts[0]), value: parts.count > 1 ? decode(parts[1]) : nil)
+        }
+    }
     /// Plugins wrap HLS addresses in their own loopback proxy (`http://127.0.0.1:<port>/proxy?do=m3u8&url=...`).
     /// This app hosts no such proxy, and in `m3u8` mode the wrapped address is the real playlist.
     static func unwrapPluginProxy(_ address: String) -> String {
-        guard isPluginProxy(address), let marker = address.range(of: "/proxy?") else { return address }
-        var parts = URLComponents()
-        parts.percentEncodedQuery = String(address[marker.upperBound...])
-        let items = parts.queryItems ?? []
+        let items = pluginProxyQuery(address)
         guard items.first(where: { $0.name == "do" })?.value == "m3u8",
               let inner = items.first(where: { $0.name == "url" })?.value, !inner.isEmpty else { return address }
         return inner

@@ -9,6 +9,14 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
 
+// Node 18 (nodejs-mobile) defaults to a new connection for every request; desktop Node 19+ keeps them
+// alive. Bundles using axios's default agents can make several requests to one site in quick succession
+// (address probes, searches with fallback paths, challenge cookies). Reuse those connections on iOS too:
+// repeatedly opening TLS connections made the 9280.kstore.vip sites reset the handshake before answering.
+// Bundles' own agents and their TLS verification settings remain theirs.
+http.globalAgent.keepAlive = true;
+https.globalAgent.keepAlive = true;
+
 const [controlFile, relistenFile] = process.argv.slice(2);
 const token = crypto.randomBytes(16).toString('hex');
 function log(...values) { process.stderr.write(values.map(v => typeof v === 'string' ? v : JSON.stringify(v)).join(' ') + '\n'); }
@@ -102,6 +110,14 @@ async function answerMessage(req, res) {
     let message = {};
     try { message = JSON.parse(Buffer.concat(chunks).toString('utf8')) || {}; } catch { }
     const page = String(message.opt?.url || '');
+    if (message.action === 'getPlayInfo') {
+        catPlaying.asked = Date.now();
+        const { title, episodeName, flag } = catPlaying;
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ title, episodeName, flag }));
+        return;
+    }
+    if (message.action === 'danmuPush' && loopbackPage(page)) catPushed = { url: page.replace('//localhost:', '//127.0.0.1:'), at: Date.now() };
     if (['openInternalWebview', 'openWeb'].includes(message.action) && /^http:\/\/(127\.0\.0\.1|localhost|\d+\.\d+\.\d+\.\d+):\d+(\/|$)/.test(page)) {
         for (const watch of pageWatchers) watch(page);
     }
@@ -112,6 +128,49 @@ async function answerMessage(req, res) {
 // The page on loopback, as the app opens it, or undefined when it is served anywhere else.
 const loopbackPage = page => page && /^http:\/\/(127\.0\.0\.1|localhost):\d+(\/|$)/.test(page) ? page : undefined;
 const isMessage = req => req.method === 'POST' && req.url === '/msg';
+
+// CatPawOpen bundles find danmaku for what plays, as the CatVod Open apps take it (#506): a moment after a play the
+// 9280.kstore.vip bundle asks the app what plays ("getPlayInfo": {title, episodeName, flag}), matches that in its own
+// danmu_api and sends the comments' address back ("danmuPush": http://127.0.0.1:<port>/danmu/auto?name=…&episode=…).
+// The host names each play from the detail answers it passed on; the app asks for the address with `catDanmaku` and
+// fetches the comments itself. A bundle that never asks gets no answer it didn't get before. Keep in step with host.mjs.
+const catTitles = new Map(); // play id -> {title, episodeName, flag}, from the latest detail answers
+let catPlaying = { title: '', episodeName: '', flag: '', at: 0, asked: 0 }, catPushed = { url: '', at: 0 };
+function rememberTitles(text) {
+    let list;
+    try { list = JSON.parse(text)?.list; } catch { return; }
+    for (const video of Array.isArray(list) ? list : []) {
+        const title = String(video?.vod_name ?? '').trim();
+        if (!title) continue;
+        const flags = String(video.vod_play_from ?? '').split('$$$');
+        String(video.vod_play_url ?? '').split('$$$').forEach((line, index) => {
+            for (const item of line.split('#')) {
+                const cut = item.indexOf('$');
+                const episodeName = cut < 0 ? '' : item.slice(0, cut).trim(), id = cut < 0 ? item : item.slice(cut + 1);
+                if (!id.trim()) continue;
+                catTitles.delete(id);
+                catTitles.set(id, { title, episodeName, flag: flags[index] || '' });
+            }
+        });
+    }
+    while (catTitles.size > 3000) catTitles.delete(catTitles.keys().next().value);
+}
+function startedPlaying(flag, id) {
+    const known = catTitles.get(id);
+    catPlaying = { title: known?.title || '', episodeName: known?.episodeName || '', flag: flag || known?.flag || '', at: Date.now(), asked: 0 };
+}
+// The comments' address for an episode: the one the bundle sent for this play, or else its /danmu/auto for the name
+// the app asks with (a bundle without it answers 404). `pending` while the bundle may still send one: it asks what
+// plays 800 ms after the play and sends the address straight after the answer.
+function danmakuAddress(port, params) {
+    const now = Date.now(), name = String(params.name || ''), episode = String(params.episode || '');
+    const current = catPlaying.title === name && catPlaying.episodeName === episode;
+    const pushed = current && catPushed.at >= catPlaying.at && catPushed.url.startsWith(`http://127.0.0.1:${port}/`) ? catPushed.url : '';
+    const pending = current && !pushed && now - catPlaying.at < 3000 && !(catPlaying.asked && now - catPlaying.asked > 500);
+    const query = new URLSearchParams({ name });
+    if (episode) query.set('episode', episode);
+    return { result: JSON.stringify({ url: pushed || `http://127.0.0.1:${port}/danmu/auto?${query}`, pushed: !!pushed, pending }) };
+}
 // Messages go to a server of the host's own: a bundle that finds its own port behind catDartServerPort() skips the call
 // as a call to itself (BRIDGE_SELF_CALL in the 豆儿 and Lmentor bundles), so pages they ask for never arrived (#385).
 const messages = http.createServer((req, res) => {
@@ -192,15 +251,20 @@ async function start({ bundle, api, profile }) {
     return { server, port, ports: [port], started: new Set() };
 }
 // The app's cloud-drive sign-ins, for bundles that keep their own and sign in through a config center the app can't
-// show. Bundles of the wexfnw family take a drive's cookie at PUT /website/api/credential/<drive>/cookie, and the
-// Xunlei sign-in (its device and tokens) as their whole Xunlei config. Each sign-in passes on once per change in the
-// app, so the bundle's own refreshes of it stay. Keep in step with host.mjs.
+// show. Bundles of the wexfnw family take a drive's cookie at PUT /website/api/credential/<drive>/cookie as {value}, and
+// the Xunlei sign-in (its device and tokens) as their whole Xunlei config. The catpaw.douer.me bundle (豆儿) takes the
+// cookie at PUT /website/<drive>/cookie as {cookie} (#651). Each sign-in passes on once per change in the app, so the
+// bundle's own refreshes of it stay. Keep in step with host.mjs.
 const sharedDrives = { quark: 'quarkCookie', uc: 'ucCookie', baidu: 'baiduCookie' };
-function sharedSignIns(accounts) {
+const cookieRoutes = [
+    { route: drive => `/website/api/credential/${drive}/cookie`, body: value => ({ value }), thunder: true },
+    { route: drive => `/website/${drive}/cookie`, body: value => ({ cookie: value }) },
+];
+function sharedSignIns(accounts, layout) {
     const shares = Object.entries(sharedDrives)
-        .map(([drive, key]) => ({ drive, route: `/website/api/credential/${drive}/cookie`, value: String(accounts[key] || '').trim() }));
+        .map(([drive, key]) => ({ drive, route: layout.route(drive), value: String(accounts[key] || '').trim(), body: layout.body }));
     // A bundle from before Xunlei sign-ins lacks this address; the other drives still pass.
-    shares.push({ drive: 'thunder', route: '/website/api/thunder/config', value: accounts.xunlei ? JSON.stringify(accounts.xunlei) : '', optional: true });
+    if (layout.thunder) shares.push({ drive: 'thunder', route: '/website/api/thunder/config', value: accounts.xunlei ? JSON.stringify(accounts.xunlei) : '', body: value => ({ value }), optional: true });
     return shares;
 }
 async function shareAccounts(instance, accountsFile, profile) {
@@ -215,15 +279,26 @@ async function shareAccounts(instance, accountsFile, profile) {
     try { given = JSON.parse(fs.readFileSync(givenFile, 'utf8')); } catch { }
     const digest = text => crypto.createHash('sha256').update(text).digest('hex');
     let changed = false;
-    for (const { drive, route, value, optional } of sharedSignIns(accounts)) {
-        if (!value || given[drive] === digest(value)) continue;
-        const { status, text } = await request(`http://127.0.0.1:${instance.port}${route}`,
-            { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ value }) });
-        // The config center answers {code: 0}; anything else is a bundle without one.
-        let saved = false;
-        try { saved = status >= 200 && status < 300 && JSON.parse(text).code === 0; } catch { }
-        if (!saved) { if (optional) continue; instance.takesAccounts = false; break; }
-        given[drive] = digest(value); changed = true; log('CATPAW_ACCOUNT', drive);
+    // The bundle's layout is the first that takes a cookie; until then each is tried in turn.
+    for (const layout of instance.cookieLayout ? [instance.cookieLayout] : cookieRoutes) {
+        let missing = false;
+        for (const { drive, route, value, body, optional } of sharedSignIns(accounts, layout)) {
+            if (!value || given[drive] === digest(value)) continue;
+            const { status, text } = await request(`http://127.0.0.1:${instance.port}${route}`,
+                { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body(value)) });
+            // The config center answers {code: 0}. Its refusal ({code: -1, message}) leaves the other drives to pass; any
+            // other answer is a bundle without a config center at this address.
+            let answer;
+            try { answer = JSON.parse(text); } catch { }
+            if (!(status >= 200 && status < 300 && answer?.code === 0)) {
+                if (optional || (status !== 404 && answer?.code !== undefined)) continue;
+                missing = true; break;
+            }
+            instance.cookieLayout = layout;
+            given[drive] = digest(value); changed = true; log('CATPAW_ACCOUNT', drive);
+        }
+        if (!missing) break;
+        if (instance.cookieLayout || layout === cookieRoutes.at(-1)) { instance.takesAccounts = false; break; }
     }
     if (changed) fs.writeFileSync(givenFile, JSON.stringify(given));
 }
@@ -264,11 +339,17 @@ async function call(instance, params) {
         if (!['start', 'poll', 'cancel'].includes(params.catLogin)) throw new Error('Invalid CatPawOpen sign-in');
         return { result: await send(`/website/api/login/${params.catLogin}`, { provider: params.provider || '', taskId: params.taskId || '' }) };
     }
+    if (params.catDanmaku) return danmakuAddress(instance.port, params);
     const api = String(params.catPawOpen || '');
     if (!/^\/spider\/[^?#]+$/.test(api)) throw new Error('Invalid CatPawOpen source');
-    if (!instance.started.has(api)) { await send(api + '/init', {}); instance.started.add(api); }
+    // A site without an init route is ready as it is: the xiaosage.361123.xyz bundle's drive sites (玩偶, 花卷, 原盘…)
+    // answer its POST with HTTP 404 "站点或接口不存在" and serve everything else (#446). Keep in step with host.mjs.
+    if (!instance.started.has(api)) {
+        await send(api + '/init', {}).catch(error => { if (error.status !== 404) throw error; });
+        instance.started.add(api);
+    }
     let route, body;
-    if ('play' in params) { route = '/play'; body = { flag: params.flag || '', id: params.play }; }
+    if ('play' in params) { route = '/play'; body = { flag: params.flag || '', id: params.play }; startedPlaying(body.flag, body.id); }
     else if ('ids' in params) { route = '/detail'; body = { id: params.ids }; }
     else if ('wd' in params) { route = '/search'; body = { wd: params.wd, page: Number(params.pg || 1), quick: params.quick === 'true' }; }
     else if ('t' in params) { route = '/category'; body = { id: params.t, page: Number(params.pg || 1), filter: true, filters: params.filters ? JSON.parse(params.filters) : {} }; }
@@ -279,12 +360,26 @@ async function call(instance, params) {
     const { text, page } = await watchingPages(route, () => sendFresh(send, api + route, body)
         .then(text => route === '/search' && !text.trim() ? '{"list":[]}' : text)
         .catch(error => { if (route === '/search' && error.status === 404) return '{"list":[]}'; throw error; }));
+    if (route === '/detail') rememberTitles(text);
     // Sources address the bundle's own proxy by the device's network address, or by a port from before a relisten,
     // but the server is on loopback.
     const ports = instance.ports.join('|');
     const local = address => address.replace(new RegExp(`http://\\d+\\.\\d+\\.\\d+\\.\\d+:(?:${ports})/`, 'g'), `http://127.0.0.1:${instance.port}/`);
     const result = local(text), shown = loopbackPage(page && local(page));
     return { result: shown ? withPage(result, shown) : result };
+}
+
+// A bundle's media proxy address from before a relisten, at the port that bundle listens on now: a stream that was
+// playing when iOS suspended the app asks again there (#485). The address as it is when no bundle had its port.
+async function relocate(address) {
+    const url = new URL(address);
+    for (const pending of bundles.values()) {
+        const instance = await pending.catch(() => null);
+        if (!instance?.ports.includes(Number(url.port))) continue;
+        url.port = String(instance.port);
+        return url.toString();
+    }
+    return address;
 }
 
 const control = http.createServer(async (req, res) => {
@@ -294,6 +389,7 @@ const control = http.createServer(async (req, res) => {
         const chunks = [];
         for await (const chunk of req) chunks.push(chunk);
         const input = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+        if (input.relocate) { reply({ result: await relocate(String(input.relocate)) }); return; }
         proxy = input.proxy?.host ? { host: input.proxy.host, port: Number(input.proxy.port), exceptions: input.proxy.exceptions || [] } : null;
         let instance = bundles.get(input.bundle);
         if (!instance) {

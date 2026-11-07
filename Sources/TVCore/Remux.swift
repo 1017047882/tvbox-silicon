@@ -7,6 +7,7 @@ import Network
 public enum Remux {
     /// Whether a file starting with these bytes is one the repackager opens and AVPlayer doesn't.
     public static func handles(_ head: Data) -> Bool {
+        if DiscImage.handles(head) { return true }
         let bytes = [UInt8](head.prefix(16))
         guard bytes.count >= 4 else { return false }
         func text(_ range: Range<Int>) -> String { String(decoding: bytes[range], as: UTF8.self) }
@@ -33,17 +34,23 @@ public enum Remux {
     }
 
     /// Opens the file and returns the address of its HLS master playlist on a loopback server. `subtitles`, the
-    /// files beside it, are fetched (with `headers`) while the file opens and join its own subtitles.
+    /// files beside it, are fetched (with `headers`) while the file opens and join its own subtitles. The picture
+    /// waits for them at most `subtitleGrace` after the file is open; any later the player shows them itself
+    /// (`subtitleSources`, #576).
     public static func open(_ source: RemuxSource, subtitles: [ExternalSubtitle] = [], headers: [String: String] = [:]) async throws -> URL {
         try await open(source, subtitles: subtitles, headers: headers, session: .shared)
     }
 
-    static func open(_ source: RemuxSource, subtitles: [ExternalSubtitle], headers: [String: String], session subtitleSession: URLSession,
+    static func open(_ original: RemuxSource, subtitles: [ExternalSubtitle], headers: [String: String], session subtitleSession: URLSession,
                      translator: (any SubtitleTranslating)? = SubtitleTranslation.translator) async throws -> URL {
-        async let files = SubtitleFile.load(subtitles, headers: headers, session: subtitleSession)
+        // A Blu-ray or DVD image plays its main title.
+        let source: RemuxSource
+        do { source = try await DiscImage.title(original) ?? original }
+        catch { await original.close(); throw error }
+        let loading = Task { await SubtitleFile.load(subtitles, headers: headers, session: subtitleSession) }
         let session = RemuxSession(source: source)
-        try await session.open()
-        session.add(await files)
+        do { try await session.open() } catch { loading.cancel(); throw error }
+        session.add(await waiting(for: loading, atMost: subtitleGrace))
         if let translator { await session.addTranslations(translator) }
         RemuxStore.shared.add(session)
         do {
@@ -54,6 +61,29 @@ public enum Remux {
             throw error
         }
     }
+
+    /// How long an open file waits for its subtitle files once the picture is ready.
+    static let subtitleGrace: TVDelay = .seconds(2)
+
+    /// The files `loading` fetched, or none if it takes longer than `limit` (it is cancelled then).
+    static func waiting(for loading: Task<[SubtitleFile.Track], Never>, atMost limit: TVDelay) async -> [SubtitleFile.Track] {
+        await withTaskGroup(of: [SubtitleFile.Track]?.self) { group in
+            group.addTask { await loading.value }
+            group.addTask { try? await tvSleep(for: limit); return nil }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            guard let first else {
+                loading.cancel()
+                Diagnostics.shared.record(.info, "subtitles", "files late; the player shows them")
+                return []
+            }
+            return first
+        }
+    }
+
+    /// The addresses of the subtitle files that are tracks of the stream at `url`: the player leaves these to
+    /// AVPlayer and shows the rest itself.
+    public static func subtitleSources(_ url: URL) -> Set<URL> { session(url)?.subtitleSources ?? [] }
 
     /// Whether `url` is served by the repackager: a file (`open`) or an HLS stream (`HLSRemux`).
     public static func isRemuxed(_ url: URL) -> Bool { identifier(url).map(RemuxStore.shared.contains) ?? false }
@@ -71,6 +101,30 @@ public enum Remux {
     /// Whether the picture behind `url` is Dolby Vision profile 5, served as it is: it has no HDR10 picture to
     /// convert to SDR, so a device that refuses it refuses it again.
     public static func isDolbyVision(_ url: URL) -> Bool { session(url)?.plan.isDolbyVision ?? false }
+
+    /// An HDR or Dolby Vision picture served as it is: what an Apple TV switches its display to before AVPlayer
+    /// opens it (in SDR mode AVPlayer refuses an HDR variant of an HLS stream).
+    public struct HDRPicture: Sendable, Equatable {
+        public let width: Int, height: Int
+        public let frameRate: Double
+        /// FFmpeg's AVColorTransferCharacteristic: 16 is PQ, 18 is HLG.
+        public let transfer: Int
+        public let dolbyVision: Bool
+    }
+
+    /// The picture behind `url` when it is served as HDR, not converted to SDR; nil otherwise.
+    public static func hdrPicture(_ url: URL) -> HDRPicture? {
+        guard let plan = session(url)?.plan, let video = plan.tracks.first, video.kind == .video, plan.videoRange != "SDR" else { return nil }
+        return HDRPicture(width: video.stream.width, height: video.stream.height, frameRate: video.stream.frameRate,
+                          transfer: plan.videoRange == "HLG" ? 18 : 16, dolbyVision: plan.isDolbyVision)
+    }
+
+    /// The source's Dolby Vision profile when the picture behind `url` is served without it (profile 7, say).
+    public static func droppedDolbyVision(_ url: URL) -> Int? {
+        guard let track = session(url)?.plan.tracks.first, track.kind == .video, track.dolbyVision == .drop,
+              track.stream.doviProfile > 0 else { return nil }
+        return track.stream.doviProfile
+    }
 
     /// Set once AVPlayer refused an HDR stream although the device reported HDR playback (an Apple TV can):
     /// files opened after that convert HDR pictures to SDR, as for a display that shows no HDR.
@@ -133,7 +187,7 @@ public enum Remux {
         let parts = url.path.split(separator: "/")
         return parts.count == 3 ? String(parts[1]) : nil
     }
-    private static func session(_ url: URL) -> RemuxSession? { identifier(url).flatMap(RemuxStore.shared.session) }
+    static func session(_ url: URL) -> RemuxSession? { identifier(url).flatMap(RemuxStore.shared.session) }
 }
 
 struct CloudRemuxSource: RemuxSource {

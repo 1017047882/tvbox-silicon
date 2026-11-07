@@ -284,6 +284,9 @@ private struct MusicSongCell: View {
         .glassRow()
         .contextMenu {
             WithPerceptionTracking {
+
+            FavoriteMenuButton(item: .music(track), name: track.title)
+            Divider()
             Button { store.music.playNext([track]) } label: { Label(L10n.text("Play Next"), systemImage: "text.line.first.and.arrowtriangle.forward") }
             Button { store.music.addToUpNext([track]) } label: { Label(L10n.text("Add to Up Next"), systemImage: "text.line.last.and.arrowtriangle.forward") }
             Divider()
@@ -354,6 +357,10 @@ struct MusicTrackMenu: View {
     var body: some View {
         WithPerceptionTracking {
         Menu {
+            if tracks.count == 1, let track = tracks.first {
+                FavoriteMenuButton(item: .music(track), name: track.title)
+                Divider()
+            }
             Button { store.music.playNext(tracks) } label: { Label(L10n.text("Play Next"), systemImage: "text.line.first.and.arrowtriangle.forward") }
             Button { store.music.addToUpNext(tracks) } label: { Label(L10n.text("Add to Up Next"), systemImage: "text.line.last.and.arrowtriangle.forward") }
             Divider()

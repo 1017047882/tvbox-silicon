@@ -54,7 +54,7 @@ public enum CloudStreams {
         return (stream.counter.value, stream.host)
     }
 
-    /// Whether the file is one AVFoundation can't open but `Remux` can (MKV, AVI, FLV, ...), judged from its
+    /// Whether the file is one AVFoundation can't open but `Remux` can (MKV, AVI, FLV, disc images, ...), judged from its
     /// first bytes. False when they can't be read: the player reports network failures itself.
     public static func needsRemux(_ url: URL) async -> Bool {
         guard let stream = CloudStreamStore.shared.stream(url), let head = await stream.head() else { return false }
@@ -181,7 +181,8 @@ actor CloudByteStream {
     private var recent: [Int] = []
     private var inflight: [Int: Task<Data, Error>] = [:]
     /// Where AVPlayer is reading. A file whose audio sits far from its video is read in two
-    /// places at once; a jump away from all of them is a seek.
+    /// places at once; a jump away from all of them is a seek. On the iPhone AVPlayer also reads one
+    /// place on two overlapping requests, the newer starting a few chunks behind the older (issue #433).
     private var readers: [Int] = []
     /// How many reads wait on each chunk; a seek never cancels a chunk someone still needs.
     private var waiting: [Int: Int] = [:]
@@ -228,7 +229,7 @@ actor CloudByteStream {
         return value
     }
 
-    func head() async -> Data? { try? await chunk(0).prefix(16) }
+    func head() async -> Data? { try? await chunk(0).prefix(DiscImage.headLength) }
 
     /// From now on the bytes stay as stored; chunks already retagged are fetched again.
     func keepSampleEntries() {
@@ -241,15 +242,15 @@ actor CloudByteStream {
     func read(at offset: Int, count: Int) async throws -> Data {
         guard offset >= 0, offset < source.length, count > 0 else { throw TVError.unsupported("Invalid range") }
         let index = offset / Self.chunkSize
-        let near = { (reader: Int) in index >= reader - 1 && index <= reader + Self.readAhead + 1 }
-        if let current = readers.firstIndex(where: near) { readers[current] = index }
+        let near = { (reader: Int) in index >= reader - Self.readAhead && index <= reader + Self.readAhead + 1 }
+        if let current = readers.firstIndex(where: near) { readers[current] = max(readers[current], index) }
         else {
             if !readers.isEmpty { Diagnostics.shared.record(.debug, "cloud.stream", "reader at=\(index) others=\(readers)") }
             readers.append(index)
             // Keep the two most recent positions (video and audio); a third means the user seeked.
             if readers.count > 2 {
                 readers.removeFirst(readers.count - 2)
-                let windows = readers.map { $0 - 1...$0 + Self.readAhead }
+                let windows = readers.map { $0 - Self.readAhead...$0 + Self.readAhead }
                 for (key, task) in inflight where waiting[key, default: 0] == 0 && !windows.contains(where: { $0.contains(key) }) {
                     task.cancel(); inflight[key] = nil
                 }
@@ -288,7 +289,8 @@ actor CloudByteStream {
     }
 
     private func download(_ index: Int) async throws -> Data {
-        defer { inflight[index] = nil }
+        // A cancelled download was already let go, and the chunk may be on its way again in another.
+        defer { if !Task.isCancelled { inflight[index] = nil } }
         let first = index * Self.chunkSize, last = min(source.length, first + Self.chunkSize) - 1
         var attempt = 0, cut = 0, refusals = 0
         var received = Data()
@@ -347,6 +349,9 @@ actor CloudByteStream {
                 while recent.count > Self.cacheChunks { cache[recent.removeFirst()] = nil }
                 return playable
             } catch let error as URLError where error.code != .cancelled && attempt < 3 {
+                // A loopback proxy (a CatPawOpen bundle's) refuses once iOS took back the suspended app's sockets, and
+                // listens again on a new port: ask where (#485).
+                if error.code == .cannotConnectToHost, ["127.0.0.1", "localhost"].contains(current.url.host ?? ""), await renew() { continue }
                 Diagnostics.shared.record(.debug, "cloud.stream", "chunk=\(index) retry \(error.code.rawValue)")
                 try await tvSleep(for: .milliseconds(400 * attempt))
             }

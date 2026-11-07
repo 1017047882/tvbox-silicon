@@ -1,8 +1,8 @@
-#if os(iOS)
+#if os(iOS) || os(tvOS)
 import CFNetwork
 import Foundation
 
-/// CatPawOpen (猫源) sources on iPhone and iPad. The app embeds nodejs-mobile (`Scripts/fetch-node-mobile.sh`)
+/// CatPawOpen (猫源) sources on iPhone, iPad and Apple TV. The app embeds nodejs-mobile (`Scripts/fetch-node-mobile.sh`)
 /// and starts it once, the first time such a source is used: Node can't start twice in a process. It runs
 /// `NodeHost/main.mjs`, the iOS twin of the Mac host's CatPawOpen mode, which starts each bundle once and
 /// answers on a loopback port with a per-launch token.
@@ -73,6 +73,24 @@ public actor EmbeddedNodeHost {
         }
         Diagnostics.shared.record(.info, "jar.request", "source=\(site.key) node \(kind) complete duration=\(started.duration(to: .now)) bytes=\(text.utf8.count)")
         return try JSONDecoder().decode([String: JSONValue].self, from: Data(text.utf8))
+    }
+
+    /// A bundle's media proxy address at the port the bundle listens on now. iOS takes back a suspended app's listening
+    /// sockets and Node then listens again on new ports, so an episode that was playing when the screen went off can't
+    /// reach its address any more (#485). Nil when the address is still current, or Node can't say.
+    public func relocate(_ url: URL) async -> URL? {
+        guard Self.available, let control = try? await start(),
+              let body = try? JSONEncoder().encode(["relocate": url.absoluteString]) else { return nil }
+        let answer: Data
+        do { answer = try await send(body, to: control) }
+        catch let error as URLError where error.code == .cannotConnectToHost || error.code == .networkConnectionLost {
+            guard let fresh = try? await relisten(after: control), let data = try? await send(body, to: fresh) else { return nil }
+            answer = data
+        } catch { return nil }
+        guard let envelope = try? JSONDecoder().decode([String: JSONValue].self, from: answer),
+              let address = envelope["result"]?.string, let moved = URL(string: address), moved.port != url.port else { return nil }
+        Diagnostics.shared.record(.info, "node.start", "media proxy moved from port \(url.port ?? 0) to \(moved.port ?? 0)")
+        return moved
     }
 
     private func send(_ body: Data, to control: Control) async throws -> Data {
@@ -156,9 +174,9 @@ public actor EmbeddedNodeHost {
         try? FileManager.default.removeItem(at: file)
         // Node watches this file; it has to exist first.
         FileManager.default.createFile(atPath: relistenFile.path, contents: nil)
-        // Node 18.20 refuses RSA PKCS#1 v1.5 decryption, which bundles use to read their APIs' replies (瓜子 signs
-        // in with it). Node 22+ allows it again with OpenSSL's implicit rejection; the Mac's Node already does.
-        let arguments = ["node", "--security-revert=CVE-2023-46809", main.path, file.path, relistenFile.path]
+        // Node 26 decrypts RSA PKCS#1 v1.5 (瓜子 signs in with it) through OpenSSL's implicit rejection, so it
+        // needs no --security-revert, which it would refuse as an unknown CVE.
+        let arguments = ["node", main.path, file.path, relistenFile.path]
         let thread = Thread {
             // node_start expects its arguments in one contiguous block that lives as long as Node.
             let strings = arguments.map { Array($0.utf8CString) }
@@ -194,10 +212,15 @@ public actor EmbeddedNodeHost {
     private static let relistenFile = storageRoot.appendingPathComponent("relisten")
 
     /// Bundles download again on demand, but profiles hold their settings (sign-ins among them), so they stay
-    /// out of purgeable Caches.
+    /// out of purgeable Caches. Apple TV apps can only write to Caches.
     static let storageRoot: URL = {
         let manager = FileManager.default
-        let root = manager.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("com.tvbox.yingxia/EmbeddedNode", isDirectory: true)
+        #if os(tvOS)
+        let directory = FileManager.SearchPathDirectory.cachesDirectory
+        #else
+        let directory = FileManager.SearchPathDirectory.applicationSupportDirectory
+        #endif
+        let root = manager.urls(for: directory, in: .userDomainMask)[0].appendingPathComponent("com.tvbox.yingxia/EmbeddedNode", isDirectory: true)
         try? manager.createDirectory(at: root, withIntermediateDirectories: true)
         var excluded = root
         var values = URLResourceValues()

@@ -31,15 +31,17 @@ struct WatchNowTVPage: View {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 30) {
                             WithPerceptionTracking {
-                            if entries.isEmpty {
-                                Color.clear.frame(height: 40)
-                            } else {
+
+                            if !entries.isEmpty {
                                 WatchNowTVHero(entries: entries, state: hero).frame(width: proxy.size.width, height: heroHeight)
                             }
                             rows
 
                             }
                         }
+                        // Without the hero (nothing watched yet) the first row would sit under the sidebar's Watch Now
+                        // pill, as on Discover.
+                        .padding(.top, entries.isEmpty ? 150 : 0)
                         .padding(.bottom, 60)
                         .background {
                             WithPerceptionTracking {
@@ -157,6 +159,7 @@ private struct WatchNowTVHero: View {
     let entries: [PlaybackHistoryEntry]
     let state: WatchNowHeroState
     @FocusState private var focus: Focus?
+    @AppStorage(HistoryFileDetails.key) private var showsFileDetails = false
     private enum Focus: Hashable { case resume, details, page(Int) }
 
     private var entry: PlaybackHistoryEntry { entries.first { $0.id == state.selected } ?? entries[0] }
@@ -177,7 +180,7 @@ private struct WatchNowTVHero: View {
                 }
             }
             .accessibilityAddTraits(.isHeader)
-            Text([entry.context.episodeName, SourceLabel(entry.context.sourceName).text, HistoryFormat.status(entry)]
+            Text([EpisodeLabels.historyLabel(entry.context.episodeName, showsDetails: showsFileDetails), SourceLabel(entry.context.sourceName).text, HistoryFormat.status(entry)]
                 .filter { !$0.isEmpty }.joined(separator: " · "))
                 .font(.system(size: 24)).monospacedDigit().lineLimit(1)
             if let overview = details?.overview, !overview.isEmpty {
@@ -336,11 +339,13 @@ private struct WatchNowTVLogo: View {
 /// A section's name, as Discover's: plain, large, and not a button.
 struct WatchNowTVHeading: View {
     let title: String
+    /// The page's margin: Discover's by default; Manga's pages keep their own.
+    var gutter = DiscoverLayout.gutter
     var body: some View {
         WithPerceptionTracking {
         Text(title).font(.system(size: DiscoverLayout.heading, weight: .semibold)).lineLimit(1)
             .frame(height: DiscoverLayout.headingHeight, alignment: .top)
-            .padding(.horizontal, DiscoverLayout.gutter)
+            .padding(.horizontal, gutter)
             .accessibilityAddTraits(.isHeader)
 
         }
@@ -351,12 +356,13 @@ struct WatchNowTVHeading: View {
 struct WatchNowTVRail<Content: View>: View {
     let title: String
     var seeAll: WatchNowTVSeeAll? = nil
+    var gutter = DiscoverLayout.gutter
     @ViewBuilder let content: () -> Content
     var body: some View {
         WithPerceptionTracking {
         VStack(alignment: .leading, spacing: 0) {
-            WatchNowTVHeading(title: title)
-            WatchNowTVRow(seeAll: seeAll, content: content)
+            WatchNowTVHeading(title: title, gutter: gutter)
+            WatchNowTVRow(seeAll: seeAll, gutter: gutter, content: content)
         }
 
         }
@@ -367,6 +373,7 @@ struct WatchNowTVRail<Content: View>: View {
 /// margin, invisible, that Left from the first cover lands on and opens; it closes again when focus leaves it.
 struct WatchNowTVRow<Content: View>: View {
     var seeAll: WatchNowTVSeeAll? = nil
+    var gutter = DiscoverLayout.gutter
     @ViewBuilder let content: () -> Content
     @FocusState private var seeAllFocused: Bool
     @State private var revealed = false
@@ -381,8 +388,8 @@ struct WatchNowTVRow<Content: View>: View {
 
                 }
             }
-            .padding(.leading, seeAll != nil && !revealed ? DiscoverLayout.gutter - DiscoverLayout.spacing - 1 : DiscoverLayout.gutter)
-            .padding(.trailing, DiscoverLayout.gutter).padding(.vertical, 24)
+            .padding(.leading, seeAll != nil && !revealed ? gutter - DiscoverLayout.spacing - 1 : gutter)
+            .padding(.trailing, gutter).padding(.vertical, 24)
         }
         .tvScrollClipDisabled().tvScrollIndicators(.hidden)
         .focusSection()

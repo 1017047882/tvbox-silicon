@@ -14,16 +14,15 @@ import org.json.JSONObject;
  * {@code waiting}, {@code success}, {@code expired} or {@code error}, and the plugin saves the account
  * itself. When a line answers that its drive has no sign-in ("[pan115](resolvePlay) 115 Cookie
  * 未配置或已失效"), the host starts that sign-in, the app shows the code (LoginPrompt), and once it is
- * confirmed the line is asked again. Drives the app signs in to itself (Quark, UC, Baidu) reach the
- * plugin from the app's accounts (CloudDriveBridge.seedWexCookies); for them this is only the
- * fallback when the plugin still finds no usable sign-in. What the sign-in wrote to the plugin's
- * preferences goes to the app with the notice, so every Wex source gets it without another scan.
+ * confirmed the line is asked again. Accounts signed in from the app's Settings (Quark, UC, Baidu, 115)
+ * reach the plugin first (CloudDriveBridge.seedWexCookies); when the plugin still finds no usable
+ * sign-in, it is always its own code that is offered, never the app's sign-in page. What the sign-in
+ * wrote to the plugin's preferences goes to the app with the notice, so every Wex source gets it
+ * without another scan.
  */
 final class OwnDriveSignIn {
     /** "[drive](stage) message" from the plugin's drive errors, when the message says the sign-in is missing or stale. */
     private static final Pattern MISSING = Pattern.compile("^\\[([a-z0-9]+)\\]\\([^)]*\\)\\s*.*(配置中心|未配置|已失效|未登录).*", Pattern.DOTALL);
-    /** Drives with an app sign-in, and the account field that holds it. */
-    private static final Map<String, String> APP_ACCOUNTS = Map.of("quark", "quarkCookie", "uc", "ucCookie", "baidu", "baiduCookie");
     private static final Set<String> TERMINAL = Set.of("success", "expired", "error");
     static final long POLL_MILLIS = Long.getLong("tvbox.ownSignInPollMillis", 2_000);
 
@@ -43,14 +42,10 @@ final class OwnDriveSignIn {
 
     /**
      * Signs the plugin in to {@code drive} through its own QR code. True once the plugin reports the
-     * sign-in done; false when it has no such sign-in, the code expired, or the drive is one the app
-     * should sign in to itself.
+     * sign-in done; false when it has no such sign-in or the code expired.
      */
     static boolean signIn(CloudDriveBridge bridge, String drive, Path folder) throws Exception {
         if (folder == null) return false;
-        String field = APP_ACCOUNTS.get(drive);
-        // With no app sign-in, the app asks for its own, which every source then uses.
-        if (field != null && !bridge.hasAppAccount(field)) return false;
         var before = wexValues(bridge);
         var start = call(bridge, "loginStart", drive, null);
         String code = start == null ? "" : start.optString("qrUrl"), task = start == null ? "" : start.optString("taskId");
@@ -90,7 +85,9 @@ final class OwnDriveSignIn {
                 if (entry.getValue().equals(before.get(entry.getKey()))) continue;
                 written.put(entry.getKey(), entry.getValue());
                 String field = CloudDriveBridge.WEX_APP_KEYS.get(entry.getKey());
-                if (field != null) written.put(CloudDriveBridge.WEX_REPLACED + entry.getKey(), bridge.appAccountDigest(field));
+                // None when the app had no sign-in for that drive (115): the app's own sign-in, once made, wins.
+                String replaced = field == null ? "" : bridge.appAccountDigest(field);
+                if (!replaced.isEmpty()) written.put(CloudDriveBridge.WEX_REPLACED + entry.getKey(), replaced);
             }
         } catch (org.json.JSONException impossible) { }
         if (written.length() > 0) kept.put("wexPreferences", written);

@@ -453,6 +453,15 @@ struct FormSettingsView: View {
 
                     }
                 }
+                ForEach(MangaStore.shared.repositories, id: \.self) { url in
+                    WithPerceptionTracking {
+
+                    FormLink(symbol: "books.vertical.fill", tint: .orange, title: MangaSources.title(of: url), value: L10n.text("Manga")) {
+                        MangaRepositoryView(url: url)
+                    }
+
+                    }
+                }
                 if store.subscriptions.count > 1 {
                     FormLink(symbol: "trash.fill", tint: .red, title: L10n.text("Remove Subscriptions")) { RemoveSubscriptionsView() }
                 }
@@ -477,7 +486,7 @@ struct FormSettingsView: View {
                     Text(L10n.text("Subscriptions"))
                     Spacer()
                     if store.importing {
-                        ProgressView().controlSize(.small)
+                        ProgressView().appControlSize(.small)
                     } else if !store.subscriptions.isEmpty {
                         // Quiet, in the header's own grey: a page of settings has no one blue action.
                         Button { Task { await store.refreshSubscriptions() } } label: {
@@ -491,6 +500,18 @@ struct FormSettingsView: View {
                 #endif
             } footer: {
                 if let message = store.importError ?? store.notice { Text(message) }
+            }
+
+            if !MangaStore.shared.repositories.isEmpty {
+                Section {
+                    let sources = MangaStore.shared.sources
+                    FormLink(symbol: "books.vertical.fill", tint: .orange, title: L10n.text("Comic Sources"),
+                             value: sources.isEmpty ? nil : String(sources.count)) { MangaSourcesView() }
+                } header: {
+                    Text(L10n.text("Manga"))
+                } footer: {
+                    Text(L10n.text("Manga shows while a Venera comic source list is among your subscriptions."))
+                }
             }
 
             Section(L10n.text("Accounts")) {
@@ -562,6 +583,8 @@ struct FormSettingsView: View {
                     FormLabel(symbol: "info.circle.fill", tint: .blue, title: L10n.text("Show Video Info"), subtitle: SettingsNote.playbackInfo)
                 }
                 .settingsSwitch()
+                FormLink(symbol: "captions.bubble.fill", tint: .orange, title: L10n.text("Subtitle Style")) { SubtitleStyleView() }
+                FormLink(symbol: "text.magnifyingglass", tint: .orange, title: L10n.text("Subtitle Sources")) { SubtitleSourcesView() }
                 FormLink(symbol: "play.fill", tint: Brand.indigo, title: L10n.text("Play a URL")) { PlayURLView() }
             } header: {
                 Text(L10n.text("Playback"))
@@ -668,7 +691,7 @@ struct FormSettingsView: View {
                 if updates.available.isEmpty, Updates.channel != .none {
                     TVLabeledContent {
                         Button { Task { await updates.check(manual: true) } } label: {
-                            if updates.checking { ProgressView().controlSize(.small) } else { Text(L10n.text("Check Now")) }
+                            if updates.checking { ProgressView().appControlSize(.small) } else { Text(L10n.text("Check Now")) }
                         }
                         .disabled(updates.checking)
                     } label: {
@@ -822,7 +845,7 @@ struct FormSettingsView: View {
                 Button(L10n.text("Refresh All")) { Task { await store.refreshSubscriptions() } }.disabled(store.importing)
             }
             Spacer()
-            if store.importing { ProgressView().controlSize(.small); ElapsedTime() }
+            if store.importing { ProgressView().appControlSize(.small); ElapsedTime() }
             Button(L10n.text("Use a Demo URL")) { store.subscriptionAddress = Store.defaultURL }
             Button(L10n.text("Add from File…")) { choosesFile = true }.disabled(store.importing)
                 .help(L10n.text("A TVBox JSON subscription, or one Python (.py) or JavaScript (.js) spider."))
@@ -908,35 +931,39 @@ struct PlaybackSettingsView: View {
     var body: some View {
         WithPerceptionTracking {
         SettingsPage(title: L10n.text("Playback"), symbol: "slider.horizontal.below.rectangle") {
-            SettingsGroup(footer: L10n.text("Touch and hold the video to play at this speed. Slide sideways to change it, or slide down to keep it after you let go.")) {
+            // Few groups with short rows: one card per switch, each with its own long note, read as a stack of
+            // fragments, and a long title pushed the switch's row to two lines.
+            SettingsGroup(title: L10n.text("Gestures"), footer: L10n.text("Touch and hold the video to play at this speed. Slide sideways to change it, or slide down to keep it after you let go.")
+                          + " " + L10n.text("Slide up or down on the left of the video to change the brightness, or on the right to change the volume.")) {
                 Picker(selection: $holdSpeed) {
                     ForEach(SpeedBoost.startRates, id: \.self) { Text($0.formatted(.number.precision(.fractionLength(0...2))) + "×").tag($0) }
                 } label: {
                     FormLabel(symbol: "forward.fill", tint: .orange, title: L10n.text("Touch and Hold Speed"))
                 }
-            }
-            SettingsGroup(footer: L10n.text("Slide up or down on the left of the video to change the brightness, or on the right to change the volume.")) {
                 Toggle(isOn: $slidesLevels) {
-                    FormLabel(symbol: "sun.max.fill", tint: .yellow, title: L10n.text("Slide for Brightness and Volume"))
+                    FormLabel(symbol: "sun.max.fill", tint: .yellow, title: L10n.text("Brightness and Volume"))
                 }
                 .settingsSwitch()
             }
             SettingsGroup(footer: SettingsNote.playbackInfo) {
+                FormLink(symbol: "captions.bubble.fill", tint: .orange, title: L10n.text("Subtitle Style")) { SubtitleStyleView() }
+                FormLink(symbol: "text.magnifyingglass", tint: .orange, title: L10n.text("Subtitle Sources")) { SubtitleSourcesView() }
                 Toggle(isOn: $showsPlaybackInfo) {
                     FormLabel(symbol: "info.circle.fill", tint: .blue, title: L10n.text("Show Video Info"))
                 }
                 .settingsSwitch()
             }
             if store.extrasUnlocked {
-                SettingsGroup(footer: SettingsNote.danmaku) {
+                SettingsGroup(title: L10n.text("Danmaku"), footer: SettingsNote.danmaku) {
                     Toggle(isOn: $showsDanmaku) {
                         FormLabel(symbol: "text.bubble.fill", tint: .teal, title: L10n.text("Show Danmaku"))
                     }
                     .settingsSwitch()
+                    // "Danmaku Area" beside "Top Three Quarters" didn't fit, and the picker put its value on a line of its own.
                     Picker(selection: $danmakuArea) {
                         ForEach(DanmakuArea.allCases, id: \.self) { Text($0.title).tag($0) }
                     } label: {
-                        FormLabel(symbol: "rectangle.tophalf.inset.filled", tint: .teal, title: L10n.text("Danmaku Area"))
+                        FormLabel(symbol: "rectangle.tophalf.inset.filled", tint: .teal, title: L10n.text("Area"))
                     }
                 }
             }
@@ -1385,7 +1412,7 @@ struct DiagnosticsView: View {
             } else {
                 VStack(alignment: .leading, spacing: 8) { actionButtons }
             }
-        }.controlSize(.regular)
+        }.appControlSize(.regular)
     }
     @ViewBuilder private var actionButtons: some View {
             Button { live.toggle() } label: {
@@ -1710,6 +1737,7 @@ struct TVSettingsView: View {
                 TVSettingsLink(title: L10n.text("Telegram Group")) { TelegramGroupView() }
             }
             subscriptionSection
+            if !MangaStore.shared.repositories.isEmpty { comicSection }
             TVSettingsSection(title: L10n.text("Accounts")) {
                 if store.extrasUnlocked {
                     TVSettingsLink(title: L10n.text("Bilibili"), value: bilibiliSummary) { BilibiliAccountView() }
@@ -1740,6 +1768,8 @@ struct TVSettingsView: View {
                 TVSettingsLink(title: L10n.text("Play a URL")) { TVPlayURLPage() }
             }
             TVSettingsSection(footer: L10n.text("Shows the video's format, resolution, frame rate and bitrate in a corner of the player.")) {
+                TVSettingsLink(title: L10n.text("Subtitle Style")) { SubtitleStyleView() }
+                TVSettingsLink(title: L10n.text("Subtitle Sources")) { SubtitleSourcesView() }
                 TVSettingsToggle(title: L10n.text("Show Video Info"), isOn: $showsPlaybackInfo)
             }
             if VideoEnhancement.canUpscale || VideoEnhancement.canSmooth {
@@ -1778,12 +1808,26 @@ struct TVSettingsView: View {
         return L10n.text("With your phone on the same network, tap the TV button in a Bilibili video and choose %@.", L10n.text("Yingxia")) + "\n" + phones
     }
 
+    private var comicSection: some View {
+        TVSettingsSection(title: L10n.text("Manga"), footer: L10n.text("Manga shows while a Venera comic source list is among your subscriptions.")) {
+            let sources = MangaStore.shared.sources
+            TVSettingsLink(title: L10n.text("Comic Sources"), value: sources.isEmpty ? nil : String(sources.count)) { MangaSourcesView() }
+        }
+    }
+
     private var subscriptionSection: some View {
         TVSettingsSection(title: L10n.text("Subscriptions"), footer: store.notice) {
             ForEach(store.subscriptions) { entry in
                 WithPerceptionTracking {
                 let failed = store.subscriptionErrors[entry.address] != nil
                 TVSettingsLink(title: entry.title, value: store.subscriptionValue(entry), warning: failed) { TVSubscriptionPage(entry: entry) }
+
+                }
+            }
+            ForEach(MangaStore.shared.repositories, id: \.self) { url in
+                WithPerceptionTracking {
+
+                TVSettingsLink(title: MangaSources.title(of: url), value: L10n.text("Manga")) { MangaRepositoryView(url: url) }
 
                 }
             }
@@ -1986,19 +2030,25 @@ struct TVSettingsField: View {
     @Binding var text: String
     /// Words rather than an address: the usual keyboard, with capitals and corrections.
     var prose = false
+    /// A key or password: dots in the row, a secure field to type it.
+    var secret = false
     @State private var editing = false
     @State private var draft = ""
     @State private var cancelled = false
     var body: some View {
         WithPerceptionTracking {
         Button { draft = text; cancelled = false; editing = true } label: {
-            TVSettingsRowLabel(title: title, value: text.isEmpty ? L10n.text("Not set") : text)
+            TVSettingsRowLabel(title: title, value: text.isEmpty ? L10n.text("Not set") : secret ? String(repeating: "•", count: 8) : text)
         }
         .glassRow()
         .alert(title, isPresented: $editing) {
-            TextField(title, text: $draft)
-                .disableAutocorrection(!prose)
-                .textInputAutocapitalization(prose ? .sentences : .never).keyboardType(prose ? .default : .URL)
+            if secret {
+                SecureField(title, text: $draft)
+            } else {
+                TextField(title, text: $draft)
+                    .disableAutocorrection(!prose)
+                    .textInputAutocapitalization(prose ? .sentences : .never).keyboardType(prose ? .default : .URL)
+            }
             Button(L10n.text("Done")) {}
             Button(L10n.text("Cancel"), role: .cancel) { cancelled = true }
         }

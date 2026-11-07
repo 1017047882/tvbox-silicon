@@ -41,6 +41,9 @@ public enum PluginFailure {
                 return L10n.text("This plugin couldn't be prepared on this device (%@ could not be converted).", broken, language: language)
             }
             return L10n.text("This plugin couldn't be prepared on this device (missing %@).", missing ?? detail, language: language)
+        case "plugin_message":
+            // The plugin's own words, such as a drive it has no sign-in for (#408).
+            if let text = envelope["message"]?.string { return L10n.text("The source says: %@", text, language: language) }
         case "plugin_crash":
             return L10n.text("The source's plugin crashed. The site may have changed; try another source.", language: language)
         default: break
@@ -182,17 +185,19 @@ public struct Site: Identifiable, Codable, Hashable, Sendable {
         }
         return try raw["ext"].map(resolve)
     }
+    /// A CatPawOpen bundle (see CatPawOpen), whose config center signs in to drives with its own codes (`CatPawSignIn`).
+    public var isCatPawOpen: Bool { raw["catPawOpen"] != nil }
     /// Classified like TVBox: a `.js` api runs in the JavaScript host, a `.py` api (or a legacy
     /// `py_` key whose ext is the script) in the Python host, and any other type 3 api is a JAR class,
     /// unless its download showed otherwise.
     public var runtime: SourceRuntime {
         if native { return .api }
         guard type == 3, !missingAPI else { return .unsupported }
-        // A CatPawOpen bundle is a Node server (see CatPawOpen), which only the Mac can run.
+        // A CatPawOpen bundle is a Node server (see CatPawOpen): the Mac's Node, or nodejs-mobile in the app.
         if raw["catPawOpen"] != nil {
             #if os(macOS)
             return .javascript
-            #elseif os(iOS)
+            #elseif os(iOS) || os(tvOS)
             return EmbeddedNodeHost.available ? .javascript : .unsupported
             #else
             return .unsupported

@@ -1,6 +1,12 @@
 import Foundation
 import Perception
 
+/// Settings → Watch Now: History and Continue Watching add the file's size and picture quality to an episode's
+/// number, read from its file name ("第1集 · 5.4GB · 2160p", #595). Off by default.
+public enum HistoryFileDetails {
+    public static let key = "showsHistoryFileDetails"
+}
+
 /// Catalog identity only: an expiring stream URL or its authorization headers must
 /// never become the address used to resume a saved episode.
 public struct PlaybackHistoryContext: Codable, Hashable, Sendable {
@@ -53,6 +59,21 @@ public struct PlaybackHistoryEntry: Identifiable, Codable, Hashable, Sendable {
     public var completed: Bool { duration > 0 && position >= duration - 1 }
     public var resumePosition: Double { completed ? 0 : position }
     public var progress: Double { duration > 0 ? min(1, max(0, position / duration)) : 0 }
+
+    /// Where to start an episode again: the saved position when it is the episode this entry is about, so
+    /// picking it from a list picks up where it stopped. Any other episode starts at 0, and so does an entry
+    /// finished or barely started.
+    public func resumePosition(for episode: Episode) -> Double? {
+        guard context.episode(in: [episode]) != nil, resumePosition > 1 else { return nil }
+        return resumePosition
+    }
+
+    /// What Continue plays on the video's page: the episode watched last, or, once that one is finished, the next
+    /// one on its line. Nil when the details no longer list it or a finished episode was the line's last, so
+    /// Play starts the line instead.
+    public func continuation(in episodes: [Episode]) -> Episode? {
+        completed ? EpisodePlaylist(episodes).next(after: context) : context.episode(in: episodes)
+    }
 
     public init(context: PlaybackHistoryContext, position: Double, duration: Double, updatedAt: Date) {
         self.context = context

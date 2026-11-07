@@ -214,6 +214,7 @@ private struct WatchNowPhoneHero: View {
     @State private var hovering = false
     #endif
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AppStorage(HistoryFileDetails.key) private var showsFileDetails = false
     let entries: [PlaybackHistoryEntry]
     let state: WatchNowHeroState
     let width: CGFloat
@@ -302,7 +303,7 @@ private struct WatchNowPhoneHero: View {
             }
             .frame(width: width * 0.8, height: 120, alignment: .bottom)
             .accessibilityAddTraits(.isHeader)
-            Text([entry.context.episodeName, SourceLabel(entry.context.sourceName).text].filter { !$0.isEmpty }.joined(separator: " · "))
+            Text([EpisodeLabels.historyLabel(entry.context.episodeName, showsDetails: showsFileDetails), SourceLabel(entry.context.sourceName).text].filter { !$0.isEmpty }.joined(separator: " · "))
                 .font(.system(size: 14)).lineLimit(1).padding(.top, 14)
             if entry.duration > 0 {
                 HStack(spacing: 8) {
@@ -316,15 +317,15 @@ private struct WatchNowPhoneHero: View {
                 }
                 .padding(.top, 8)
             }
+            // The detail page's Continue button, in Liquid Glass as it sits on the cover: tinted white over a dark cover,
+            // black over a light one (a flat plate before OS 26).
             Button { resume(entry) } label: {
                 Label(L10n.text("Resume"), systemImage: store.resumingHistoryID == entry.id ? "hourglass" : "play.fill")
-                    .font(.system(size: 16, weight: .semibold))
-                    .padding(.horizontal, 28).frame(height: 44)
-                    .foregroundStyle(dark ? Color.black : Color.white)
-                    .background(dark ? Color.white : Color.black, in: Capsule())
-                    .contentShape(Capsule())
+                    .font(.headline).lineLimit(1).fixedSize().padding(.horizontal, 8)
             }
-            .buttonStyle(.plain)
+            .controlButton(prominent: true).tint(Brand.accent).tvLargeControl()
+            .environment(\.colorScheme, dark ? .dark : .light)
+            .environment(\.glassControls, true)
             .padding(.top, 18)
             .accessibilityIdentifier("home.upNext.resume")
         }

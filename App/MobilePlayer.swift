@@ -39,6 +39,9 @@ struct MobilePlayerView: View {
     @State private var pip = PictureInPicture()
     @State private var clock = PlayerClock()
     @State private var tracks = MediaTracks()
+    @State private var importsSubtitleFile = false
+    @State private var asksSubtitleAddress = false
+    @State private var searchesSubtitles = false
     @State private var nowPlaying = VideoNowPlaying()
     @State private var fillsScreen = false
     /// Avoid cropping a landscape stream to a portrait phone when rotation has not completed.
@@ -48,6 +51,7 @@ struct MobilePlayerView: View {
     @State private var speed: Float = 1
     @AppStorage(DanmakuArea.key) private var danmakuArea = DanmakuArea.standard
     @State private var showsDanmakuList = false
+    @State private var showsEpisodes = false
     /// Devices with Yingxia open, for the Play On button; and the one the video was sent to.
     @State private var tvBrowser = PlayOnBrowser()
     @State private var playingOn: String?
@@ -56,6 +60,8 @@ struct MobilePlayerView: View {
     @State private var holding = false
     @AppStorage(SpeedBoost.key) private var holdSpeed = SpeedBoost.standard
     @AppStorage(PlaybackInfo.key) private var showsPlaybackInfo = false
+    /// The full-screen top row's height, which the info panel keeps clear of while the controls show.
+    @State private var topRowHeight: CGFloat = 44
     /// Double taps on a side skip (YouTube); the run's total shows on that side for a moment.
     @State private var taps = PictureTaps()
     @State private var skipped: (forward: Bool, total: Double)?
@@ -75,11 +81,18 @@ struct MobilePlayerView: View {
     @State private var mountsVolume = false
     /// The screen's brightness before the first slide changed it, put back when the player closes.
     @State private var brightnessBefore: CGFloat?
+    /// Full screen, the controls and every touch on the picture can be locked, so a hand on the screen doesn't skip or
+    /// pause. A tap then shows the lock button alone for a moment.
+    @State private var locked = false
+    @State private var showsLock = false
+    @State private var lockTask: Task<Void, Never>?
 
     var body: some View {
         WithPerceptionTracking {
         ZStack {
             PlayerLayerView(player: session.player, fills: fillsPicture, pip: pip).playerBleed(!inline)
+                // Picture in Picture shows only the player's layer, so AVPlayer draws the subtitles there.
+                .tvOnChange(of: pip.active) { _, active in session.subtitles.native = active }
             // The enhanced picture covers the layer's own, under everything else.
             EnhancedVideoSurface(enhancer: session.enhancer, fills: fillsPicture, bleeds: !inline)
             if showsDanmaku && !session.danmaku.isEmpty {
@@ -87,6 +100,7 @@ struct MobilePlayerView: View {
                     // Across the whole width, but below the Dynamic Island and above the home indicator when upright.
                     .playerBleed(!inline, edges: .horizontal)
             }
+            SubtitleOverlay(cues: session.subtitles, fills: fillsPicture).playerBleed(!inline)
             // The artwork dissolves into the first frame.
             if let waiting {
                 if inline {
@@ -106,6 +120,7 @@ struct MobilePlayerView: View {
             // A tap on the picture shows or hides the controls; a tap on a control keeps them up (see `rows`).
             // Two taps on a side skip, touching and holding plays faster, and sliding sideways seeks.
             PictureGestures(tap: tapped, hold: held, swipe: swiped, levels: slidesLevels) { wider in
+                guard !locked else { return }
                 withAnimation(.easeInOut(duration: 0.25)) { fillsScreen = wider }
             }
             .playerBleed(!inline)
@@ -123,15 +138,18 @@ struct MobilePlayerView: View {
                     if session.paused { session.togglePlayback() }
                 }
             }
-            // The controls take its corner while they show; it comes back with the bare picture.
+            // While the controls show it moves below their top row; on a watch page, too small for both, they take
+            // its corner and it comes back with the bare picture.
             if showsPlaybackInfo && session.error == nil && session.showsPicture && !pip.active && playingOn == nil {
                 PlaybackInfoPanel(session: session)
                     .padding(inline ? 8 : 16)
+                    .padding(.top, chromeVisible && !inline ? topRowHeight + 12 : 0)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .opacity(chromeVisible ? 0 : 1)
+                    .opacity(chromeVisible && inline ? 0 : 1)
                     .animation(.tvSmooth(duration: 0.25), value: chromeVisible)
             }
-            controls.opacity(chromeVisible ? 1 : 0).allowsHitTesting(chromeVisible && !settling)
+            controls.opacity(chromeVisible && !locked ? 1 : 0).allowsHitTesting(chromeVisible && !locked && !settling)
+            if !inline { lockButton }
         }
         .animation(.easeInOut(duration: 0.7), value: waiting == nil)
         .animation(.easeInOut(duration: 0.4), value: waiting?.starting)
@@ -159,6 +177,11 @@ struct MobilePlayerView: View {
             return new.locked != old.locked ? .impact(weight: .medium) : new.rate != old.rate ? .selection : nil
         }
         .task(id: clock.item.map(ObjectIdentifier.init)) { await tracks.load(clock.item) }
+        .tvSensoryFeedback(.impact(weight: .medium), trigger: locked)
+        // A failure, or a watch page's player back from full screen, has controls to reach.
+        .tvOnChange(of: session.error != nil || inline) { _, unlock in if unlock { setLocked(false) } }
+        .subtitleImport(files: $importsSubtitleFile, address: $asksSubtitleAddress, search: $searchesSubtitles, subtitles: session.externalSubtitles)
+        .playerEpisodesSheet(isPresented: $showsEpisodes, channel: channel)
         .sheet(isPresented: $showsDanmakuList) {
             WithPerceptionTracking {
             DanmakuListView(player: session.player, comments: session.danmaku) { showsDanmakuList = false }
@@ -196,6 +219,11 @@ struct MobilePlayerView: View {
     // MARK: Taps and slides
 
     private func tapped(_ x: CGFloat, _ width: CGFloat) {
+        // Locked, a tap shows (or hides) the lock button and nothing else: no controls, no skip, no pause.
+        if locked {
+            if showsLock { withAnimation(.easeOut(duration: 0.2)) { showsLock = false } } else { flashLock() }
+            return
+        }
         let zone = PictureTaps.zone(x: x, width: width, seekable: seekable && showsTransport && playingOn == nil && !pip.active)
         switch taps.tap(at: ProcessInfo.processInfo.systemUptime, in: zone) {
         case .toggleControls:
@@ -244,6 +272,7 @@ struct MobilePlayerView: View {
     private var screen: UIScreen? { UIApplication.shared.appWindowScene?.screen }
 
     private func swiped(_ phase: PictureGestures.Swipe) {
+        if locked, case .began = phase { return }
         switch phase {
         case .began(.seek):
             guard showsTransport, seekable, clock.duration > 0, playingOn == nil, !pip.active else { return }
@@ -366,6 +395,56 @@ struct MobilePlayerView: View {
         }
     }
 
+    // MARK: Lock
+
+    /// On the left edge, halfway down, as in Bilibili: with the controls while unlocked, alone for a moment after a tap
+    /// while locked.
+    @ViewBuilder private var lockButton: some View {
+        let visible = locked ? showsLock : chromeVisible && showsTransport
+        Button {
+            setLocked(!locked)
+        } label: {
+            Image(systemName: locked ? "lock.fill" : "lock.open.fill").font(.headline).frame(width: 22, height: 22)
+                .tvContentTransition(.symbolEffect(.replace))
+        }
+        .chromeButton()
+        .foregroundStyle(.white)
+        .environment(\.colorScheme, .dark)
+        .accessibilityLabel(L10n.text(locked ? "Unlock Controls" : "Lock Controls"))
+        .accessibilityIdentifier("player.lock")
+        .padding(.leading, 16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .opacity(visible ? 1 : 0)
+        .allowsHitTesting(visible && !settling)
+        .animation(.easeOut(duration: 0.2), value: visible)
+    }
+
+    private func setLocked(_ lock: Bool) {
+        guard lock != locked else { return }
+        lockTask?.cancel()
+        withAnimation(.easeOut(duration: 0.2)) { locked = lock }
+        if lock {
+            // The picture to itself; the lock button stays a moment to show where it is.
+            endBoost()
+            hideChrome()
+            clearLabels()
+            flashLock()
+        } else {
+            showsLock = false
+            if !chromeVisible { toggleChrome() } else { poke() }
+        }
+    }
+
+    private func flashLock() {
+        withAnimation(.easeOut(duration: 0.2)) { showsLock = true }
+        lockTask?.cancel()
+        lockTask = Task {
+            try? await tvSleep(for: .seconds(2.5))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.3)) { showsLock = false }
+        }
+    }
+
     // MARK: Touch and hold
 
     /// Only while a video with a timeline plays here.
@@ -374,7 +453,7 @@ struct MobilePlayerView: View {
     private func held(_ phase: PictureGestures.Hold) {
         switch phase {
         case .began:
-            guard boosts else { return }
+            guard boosts, !locked else { return }
             // A new hold replaces a kept speed: it ends with the finger unless slid down again.
             let started = SpeedBoost(rate: holdSpeed)
             boost = started; holding = true
@@ -461,7 +540,10 @@ struct MobilePlayerView: View {
             VStack(spacing: 0) {
                 topRow
                 Spacer(minLength: 0)
-                if showsTransport { bottomRow }
+                if showsTransport {
+                    if !inline { infoRow }
+                    bottomRow
+                }
             }
             .padding(inline ? 8 : 16)
             if showsTransport { centerRow }
@@ -511,6 +593,20 @@ struct MobilePlayerView: View {
             }
         }
         .playerTopBarActivity(poke)
+        .tvOnGeometryChange(for: CGFloat.self) { $0.size.height } action: { topRowHeight = $0 }
+    }
+
+    /// Over the seek bar, as in MiraPlay: the title's logo on the left and the video's tags on the right (#520).
+    private var infoRow: some View {
+        HStack(alignment: .bottom, spacing: 12) {
+            PlayerTitleLogo(channel: channel, compact: verticalSizeClass != .compact && horizontalSizeClass == .compact)
+            Spacer(minLength: 0)
+            PlaybackBadges(session: session, active: chromeVisible) {
+                withAnimation(.tvSmooth(duration: 0.25)) { showsPlaybackInfo.toggle() }
+                poke()
+            }
+        }
+        .padding(.bottom, 2)
     }
 
     private var toolbar: some View {
@@ -589,13 +685,45 @@ struct MobilePlayerView: View {
                     .pickerStyle(.inline)
                 }
             }
-            if let legible = tracks.legible, !legible.options.isEmpty {
-                Menu(L10n.text("Subtitles")) {
-                    Picker(L10n.text("Subtitles"), selection: Binding(get: { tracks.selected(in: legible) }, set: { tracks.select($0, in: legible) })) {
+            // A file whose sound tracks AVFoundation offers no choice between (#428).
+            if session.audioChoices.count > 1 {
+                Menu(L10n.text("Audio")) {
+                    Picker(L10n.text("Audio"), selection: Binding(get: { session.audioChoice }, set: { if let id = $0 { session.chooseAudio(id) } })) {
+                        ForEach(session.audioChoices) { Text($0.name).tag(Optional($0.id)) }
+                    }
+                    .pickerStyle(.inline)
+                }
+            }
+            // The item's own subtitles, then subtitle files beside the video or added now (#576).
+            Menu(L10n.text("Subtitles")) {
+                if let legible = tracks.legible, !legible.options.isEmpty {
+                    Picker(L10n.text("Subtitles"), selection: Binding(get: { session.externalSubtitles.selected == nil ? tracks.selected(in: legible) : nil },
+                                                                      set: { tracks.select($0, in: legible); session.externalSubtitles.nativeChosen() })) {
                         if legible.group.allowsEmptySelection { Text(L10n.text("Off")).tag(AVMediaSelectionOption?.none) }
                         ForEach(legible.options, id: \.self) { Text($0.displayName).tag(Optional($0)) }
                     }
                     .pickerStyle(.inline)
+                } else if session.externalSubtitles.selected != nil {
+                    Button(L10n.text("Off")) { session.externalSubtitles.select(nil) }
+                }
+                ExternalSubtitleMenu(subtitles: session.externalSubtitles, addFile: { importsSubtitleFile = true }, addAddress: { asksSubtitleAddress = true },
+                                     searchOnline: { searchesSubtitles = true })
+            }
+            if session.externalSubtitles.selected == nil, let legible = tracks.legible, !legible.options.isEmpty {
+                // A subtitle file that runs ahead of its picture (#599): each step holds it back half a second.
+                Menu(L10n.text("Subtitle Delay")) {
+                    Text(SubtitleDelay.title(session.subtitles.delay))
+                    Button(String(format: "%+.1f s", -SubtitleDelay.step)) {
+                        SubtitleDelay.save(session.subtitles.delay - SubtitleDelay.step)
+                    }
+                    .disabled(session.subtitles.delay <= SubtitleDelay.range.lowerBound)
+                    Button(String(format: "%+.1f s", SubtitleDelay.step)) {
+                        SubtitleDelay.save(session.subtitles.delay + SubtitleDelay.step)
+                    }
+                    .disabled(session.subtitles.delay >= SubtitleDelay.range.upperBound)
+                    if session.subtitles.delay != 0 {
+                        Button(L10n.text("Reset")) { SubtitleDelay.save(0) }
+                    }
                 }
             }
             if !session.isLive {
@@ -649,11 +777,13 @@ struct MobilePlayerView: View {
     }
 
     /// Previous and Next Episode, small and at the right of the time above the seek bar. Beside ±10 and play, a tap
-    /// that ran past +10 out of habit changed the episode.
+    /// that ran past +10 out of habit changed the episode. Then 选集, which opens the episodes in a sheet (#524).
     @ViewBuilder private var stepButtons: some View {
         let previous = store.step(back: true, from: channel, session: session)
         let next = store.step(back: false, from: channel, session: session)
-        if previous != nil || next != nil || toggleFullScreen != nil {
+        // On a watch page the episodes are on the page itself.
+        let episodes = !inline && PlayerEpisodesSheet.offered(for: channel, in: store)
+        if previous != nil || next != nil || episodes || toggleFullScreen != nil {
             HStack(spacing: 10) {
                 if let previous {
                     Button { previous.go() } label: { Image(systemName: "backward.end.fill") }
@@ -666,6 +796,19 @@ struct MobilePlayerView: View {
                         .buttonStyle(PlayerCircleStyle(size: 36))
                         .disabled(next.busy)
                         .accessibilityLabel(L10n.text("Next Episode"))
+                }
+                if episodes {
+                    PlayerEpisodesButton(channel: channel, isPresented: $showsEpisodes) {
+                        HStack(spacing: 6) {
+                            Image(systemName: PlayerEpisodesSheet.symbol)
+                            Text(L10n.text("Episodes"))
+                        }
+                        .font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
+                        .padding(.horizontal, 14).frame(height: 36)
+                        .glassSurface(.regular.interactive(), in: Capsule())
+                        .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
                 }
                 if let toggleFullScreen {
                     let full = layout == .pageFullScreen
@@ -826,9 +969,11 @@ struct PlayerScheme: ViewModifier {
 
 extension View {
     /// Under the status bar and the home indicator on a screen of its own; inside its frame at the top of a page,
-    /// where reaching into the safe area would run the picture under the status bar.
-    @ViewBuilder func playerBleed(_ bleeds: Bool, edges: Edge.Set = .all) -> some View {
-        if bleeds { ignoresSafeArea(edges: edges) } else { self }
+    /// where reaching into the safe area would run the picture under the status bar. One view either way: a branch
+    /// for each made a watch page going full screen build the picture's layer anew, and Picture in Picture stayed
+    /// with the old one, off screen, so it couldn't start (#652).
+    func playerBleed(_ bleeds: Bool, edges: Edge.Set = .all) -> some View {
+        ignoresSafeArea(edges: bleeds ? edges : [])
     }
 }
 
@@ -1211,7 +1356,14 @@ private struct PlayerLayerView: UIViewRepresentable {
     @PerceptionIgnored private var observation: NSKeyValueObservation?
 
     func attach(_ layer: AVPlayerLayer) {
-        guard supported, controller == nil else { return }
+        guard supported else { return }
+        if let controller {
+            // A new layer for the same player: Picture in Picture follows the one on screen.
+            if controller.contentSource?.playerLayer !== layer, !controller.isPictureInPictureActive {
+                controller.contentSource = .init(playerLayer: layer)
+            }
+            return
+        }
         let controller = AVPictureInPictureController(contentSource: .init(playerLayer: layer))
         controller.delegate = self
         // Leaving the app while a video plays carries on in Picture in Picture, as AVKit's own player did.
@@ -1482,6 +1634,91 @@ private struct PlayerLayerView: UIViewRepresentable {
             center.nowPlayingInfo = nil
             center.playbackState = .stopped
         }
+    }
+}
+
+/// The video's tags over the seek bar, as MiraPlay shows them: "HW  H265  HDR10  4K  24FPS" (#520, #519). Plain
+/// white type on the controls' scrim, read once a second while the controls show. A tap shows the full info panel
+/// (the bitrate, the sound and the download speed) or hides it.
+private struct PlaybackBadges: View {
+    let session: PlaybackSession
+    /// The controls show: only then is the playing item read.
+    let active: Bool
+    let action: () -> Void
+    @State private var sampler = PlaybackInfoSampler()
+    @State private var badges: [String] = []
+
+    var body: some View {
+        WithPerceptionTracking {
+
+        Button(action: action) {
+            HStack(spacing: 12) {
+                ForEach(badges, id: \.self) { Text($0) }
+            }
+            .font(.system(size: 13, weight: .semibold)).monospacedDigit()
+            .shadow(color: .black.opacity(0.6), radius: 3)
+            .padding(.vertical, 6).padding(.leading, 6)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .opacity(badges.isEmpty ? 0 : 1)
+        .animation(.tvSmooth(duration: 0.25), value: badges)
+        .accessibilityLabel(L10n.text("Show Video Info"))
+        .accessibilityValue(badges.joined(separator: " "))
+        .accessibilityIdentifier("player.badges")
+        .task(id: active) {
+            while active && !Task.isCancelled {
+                if let info = await sampler.sample(session), info.badges != badges { badges = info.badges }
+                try? await tvSleep(for: .seconds(1))
+            }
+        }
+
+        }
+    }
+}
+
+/// The title's logo at the bottom left of the picture, as MiraPlay and Apple TV's player show it (#520): TMDB's, when
+/// the video's page found the title there. Only what this device already knows; nothing shows otherwise, since the
+/// title is in the top row too.
+private struct PlayerTitleLogo: View {
+    let channel: Channel
+    /// A phone held upright: a smaller logo.
+    let compact: Bool
+    @Environment(Store.self) private var store
+    @State private var tmdb = TMDBLookup()
+    @State private var aspect: CGFloat?
+
+    var body: some View {
+        WithPerceptionTracking {
+
+        let box = compact ? CGSize(width: 150, height: 40) : CGSize(width: 220, height: 56)
+        // A view even before there is a logo, so the lookup below runs.
+        ZStack(alignment: .bottomLeading) {
+            Color.clear.frame(width: 0, height: 0)
+            if let logo = tmdb.details?.logo {
+                let size = Self.fit(aspect ?? 3, in: box)
+                TMDBArtwork(url: logo, maxPixels: 800, fill: false, aspect: $aspect)
+                    .frame(width: size.width, height: size.height, alignment: .bottomLeading)
+                    .shadow(color: .black.opacity(0.45), radius: 6)
+                    .opacity(aspect == nil ? 0 : 1)
+                    .animation(.tvSmooth(duration: 0.3), value: aspect == nil)
+                    .accessibilityHidden(true)
+            }
+        }
+        .allowsHitTesting(false)
+        .task(id: store.catalog(for: channel)?.video.id) {
+            guard let catalog = store.catalog(for: channel), TMDBLookup.applies(to: catalog.client.site) else { return }
+            _ = await tmdb.prepare(key: TMDBMatchStore.key(source: catalog.client.site.key, video: catalog.video.id))
+        }
+
+        }
+    }
+
+    /// Wide logos fill the width, tall ones the height.
+    static func fit(_ aspect: CGFloat, in box: CGSize) -> CGSize {
+        let aspect = max(aspect, 0.5)
+        return aspect >= box.width / box.height ? CGSize(width: box.width, height: box.width / aspect)
+            : CGSize(width: box.height * aspect, height: box.height)
     }
 }
 #endif

@@ -71,6 +71,9 @@ import TVCore
     private var episodeRequest = UUID()
     private var episodeTask: Task<Void, Never>?
     var section: AppSection = .home
+    /// The Mac sidebar folds away while the manga reader fills the window, and comes back when it closes.
+    /// macOS 26 floats the sidebar over the page, so it covered the left part of every comic page.
+    var hidesSidebar = false
     /// Every build shows the built-in services (Music, Bilibili, Douyin), the default subscription and
     /// the plugin pages only once a subscription that works has been added: one that is on and whose
     /// copy has sources or live playlists.
@@ -81,8 +84,13 @@ import TVCore
     private(set) var cloudDocument: Subscription?
     @PerceptionIgnored private var cloudFetchedAt: Date?
     @PerceptionIgnored private var cloudFetch: Task<Void, Never>?
-    /// Sections kept out of the tab bar and sidebar until then.
-    var hiddenSections: [AppSection] { extrasUnlocked ? [] : [.music] }
+    /// Sections kept out of the tab bar and sidebar until then; Manga while no Venera comic source list
+    /// is subscribed (one is added with Add Subscription, like any other).
+    var hiddenSections: [AppSection] {
+        var hidden: [AppSection] = extrasUnlocked ? [] : [.music]
+        if MangaStore.shared.repositories.isEmpty { hidden.append(.manga) }
+        return hidden
+    }
     private let defaults: UserDefaults
     private let http = HTTPClient()
     /// Rebuilt source rows are expensive (every source is classified and copied) and Watch Now reads
@@ -195,6 +203,12 @@ import TVCore
         }
         Diagnostics.shared.record(.info, "music", "listening source \(channel.historyContext?.sourceKey ?? "-") queue=\(queue.tracks.count)")
         music.play(queue, at: position, stream: channel)
+        #if os(iOS)
+        // Opened as a video opens its player (Apple TV's `play` does the same). The page the chapter was chosen on
+        // has no music strip: the iPhone watch page hides the tab bar that holds it, and an iPad shows it only on
+        // Music's pages, so the song played with its controls only in Control Center (#570).
+        music.presentsPlayer = true
+        #endif
     }
 
     /// The music player gets a source's streams from here, saves where a book is in the playback history, and hands
@@ -299,7 +313,9 @@ import TVCore
     }
     /// Adds the typed address, or refreshes it when it is already in the list. A directory (多仓)
     /// adds every subscription it lists, switched off, for the viewer to choose from.
-    func importSubscription(address: String? = nil) async {
+    /// `address` is one typed in Settings, or one a link or a file handed over; `name` labels it the way a
+    /// typed name does, and stays empty for a file.
+    func importSubscription(address: String? = nil, name: String? = nil) async {
         guard !importing else { return }
         importing = true; importError = nil; notice = nil
         defer { importing = false }
@@ -308,11 +324,11 @@ import TVCore
             let url = try WebAddress.resolve(typed)
             switch try await http.subscriptionImport(url) {
             case .subscription(let value):
-                let name = address == nil ? subscriptionName.trimmingCharacters(in: .whitespacesAndNewlines) : ""
-                let entry = SubscriptionEntry(address: url.absoluteString, name: name)
+                let title = (address == nil ? subscriptionName : (name ?? "")).trimmingCharacters(in: .whitespacesAndNewlines)
+                let entry = SubscriptionEntry(address: url.absoluteString, name: title)
                 if let index = subscriptions.firstIndex(where: { $0.address == entry.address }) {
                     subscriptions[index].enabled = true
-                    if !name.isEmpty { subscriptions[index].name = name }
+                    if !title.isEmpty { subscriptions[index].name = title }
                 } else { subscriptions.append(entry) }
                 keep(value, for: entry)
                 if persistsChanges { defaults.set(url.absoluteString, forKey: "subscriptionAddress") }
@@ -321,6 +337,10 @@ import TVCore
                 let added = entries.filter { entry in !subscriptions.contains { $0.address == entry.address } }
                 subscriptions += added
                 notice = L10n.text("This address lists %lld subscriptions. They were added switched off; turn on the ones you want.", added.count)
+            case .comicSources(let count):
+                // Comic source lists feed Manga (and show it); they are listed under Subscriptions too.
+                MangaStore.shared.addRepository(url)
+                notice = L10n.text("Added a Venera comic source list (%lld sources). Choose the ones to install in Comic Sources.", count)
             case .alist(let servers):
                 // AList servers are browsed in Cloud Files, not merged as sources.
                 let saved = try AListServers.add(servers)
@@ -427,6 +447,8 @@ import TVCore
                 guard let index = subscriptions.firstIndex(where: { $0.address == entry.address }) else { continue }
                 let known = Set(subscriptions.map(\.address))
                 subscriptions.replaceSubrange(index...index, with: listed.filter { !known.contains($0.address) })
+            case .success(.comicSources):
+                subscriptionErrors[entry.address] = L10n.text("This address is now a comic source list. Add it again to use it for Manga.")
             case .success(.alist):
                 subscriptionErrors[entry.address] = L10n.text("This address is now an AList server. Add it again to browse it in Cloud Files.")
             case .failure(let error):
@@ -507,6 +529,10 @@ import TVCore
     /// every ten minutes at most. A failed fetch keeps the last copy.
     private func refreshCloudSources(force: Bool = false) {
         guard extrasUnlocked, cloudFetch == nil else { return }
+        #if DEBUG
+        // `-qaNoCloudSources 1`: only the QA subscription's sources, for UI tests that count results.
+        if UserDefaults.standard.bool(forKey: "qaNoCloudSources") { return }
+        #endif
         if !force, cloudDocument != nil, let fetched = cloudFetchedAt, Date.now.timeIntervalSince(fetched) < 600 { return }
         let http = http, persists = persistsChanges
         cloudFetch = Task { [weak self] in
@@ -669,15 +695,19 @@ import TVCore
         }
         // The Episodes menu's short labels (#318): kept from the episode before on the same video, else worked out off the
         // main thread.
-        let kept = playbackCatalog.flatMap { $0.video == video ? $0.labels : nil }
-        playbackCatalog = PlaybackCatalog(video: video, client: client, scope: context.id, labels: kept ?? [:])
+        let kept = playbackCatalog.flatMap { $0.video == video ? $0 : nil }
+        playbackCatalog = PlaybackCatalog(video: video, client: client, scope: context.id, labels: kept?.labels ?? [:], details: kept?.details ?? [:])
         guard kept == nil else { return }
         let episodes = video.episodes
         Task { [weak self] in
-            let labels = await Task.detached(priority: .utility) { EpisodeLabels.labels(episodes) }.value
+            let (labels, details) = await Task.detached(priority: .utility) {
+                let labels = EpisodeLabels.labels(episodes)
+                return (labels, EpisodeFileInfo.details(episodes, labels: labels))
+            }.value
             // Still this video, though maybe the next episode by now.
-            guard let self, !labels.isEmpty, self.playbackCatalog?.video == video else { return }
+            guard let self, !labels.isEmpty || !details.isEmpty, self.playbackCatalog?.video == video else { return }
             self.playbackCatalog?.labels = labels
+            self.playbackCatalog?.details = details
         }
     }
 
@@ -923,6 +953,8 @@ struct PlaybackCatalog {
     let scope: String
     /// Short labels (第1集) for lines whose episode names are file names, by episode id.
     var labels: [Episode.ID: String] = [:]
+    /// Resolution and size read from file names (4K · 5.2G, #620), shown under the episodes, by episode id.
+    var details: [Episode.ID: String] = [:]
     var playlist: EpisodePlaylist { EpisodePlaylist(video.episodes) }
 }
 

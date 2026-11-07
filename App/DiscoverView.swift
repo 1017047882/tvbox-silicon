@@ -10,12 +10,14 @@ import TVCore
     private(set) var collections: TMDBCatalog.Collections?
     private(set) var collectionsFailed = false
     private(set) var loading = false
+    /// The featured charts answered once, with titles or not: until then the carousel doesn't fall back to trending.
+    private(set) var featuredAnswered = false
     /// Douban's hot lists, only fetched while their section is shown. A list that fails is just left out.
     private(set) var douban: [DoubanCatalog.Feed: [DoubanCatalog.Item]] = [:]
     private var doubanLoading = false
     /// This week's airing calendars (the Airing Today shelves). One that fails is just left out.
     private(set) var calendar: [TMDBCalendar.Kind: TMDBCalendar.Week] = [:]
-    static let feeds: [TMDBCatalog.Feed] = [.trending, .nowPlaying, .onTheAir, .variety, .chinese, .animation, .topMovies, .topTelevision, .family, .kids, .netflix, .disney, .appleTV, .hbo, .warner, .universal, .paramount, .sony]
+    static let feeds: [TMDBCatalog.Feed] = [.featured, .trending, .nowPlaying, .onTheAir, .variety, .chinese, .animation, .topMovies, .topTelevision, .family, .kids, .netflix, .disney, .appleTV, .hbo, .warner, .universal, .paramount, .sony]
     func items(_ feed: TMDBCatalog.Feed) -> [TMDBCatalog.Item] { pages[feed]?.items ?? [] }
 
     private enum LoadResult: Sendable {
@@ -44,8 +46,9 @@ import TVCore
                 guard !Task.isCancelled else { group.cancelAll(); break }
                 switch result {
                 case let .page(feed, page):
+                    if feed == .featured { featuredAnswered = true }
                     if let page { pages[feed] = page; failures.remove(feed) }
-                    else { failures.insert(feed) }
+                    else if feed != .featured { failures.insert(feed) }
                 case let .collections(fresh):
                     if let fresh { collections = fresh; collectionsFailed = false }
                     else { collectionsFailed = true }
@@ -93,19 +96,32 @@ struct DiscoverView: View {
     @AppStorage("discover.hiddenSections") private var hiddenSections = ""
     /// Douban's lists are in Chinese: shown by default only when the app is.
     @AppStorage("discover.doubanShown") private var doubanShown = TMDBMatch.language.hasPrefix("zh")
-    private var featured: [TMDBCatalog.Item] { Array(model.items(.trending).filter { $0.poster != nil }.prefix(8)) }
+    /// IMDb's and Douban's charts of the day (#631), or this week's TMDB trending titles when those didn't load.
+    /// Not trending while they still may: the carousel would change under the viewer.
+    private var featured: [TMDBCatalog.Item] {
+        let charts = model.items(.featured).filter { $0.poster != nil }
+        guard charts.isEmpty, model.featuredAnswered else { return Array(charts.prefix(10)) }
+        return Array(model.items(.trending).filter { $0.poster != nil }.prefix(8))
+    }
     var body: some View {
         WithPerceptionTracking {
+
+        // Turning Featured Titles off in Edit Layout also drops its backdrop, trailer and colours (#447).
+        let heroShown = visible(.hero)
         GeometryReader { proxy in
             WithPerceptionTracking {
             let heroHeight = DiscoverLayout.heroHeight(proxy.size.width)
             ZStack(alignment: .top) {
-                DiscoverHeroBackground(state: heroState, items: featured, width: proxy.size.width, height: heroHeight,
-                                       active: onScreen && scenePhase == .active)
+                if heroShown {
+                    DiscoverHeroBackground(state: heroState, items: featured, width: proxy.size.width, height: heroHeight,
+                                           active: onScreen && scenePhase == .active)
+                } else {
+                    DiscoverBackdrop(paint: nil, width: proxy.size.width, heroHeight: heroHeight, scrollY: 0, trailer: nil, playsTrailer: false)
+                }
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 30) {
                         if featured.isEmpty, model.loading {
-                            ProgressView().frame(maxWidth: .infinity).frame(height: min(proxy.size.width * 1.5, 660))
+                            ProgressView().frame(maxWidth: .infinity).frame(height: heroShown ? min(proxy.size.width * 1.5, 660) : 160)
                         }
                         ForEach(DiscoverSection.allCases.filter(visible)) { section in
                             WithPerceptionTracking {
@@ -152,6 +168,10 @@ struct DiscoverView: View {
                         }.padding(.horizontal, DiscoverLayout.gutter).padding(.vertical, 20)
                     }
                     .padding(.bottom, 28)
+                    #if os(tvOS)
+                    // Without the hero the first shelf would sit under the search button.
+                    .padding(.top, heroShown ? 0 : 150)
+                    #endif
                     .background {
                         WithPerceptionTracking {
                         GeometryReader { geometry in
@@ -178,7 +198,7 @@ struct DiscoverView: View {
 
             }
         }
-        .modifier(DiscoverHeroTheme(state: heroState))
+        .modifier(DiscoverHeroTheme(state: heroState, hero: heroShown))
         .navigationTitle("")
         #if !os(macOS)
         .tvToolbar(.visible, for: .navigationBar)
@@ -186,7 +206,7 @@ struct DiscoverView: View {
         #if os(tvOS)
         .tvToolbarColorScheme(.dark, for: .navigationBar)
         #else
-        .tvToolbarColorScheme(heroState.paint?.isDark == false ? .light : .dark, for: .navigationBar)
+        .tvToolbarColorScheme(heroShown && heroState.paint?.isDark == false ? .light : .dark, for: .navigationBar)
         #endif
         #endif
         #if os(tvOS)
@@ -197,7 +217,7 @@ struct DiscoverView: View {
             }.tileButton()
                 .focused($tvFocus, equals: .search)
                 .onMoveCommand { direction in
-                    if direction == .down, !featured.isEmpty {
+                    if direction == .down, heroShown, !featured.isEmpty {
                         tvFocus = .page(featured.firstIndex { $0.key == heroState.id } ?? 0)
                     }
                 }
@@ -220,7 +240,8 @@ struct DiscoverView: View {
         #if os(tvOS)
         .ignoresSafeArea()
         #else
-        .ignoresSafeArea(edges: .top)
+        // Only the hero runs under the status and navigation bars; without it the first shelf starts below them.
+        .ignoresSafeArea(edges: heroShown ? .top : [])
         #endif
         .onAppear { onScreen = true }
         .onDisappear { onScreen = false }
@@ -686,13 +707,16 @@ struct DiscoverView: View {
 
 private struct DiscoverHeroTheme: ViewModifier {
     let state: DiscoverHeroState
+    /// Off: Featured Titles is hidden, and the page keeps the plain dark backdrop's colours.
+    let hero: Bool
     func body(content: Content) -> some View {
         WithPerceptionTracking {
         #if os(tvOS)
         content.foregroundStyle(.white).environment(\.colorScheme, .dark)
         #else
-        content.foregroundStyle(state.paint?.isDark == false ? Color.black : Color.white)
-            .environment(\.colorScheme, state.paint?.isDark == false ? .light : .dark)
+        let light = hero && state.paint?.isDark == false
+        content.foregroundStyle(light ? Color.black : Color.white)
+            .environment(\.colorScheme, light ? .light : .dark)
         #endif
 
         }
@@ -768,6 +792,7 @@ private struct DiscoverHeroCarousel: View {
     let width: CGFloat
     #if os(macOS)
     @State private var hovering = false
+    @Environment(\.openRoute) private var openRoute
     #endif
     #if os(tvOS)
     var tvFocus: FocusState<DiscoverTVFocus?>.Binding
@@ -806,21 +831,23 @@ private struct DiscoverHeroCarousel: View {
             // One title at a time: in the split view's detail a horizontal scroll view takes the sidebar's width as
             // a content inset, which shifted every page. The arrows and the dots move between titles.
             let index = items.firstIndex { $0.key == selectedID } ?? 0
-            RouteLink { DiscoverDetailView(item: items[index]) } label: {
-                DiscoverHero(item: items[index], details: state.details[items[index].key])
-                    .frame(width: width, height: height)
-            }
-            .buttonStyle(.plain).id(items[index].key).transition(.opacity)
-            .accessibilityIdentifier("discover.hero.\(items[index].key)")
-            .overlay {
-                WithPerceptionTracking {
+            // A plain button pushes the title: a NavigationLink here also took the clicks on the arrows over it, so
+            // an arrow moved to the next title and then opened it.
+            ZStack {
+                Button {
+                    let item = items[index]
+                    openRoute?(Route { AnyView(DiscoverDetailView(item: item)) })
+                } label: {
+                    DiscoverHero(item: items[index], details: state.details[items[index].key])
+                        .frame(width: width, height: height)
+                }
+                .buttonStyle(.plain).id(items[index].key).transition(.opacity)
+                .accessibilityIdentifier("discover.hero.\(items[index].key)")
                 HStack {
                     heroArrow("chevron.left", label: L10n.text("Previous"), to: index - 1)
                     Spacer()
                     heroArrow("chevron.right", label: L10n.text("Next"), to: index + 1)
                 }.padding(.horizontal, 20).opacity(hovering ? 1 : 0).animation(.easeOut(duration: 0.2), value: hovering)
-
-                }
             }
             .onHover { hovering = $0 }
             #else
@@ -886,7 +913,10 @@ private struct DiscoverHeroCarousel: View {
         Button {
             withAnimation(.easeInOut(duration: 0.35)) { state.id = items[(index + items.count) % items.count].key }
         } label: {
+            // A plain button takes clicks only on what it draws: without the shape a click between the chevron's
+            // strokes fell through to the title under it and opened that.
             Image(systemName: symbol).font(.system(size: 17, weight: .semibold)).frame(width: 44, height: 44).glassSurface(.regular, in: Circle())
+                .contentShape(Circle())
         }.buttonStyle(.plain).accessibilityLabel(label)
     }
     #endif
@@ -909,7 +939,8 @@ private struct DiscoverNativeHeroPager: UIViewRepresentable {
         let layout = UICollectionViewFlowLayout()
         layout.scrollDirection = .horizontal
         layout.minimumLineSpacing = 0; layout.minimumInteritemSpacing = 0
-        let view = UICollectionView(frame: .zero, collectionViewLayout: layout)
+        let view = HeroPagerCollectionView(frame: .zero, collectionViewLayout: layout)
+        view.page = { [weak coordinator = context.coordinator] in coordinator?.selectedIndex ?? 0 }
         view.backgroundColor = .clear; view.isPagingEnabled = true
         view.isDirectionalLockEnabled = true; view.decelerationRate = .fast
         view.showsHorizontalScrollIndicator = false
@@ -937,6 +968,7 @@ private struct DiscoverNativeHeroPager: UIViewRepresentable {
         var parent: DiscoverNativeHeroPager
         var needsReload = false
         init(_ parent: DiscoverNativeHeroPager) { self.parent = parent }
+        var selectedIndex: Int { parent.selection.flatMap { key in parent.items.firstIndex { $0.key == key } } ?? 0 }
         func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int { parent.items.count }
         func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize { collectionView.bounds.size }
         func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
@@ -972,6 +1004,23 @@ private struct DiscoverNativeHeroPager: UIViewRepresentable {
             parent.dragging(false)
             if needsReload, let view = scrollView as? UICollectionView { needsReload = false; view.reloadData() }
         }
+    }
+}
+
+/// Each page is as wide as the pager. When the pager changes size (an iPhone turned sideways, an iPad window resized),
+/// the flow layout kept the old page size and the old offset, so the titles slid out of line (#516). A new size lays
+/// the pages out again and goes back to the selected one.
+private final class HeroPagerCollectionView: UICollectionView {
+    var page: () -> Int = { 0 }
+    private var pageSize: CGSize = .zero
+    override func layoutSubviews() {
+        guard bounds.size != pageSize, bounds.width > 0 else { return super.layoutSubviews() }
+        pageSize = bounds.size
+        collectionViewLayout.invalidateLayout()
+        super.layoutSubviews()
+        guard !isDragging, !isDecelerating else { return }
+        let x = min(CGFloat(page()) * bounds.width, max(0, contentSize.width - bounds.width))
+        if abs(contentOffset.x - x) > 0.5 { contentOffset = CGPoint(x: x, y: 0) }
     }
 }
 
@@ -1096,7 +1145,7 @@ private struct DiscoverHero: View {
                     .font(.system(size: 14)).lineLimit(1).frame(height: 17)
                 Text("「\(item.name)」" + item.overview)
                     .font(.system(size: 12)).lineLimit(2).multilineTextAlignment(.center)
-                    .frame(height: 29, alignment: .top).padding(.top, 5)
+                    .frame(height: 34, alignment: .top).padding(.top, 5)
                 HStack(spacing: 4) {
                     if let rating = item.rating {
                         TMDBBadge()
@@ -1119,6 +1168,8 @@ private struct DiscoverHero: View {
 struct DiscoverTile: View {
     let item: TMDBCatalog.Item
     var landscape = false
+    /// Shows the score under the title, as the lists' pages do (#467).
+    var showsRating = false
     var body: some View {
         WithPerceptionTracking {
         VStack(alignment: .leading, spacing: 0) {
@@ -1139,6 +1190,9 @@ struct DiscoverTile: View {
                 HStack(spacing: 5) {
                     if let year = item.year { Text(String(year)) }
                     if landscape, !item.genreNames.isEmpty { Text(item.genreNames).lineLimit(1) }
+                    if showsRating, let rating = item.rating {
+                        Text("★ " + rating.formatted(.number.precision(.fractionLength(1))))
+                    }
                 }.font(.system(size: DiscoverLayout.secondary, design: .rounded)).foregroundStyle(.primary.opacity(0.56))
             }.frame(maxWidth: .infinity, alignment: .leading).frame(height: DiscoverLayout.captionHeight)
         }
@@ -1331,6 +1385,8 @@ struct DiscoverTVGrid<Chips: View, Footer: View>: View {
     let title: String
     let items: [TMDBCatalog.Item]
     let identifier: String
+    /// Shows the score under the title, as the lists' pages do (#467).
+    var showsRating = false
     let reachedEnd: () async -> Void
     @ViewBuilder let chips: () -> Chips
     @ViewBuilder let footer: () -> Footer
@@ -1370,11 +1426,14 @@ struct DiscoverTVGrid<Chips: View, Footer: View>: View {
     }
 
     private func tile(_ item: TMDBCatalog.Item) -> some View {
-        VStack(spacing: 5) {
+        let caption = [item.date ?? item.year.map(String.init),
+                       showsRating ? item.rating.map { "★ " + $0.formatted(.number.precision(.fractionLength(1))) } : nil]
+            .compactMap { $0 }.joined(separator: " · ")
+        return VStack(spacing: 5) {
             PosterImage(url: item.poster).frame(width: 224, height: 336)
             VStack(spacing: 0) {
                 Text(item.name).font(.system(size: 29))
-                Text(item.date ?? item.year.map(String.init) ?? " ").font(.system(size: 23, weight: .medium)).foregroundStyle(.white.opacity(0.5))
+                Text(caption.isEmpty ? " " : caption).font(.system(size: 23, weight: .medium)).foregroundStyle(.white.opacity(0.5))
             }.lineLimit(1).cardCaption()
         }.frame(width: 224)
     }
@@ -1641,7 +1700,7 @@ private struct DiscoverListView: View {
     var body: some View {
         WithPerceptionTracking {
         #if os(tvOS)
-        DiscoverTVGrid(title: feed.title, items: items, identifier: "discover.list.title", reachedEnd: loadMore) {
+        DiscoverTVGrid(title: feed.title, items: items, identifier: "discover.list.title", showsRating: true, reachedEnd: loadMore) {
             EmptyView()
         } footer: {
             if failed { Button(L10n.text("Try Again")) { Task { await loadMore() } } }
@@ -1662,7 +1721,8 @@ private struct DiscoverListView: View {
                 WithPerceptionTracking {
                 ForEach(items, id: \.key) { item in
                     WithPerceptionTracking {
-                    RouteLink { DiscoverDetailView(item: item) } label: { DiscoverTile(item: item) }.tmdbCardButton()
+
+                    RouteLink { DiscoverDetailView(item: item) } label: { DiscoverTile(item: item, showsRating: true) }.tmdbCardButton()
                         .accessibilityIdentifier("discover.list.title.\(item.key)")
                         .task {
                             if item.key == items.last?.key { await loadMore() }
@@ -1713,6 +1773,7 @@ private struct DiscoverListView: View {
 private extension TMDBCatalog.Feed {
     var title: String {
         switch self {
+        case .featured: DiscoverSection.hero.title
         case .trending: L10n.text("Trending This Week")
         case .nowPlaying: L10n.text("In Theaters")
         case .onTheAir: L10n.text("On the Air")

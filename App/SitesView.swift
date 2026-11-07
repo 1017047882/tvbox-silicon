@@ -1,5 +1,6 @@
 import Perception
 import NavigationBackport
+import CoreImage
 import SwiftUI
 import TVCore
 
@@ -48,14 +49,23 @@ struct SitesView: View {
     @FocusState private var focusedSite: String?
     @State private var query = ""
     /// Groups the viewer folded. Every group starts open, subscriptions and hidden sources included,
-    /// so nothing on the page needs finding. Reset with the page, not with a pushed source: the state
-    /// lives here and `prepared` keeps the reset to once per visit.
-    @State private var collapsed: Set<String> = []
+    /// so nothing on the page needs finding, and stays as the viewer left it: a fold is saved and comes
+    /// back on the next visit and launch (#517). Picking a source always starts open, so the current
+    /// choice can be shown. `prepared` keeps the reload to once per visit, not per pushed source.
+    @State private var collapsed: Set<String>
     @State private var prepared = false
     /// The fold as it was when a search began; restored when the search is cleared.
     @State private var foldBeforeSearch: Set<String>?
     @State private var arranging = false
     @State private var choosingHidden = false
+    init(pick: ((Site) -> Void)? = nil, pickable: [Site] = [], picked: String? = nil) {
+        self.pick = pick
+        self.pickable = pickable
+        self.picked = picked
+        _collapsed = State(initialValue: pick == nil ? Self.savedFold : [])
+    }
+    private static let foldKey = "sources.foldedGroups"
+    private static var savedFold: Set<String> { Set(UserDefaults.standard.stringArray(forKey: foldKey) ?? []) }
     var body: some View {
         WithPerceptionTracking {
         Group {
@@ -170,6 +180,8 @@ struct SitesView: View {
             withAnimation(.tvSnappy(duration: 0.3)) {
                 if open { collapsed.insert(group.id) } else { collapsed.remove(group.id) }
             }
+            // A search opens every group for the moment; only the page's own fold is kept.
+            if pick == nil && query.isEmpty { UserDefaults.standard.set(collapsed.sorted(), forKey: Self.foldKey) }
         } label: {
             HStack(spacing: 8) {
                 Text(L10n.text(group.title)).font(.headline).lineLimit(1)
@@ -199,9 +211,9 @@ struct SitesView: View {
         #endif
     }
 
-    /// The default view of the page: every group open.
+    /// The page as the viewer last left it: every group open unless they folded it.
     private func applyDefaultFold() {
-        collapsed = []
+        collapsed = pick == nil ? Self.savedFold : []
         foldBeforeSearch = nil
     }
 }
@@ -1137,11 +1149,19 @@ struct SiteView: View {
                             WithPerceptionTracking {
                             ForEach(browser.videos) { video in
                                 WithPerceptionTracking {
-                                // An index source (a ranking or list site) names titles; other sources play them.
-                                if isIndex {
-                                    Button { store.searchVideos(video.name) } label: { PosterCard(video: video) }.cardButton()
-                                } else {
-                                    RouteLink { CatalogDestination(video: video, client: client) } label: { PosterCard(video: video) }.cardButton()
+                                Group {
+                                    // An index source (a ranking or list site) names titles; other sources play them.
+                                    if isIndex {
+                                        Button { store.searchVideos(video.name) } label: { PosterCard(video: video) }.cardButton()
+                                    } else {
+                                        RouteLink { CatalogDestination(video: video, client: client) } label: { PosterCard(video: video) }.cardButton()
+                                    }
+                                }
+                                .onAppear {
+                                    // The last cover coming on screen appends the next page, so scrolling never stops
+                                    // at a page boundary. A failed page waits for the footer's Retry instead.
+                                    guard browser.moreError == nil, video.id == browser.videos.last?.id else { return }
+                                    Task { await loadMore() }
                                 }
 
                                 }
@@ -1150,6 +1170,10 @@ struct SiteView: View {
                             }
                         }
                         .opacity(browser.busy && !browser.videos.isEmpty ? 0.55 : 1).animation(.tvSmooth, value: browser.busy)
+                        if !browser.videos.isEmpty && (browser.hasMore || browser.loadingMore || browser.moreError != nil) {
+                            // A focus section, so moving down from a cover in any column reaches Load More or Try Again.
+                            loadMoreFooter.tvFocusSection()
+                        }
                     }.pageContainer()
                     #if os(iOS)
                     .background {
@@ -1162,11 +1186,6 @@ struct SiteView: View {
                     }
                     #endif
                 }
-                .safeAreaInset(edge: .bottom) {
-                    WithPerceptionTracking {
- if browser.pageCount > 1 { pager }
-                    }
-                }
                 .sourceCatalogSearchable(text: Binding(get: { query }, set: { value in
                     query = value
                     if value.isEmpty && !browser.query.isEmpty { startRequest { await home() } }
@@ -1176,8 +1195,13 @@ struct SiteView: View {
         }
         .onDisappear { requestTask?.cancel(); browser.cancel() }
         .toolbar {
-            PinSourceButton(site: site, origin: origin)
-            HideSourceButton(site: site, origin: origin)
+            // Handed the store: UIKit can size a bar item before SwiftUI gives it the page's environment, and these
+            // buttons read Store first thing (a TestFlight crash on iPhone).
+            Group {
+                PinSourceButton(site: site, origin: origin)
+                HideSourceButton(site: site, origin: origin)
+            }
+            .environment(store)
         }
         .screenBackdrop()
         .onAppear {
@@ -1227,22 +1251,25 @@ struct SiteView: View {
             }.padding(.vertical, 4)
         }
     }
-    private var pager: some View {
-        GlassGroup(spacing: 10) {
-            HStack(spacing: 10) {
-                Button { startRequest { await load(page: browser.page - 1) } } label: { Image(systemName: "chevron.left").frame(width: 22) }
-                    .controlButton().disabled(browser.page <= 1 || browser.busy).accessibilityLabel(L10n.text("Previous"))
-                Text(L10n.text("Page %lld of %lld", browser.page, browser.pageCount)).font(.subheadline.weight(.medium).monospacedDigit())
-                    .padding(.horizontal, 16).padding(.vertical, 10)
-                Button { startRequest { await load(page: browser.page + 1) } } label: { Image(systemName: "chevron.right").frame(width: 22) }
-                    .controlButton().disabled(browser.page >= browser.pageCount || browser.busy).accessibilityLabel(L10n.text("Next"))
+    @ViewBuilder private var loadMoreFooter: some View {
+        if let message = browser.moreError {
+            VStack(spacing: 12) {
+                Text(message).font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                Button(L10n.text("Try Again")) { startRequest { await loadMore() } }
+                    .controlButton()
+                    .accessibilityIdentifier("site.loadMore.retry")
             }
-        }.tvLargeControl()
-        #if os(tvOS)
-        .padding(.vertical, 20).frame(maxWidth: .infinity).background(TVStyle.background).focusSection()
-        #else
-        .padding(.vertical, 8).frame(maxWidth: .infinity).controlBackdrop()
-        #endif
+            .frame(maxWidth: .infinity).padding(.vertical, 16)
+        } else if browser.loadingMore {
+            ProgressView().tvLargeControl()
+                .frame(maxWidth: .infinity).padding(.vertical, 24)
+                .accessibilityLabel(L10n.text("Loading…"))
+        } else if browser.hasMore {
+            Button(L10n.text("Load More")) { startRequest { await loadMore() } }
+                .controlButton()
+                .frame(maxWidth: .infinity).padding(.vertical, 16)
+                .accessibilityIdentifier("site.loadMore")
+        }
     }
     private func home() async { await browser.load(folder.map { .list(category: $0.id, query: "", page: 1) } ?? .home, client: client) }
     private func search() async {
@@ -1250,10 +1277,7 @@ struct SiteView: View {
         if text.isEmpty { await home() }
         else { await browser.load(.list(category: nil, query: text, page: 1), client: client) }
     }
-    private func load(page next: Int) async {
-        await browser.load(.list(category: browser.category.isEmpty ? nil : browser.category, query: browser.query, page: next, filters: browser.filters),
-                           client: client)
-    }
+    private func loadMore() async { await browser.loadMore(client: client) }
 }
 
 /// A category's filters (TVBox `filters`: 类型, 地区, 年份…) drawn as Discover's catalog search draws its own: one
@@ -1272,7 +1296,8 @@ struct CategoryFilterBar: View {
     private var anyChanged: Bool { filters.contains(where: changed) }
     private func title(_ filter: CategoryFilter) -> String {
         let current = value(filter)
-        return filter.name + "：" + (filter.options.first { $0.value == current }?.name ?? current)
+        let choice = filter.options.first { $0.value == current }?.name ?? current
+        return filter.name.isEmpty ? choice : filter.name + "：" + choice
     }
     private func pick(_ filter: CategoryFilter, _ option: String) {
         guard value(filter) != option else { return }
@@ -1390,18 +1415,593 @@ struct CategoryFilterBar: View {
     #endif
 }
 
-/// Where a listed title opens: its details, or for a drive source's folder the folder's listing.
+/// Where a listed title opens: its details, for a drive source's folder the folder's listing, and for a plugin
+/// setting listed among titles (`Video.action`) that setting.
 struct CatalogDestination: View {
     let video: Video
     let client: CatalogClient
     var body: some View {
         WithPerceptionTracking {
-        if video.isFolder { SiteView(site: client.site, origin: client.origin, jarURL: client.jarURL, folder: video) }
+        if let action = video.action { PluginActionPage(video: video, client: client, action: action) }
+        else if video.isFolder { SiteView(site: client.site, origin: client.origin, jarURL: client.jarURL, folder: video) }
         else { VideoDetailView(video: video, client: client) }
 
         }
     }
 }
+
+/// A plugin setting listed among a source's titles (aowu's 配置中心, FTY's 我的云盘┃配置). It runs in the plugin, as
+/// in TVBox; the window the plugin opens for it is drawn here (`PluginScreen`), and the viewer's taps and typing go
+/// back to the plugin's own code.
+struct PluginActionPage: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
+    let video: Video
+    let client: CatalogClient
+    let action: String
+    private enum Phase: Equatable { case running, showing, finished(String?), failed(String) }
+    @State private var phase = Phase.running
+    @State private var screen = PluginScreen()
+    /// What the viewer typed, by field, until it goes to the plugin with the next tap.
+    @State private var typed: [Int: String] = [:]
+    @State private var sending = false
+    @State private var notice: String?
+    @State private var noticeTask: Task<Void, Never>?
+
+    var body: some View {
+        ScrollView {
+            switch phase {
+            case .running:
+                ProgressView().padding(.vertical, 80).frame(maxWidth: .infinity)
+            case .showing:
+                if let window = screen.windows.last {
+                    PluginWindowView(window: window, typed: $typed, layers: screen.windows.count, send: send)
+                        .id(window.id)
+                        .disabled(sending)
+                }
+            case .finished(let message):
+                // Back is focusable, so the remote has somewhere to land on Apple TV.
+                EmptyResults(symbol: message == nil ? "checkmark.circle" : "info.circle", title: video.name,
+                             message: message ?? L10n.text("The plugin finished without a message."),
+                             action: L10n.text("Back"), actionSymbol: "chevron.backward") { dismiss() }
+                // Each tap runs the setting once more, as a tap on its row does in TVBox: settings that ask for a
+                // double tap to confirm (a reset) take two quick taps here. Never disabled, so the second tap counts.
+                Button { runAgain() } label: { Label(L10n.text("Run Again"), systemImage: "hand.tap").padding(.horizontal, 8) }
+                    .controlButton()
+                    .accessibilityIdentifier("pluginSetting.runAgain")
+            case .failed(let message):
+                EmptyResults(symbol: "exclamationmark.triangle", title: video.name, message: message,
+                             action: L10n.text("Try Again")) { Task { await run() } }
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if let notice {
+                Text(notice)
+                    .font(.callout)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 18).padding(.vertical, 12)
+                    .glassPanel(cornerRadius: 22)
+                    .padding(.bottom, 24).padding(.horizontal, 24)
+                    .transition(.opacity)
+                    .allowsHitTesting(false)
+            }
+        }
+        .animation(.easeOut(duration: 0.2), value: notice)
+        .navigationTitle(video.name)
+        .task { await run() }
+        .task(id: phase == .showing) {
+            // Plugins change their windows on their own (a QR code arriving, a sign-in confirmed): look again.
+            guard phase == .showing else { return }
+            while !Task.isCancelled {
+                try? await tvSleep(for: .seconds(1.5))
+                guard !Task.isCancelled, !sending, let window = screen.windows.last else { continue }
+                await deliver(PluginEvent(window: window.id, kind: .poll), quietly: true)
+            }
+        }
+        .onDisappear {
+            noticeTask?.cancel()
+            guard let window = screen.windows.last else { return }
+            let client = client
+            Task { _ = try? await client.pluginWindow(PluginEvent(window: window.id, kind: .closeAll)) }
+        }
+    }
+
+    private func run() async {
+        phase = .running
+        typed = [:]
+        do { show(try await client.runAction(action), first: true) }
+        catch is CancellationError { }
+        catch { phase = .failed(error.localizedDescription) }
+    }
+
+    private func runAgain() {
+        Task {
+            do { show(try await client.runAction(action), first: true) }
+            catch is CancellationError { }
+            catch { phase = .failed(error.localizedDescription) }
+        }
+    }
+
+    /// A page the plugin opens. A sign-in page that only works in its service's app (Bilibili's confirmation page)
+    /// goes there when the app is on this device; anything else, or no app, opens as it is.
+    private func open(_ link: URL) {
+        #if os(iOS)
+        let tries = (DriveAppLink.app(opening: link)?.urls ?? []) + [link]
+        #else
+        let tries = [link]
+        #endif
+        func attempt(_ index: Int) {
+            guard index < tries.count else { return }
+            openURL(tries[index]) { opened in if !opened { attempt(index + 1) } }
+        }
+        attempt(0)
+    }
+
+    #if DEBUG
+    private static func find(_ text: String, in node: PluginNode) -> PluginNode? {
+        if node.tappable, node.spokenText.contains(text) { return node.children.lazy.compactMap { find(text, in: $0) }.first ?? node }
+        return node.children.lazy.compactMap { find(text, in: $0) }.first
+    }
+    #endif
+
+    private func send(_ event: PluginEvent) {
+        var event = event
+        // Typed text reaches the plugin's fields before the tap runs, as on Android.
+        for (field, text) in typed where event.values[field] == nil { event.values[field] = .text(text) }
+        Task { await deliver(event, quietly: false) }
+    }
+
+    private func deliver(_ event: PluginEvent, quietly: Bool) async {
+        if !quietly { sending = true }
+        defer { if !quietly { sending = false } }
+        do { show(try await client.pluginWindow(event), first: false) }
+        catch is CancellationError { }
+        catch { if !quietly { phase = .failed(error.localizedDescription) } }
+    }
+
+    private func show(_ next: PluginScreen, first: Bool) {
+        if screen.windows.last?.id != next.windows.last?.id { typed = [:] }
+        screen = next
+        for link in next.links { open(link) }
+        var said = next.notices.joined(separator: "\n")
+        if let copied = next.clipboard {
+            // What the plugin copied goes on the pasteboard (Apple TV has none, so it is shown instead).
+            #if os(iOS)
+            UIPasteboard.general.string = copied
+            if said.isEmpty { said = L10n.text("Copied to the clipboard.") }
+            #elseif os(macOS)
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(copied, forType: .string)
+            if said.isEmpty { said = L10n.text("Copied to the clipboard.") }
+            #else
+            said = said.isEmpty ? copied : said + "\n" + copied
+            #endif
+        }
+        if next.windows.isEmpty {
+            // The setting is done: what it said stays on the page; with nothing to say the page goes.
+            let failure = next.error.map { L10n.text("The plugin stopped with an error: %@", $0) }
+            let message = [first ? next.message : nil, said.isEmpty ? nil : said, failure].compactMap { $0 }.joined(separator: "\n")
+            if message.isEmpty && !first { dismiss() } else { phase = .finished(message.isEmpty ? nil : message) }
+            return
+        }
+        phase = .showing
+        #if DEBUG
+        // `-qaPluginTap <text>` taps the first view showing that text in the plugin's first window, for screenshots.
+        if first, let wanted = UserDefaults.standard.string(forKey: "qaPluginTap"), let window = next.windows.last,
+           let target = window.root.flatMap({ Self.find(wanted, in: $0) }) {
+            Task { try? await tvSleep(for: .seconds(1)); send(PluginEvent(window: window.id, kind: .click, view: target.id)) }
+        }
+        #endif
+        guard !said.isEmpty else { return }
+        notice = said
+        noticeTask?.cancel()
+        noticeTask = Task {
+            try? await tvSleep(for: .seconds(4))
+            if !Task.isCancelled { notice = nil }
+        }
+    }
+}
+
+/// A QR code in a plugin window (a sign-in page, TVBox's "remote input" page) can't be scanned by the device showing
+/// it, so its link opens here. A page the plugin serves from this device (its network address) opens in the app, which
+/// has to keep running to answer it; other links open as links do. Apple TV has no browser: its codes are scanned.
+private struct PluginCodeLink: View {
+    let image: Data
+    @State private var link: URL?
+    @State private var showsPage = false
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        #if os(tvOS)
+        EmptyView()
+        #else
+        Group {
+            if let link {
+                Button { open(link) } label: { Label(L10n.text("Open Link"), systemImage: "link").padding(.horizontal, 8) }
+                    .controlButton()
+                    .accessibilityIdentifier("pluginSetting.openCode")
+            }
+        }
+        .task(id: image) { link = await Self.decode(image) }
+        #if os(iOS)
+        .sheet(isPresented: $showsPage) {
+            if let link { ConfigCenterView { ConfigCenter.local(link) ?? link } }
+        }
+        #endif
+        #endif
+    }
+
+    private func open(_ url: URL) {
+        #if os(iOS)
+        if ConfigCenter.local(url) != nil { showsPage = true } else { openURL(url) }
+        #else
+        openURL(ConfigCenter.local(url) ?? url)
+        #endif
+    }
+
+    /// The web address a QR code in the picture holds, if any.
+    nonisolated static func decode(_ data: Data) async -> URL? {
+        guard let picture = CIImage(data: data),
+              let detector = CIDetector(ofType: CIDetectorTypeQRCode, context: nil, options: [CIDetectorAccuracy: CIDetectorAccuracyHigh])
+        else { return nil }
+        for case let code as CIQRCodeFeature in detector.features(in: picture) {
+            guard let text = code.messageString?.trimmingCharacters(in: .whitespacesAndNewlines), let url = URL(string: text),
+                  ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { continue }
+            return url
+        }
+        return nil
+    }
+}
+
+/// One plugin window, drawn from the plugin's own views. When the plugin paints its window (most do: white
+/// cards), its colors are kept on that surface; a plain Android alert takes the app's look instead.
+private struct PluginWindowView: View {
+    let window: PluginWindow
+    @Binding var typed: [Int: String]
+    /// Windows open, this one included: under another one, Back returns to it.
+    let layers: Int
+    let send: (PluginEvent) -> Void
+    #if os(tvOS)
+    static let scale = 1.7
+    private let width: CGFloat = 1100
+    #else
+    static let scale = 1.0
+    private let width: CGFloat = 620
+    #endif
+
+    var body: some View {
+        let painted = window.surface.map { $0.alpha > 0.5 } ?? false
+        VStack(alignment: .leading, spacing: 14 * Self.scale) {
+            if layers > 1 {
+                Button { send(PluginEvent(window: window.id, kind: .back)) } label: {
+                    Label(L10n.text("Back"), systemImage: "chevron.backward")
+                }
+                .buttonStyle(.bordered)
+            }
+            if let title = window.title { Text(title).font(.headline) }
+            if let message = window.message { Text(message).font(.body).fixedSize(horizontal: false, vertical: true) }
+            if let header = window.header { PluginNodeView(node: header, context: context(painted)) }
+            if let root = window.root { PluginNodeView(node: root, context: context(painted)) }
+            if !window.items.isEmpty { items }
+            if let progress = window.progress { PluginNodeView(node: progress, context: context(painted)) }
+            if !window.buttons.isEmpty { buttons }
+        }
+        .padding(painted ? 0 : 20 * Self.scale)
+        .frame(maxWidth: width, alignment: .leading)
+        .background {
+            if let surface = window.surface, painted {
+                RoundedRectangle(cornerRadius: 18 * Self.scale, style: .continuous).fill(surface.color)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 18 * Self.scale, style: .continuous))
+        .environment(\.colorScheme, painted ? ((window.surface?.luminance ?? 0) > 0.5 ? .light : .dark) : colorSchemeFallback)
+        .padding(20)
+        .frame(maxWidth: .infinity)
+    }
+
+    @Environment(\.colorScheme) private var colorSchemeFallback
+
+    private func context(_ painted: Bool) -> PluginNodeView.Context {
+        PluginNodeView.Context(window: window.id, painted: painted, typed: $typed, send: send)
+    }
+
+    private var items: some View {
+        VStack(spacing: 8) {
+            ForEach(Array(window.items.enumerated()), id: \.offset) { index, item in
+                Button { send(PluginEvent(window: window.id, kind: .item, index: index)) } label: {
+                    HStack {
+                        Text(item.text).frame(maxWidth: .infinity, alignment: .leading)
+                        if window.choice == .multi {
+                            Image(systemName: item.checked == true ? "checkmark.square.fill" : "square").foregroundStyle(.tint)
+                        } else if item.checked == true {
+                            Image(systemName: "checkmark").foregroundStyle(.tint)
+                        }
+                    }
+                    .padding(.vertical, 6)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(PluginTapStyle())
+            }
+        }
+    }
+
+    private var buttons: some View {
+        HStack(spacing: 12) {
+            Spacer(minLength: 0)
+            ForEach(window.buttons.sorted { order($0.role) < order($1.role) }) { button in
+                if button.role == .positive {
+                    Button(button.text) { send(PluginEvent(window: window.id, kind: .click, view: button.id)) }
+                        .buttonStyle(.borderedProminent).disabled(!button.enabled)
+                } else {
+                    Button(button.text) { send(PluginEvent(window: window.id, kind: .click, view: button.id)) }
+                        .buttonStyle(.bordered).disabled(!button.enabled)
+                }
+            }
+        }
+    }
+
+    /// Android's order: neutral first, then negative, positive last.
+    private func order(_ role: PluginWindow.Button.Role) -> Int {
+        switch role { case .neutral: 0; case .negative: 1; case .positive: 2 }
+    }
+}
+
+private struct PluginNodeView: View {
+    struct Context {
+        let window: Int
+        /// The window has the plugin's own background, so its colors are kept.
+        let painted: Bool
+        let typed: Binding<[Int: String]>
+        let send: (PluginEvent) -> Void
+        func tap(_ node: PluginNode) { send(PluginEvent(window: window, kind: .click, view: node.id)) }
+        func change(_ node: PluginNode, _ value: PluginEvent.Value) { send(PluginEvent(window: window, kind: .change, values: [node.id: value])) }
+    }
+    let node: PluginNode
+    let context: Context
+    private var scale: Double { PluginWindowView.scale }
+
+    var body: some View {
+        content
+            .opacity(node.enabled ? (node.alpha ?? 1) : 0.45)
+    }
+
+    @ViewBuilder private var content: some View {
+        switch node.kind {
+        case .stack, .scroll, .radios: tappable(container)
+        case .text: tappable(label(node))
+        case .button:
+            Button { context.tap(node) } label: { label(node).frame(maxWidth: node.fillWidth ? .infinity : nil) }
+                .buttonStyle(.bordered).disabled(!node.enabled)
+        case .input: field
+        case .check, .switch:
+            Toggle(isOn: Binding(get: { node.checked }, set: { context.change(node, .on($0)) })) { label(node) }
+                .disabled(!node.enabled)
+        case .radio:
+            Button { if !node.checked { context.change(node, .on(true)) } } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: node.checked ? "largecircle.fill.circle" : "circle").foregroundStyle(.tint)
+                    label(node)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(PluginTapStyle())
+        case .progress:
+            if node.indeterminate { ProgressView().frame(maxWidth: .infinity) }
+            else { ProgressView(value: Double(node.progress - node.minimum), total: Double(max(1, node.maximum - node.minimum))) }
+        case .slider: slider
+        case .image: tappable(picture)
+        case .view: spacer
+        }
+    }
+
+    // Containers: Android's LinearLayout and FrameLayout, each child with its share of the line.
+    @ViewBuilder private var container: some View {
+        let spacing = 8 * scale
+        switch node.axis {
+        case .h:
+            let row = HStack(alignment: .center, spacing: spacing) { children }
+            if node.kind == .scroll { ScrollView(.horizontal, showsIndicators: false) { row } }
+            else if #available(iOS 16, macOS 13, tvOS 16, *) {
+                ViewThatFits(in: .horizontal) { row; ScrollView(.horizontal, showsIndicators: false) { row } }
+            } else { ScrollView(.horizontal, showsIndicators: false) { row } }
+        case .z:
+            ZStack(alignment: .topLeading) { children }
+        case .v:
+            VStack(alignment: node.centered ? .center : .leading, spacing: spacing) { children }
+        }
+    }
+
+    @ViewBuilder private var children: some View {
+        ForEach(node.children) { child in
+            let view = PluginNodeView(node: child, context: context)
+            if node.axis == .h, child.weight != nil { view.frame(maxWidth: .infinity, alignment: child.trailing ? .trailing : .leading) }
+            else if node.axis == .v, child.fillWidth { view.frame(maxWidth: .infinity, alignment: child.centered ? .center : child.trailing ? .trailing : .leading) }
+            else { view }
+        }
+    }
+
+    /// A view with a listener is a button; one the plugin paints gets its color and rounded plate.
+    @ViewBuilder private func tappable(_ inner: some View) -> some View {
+        let plated = inner
+            .padding(insets)
+            .background { if let plate { RoundedRectangle(cornerRadius: 10 * scale, style: .continuous).fill(plate) } }
+        if node.tappable {
+            Button { context.tap(node) } label: { plated.contentShape(Rectangle()) }
+                .buttonStyle(PluginTapStyle())
+                .disabled(!node.enabled)
+                .accessibilityLabel(node.spokenText)
+        } else {
+            plated
+        }
+    }
+
+    /// The plugin's own padding; a painted plate without one still gets room around its content.
+    private var insets: EdgeInsets {
+        if let p = node.padding { return EdgeInsets(top: p[1] * scale, leading: p[0] * scale, bottom: p[3] * scale, trailing: p[2] * scale) }
+        let room = plate == nil ? 0 : 10 * scale
+        return EdgeInsets(top: room, leading: room, bottom: room, trailing: room)
+    }
+
+    private var plate: Color? {
+        guard let background = node.background, background.alpha > 0.05 else { return nil }
+        if context.painted { return background.color }
+        return node.selected ? Color.accentColor.opacity(0.25) : Color.secondary.opacity(0.15)
+    }
+
+    private func label(_ node: PluginNode) -> some View {
+        Text(node.text ?? "")
+            .font(.system(size: (node.size ?? 15) * scale, weight: node.bold ? .semibold : .regular))
+            .foregroundStyle(textColor(node))
+            .lineLimit(node.lines)
+            .multilineTextAlignment(node.centered ? .center : node.trailing ? .trailing : .leading)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func textColor(_ node: PluginNode) -> Color {
+        guard context.painted, let color = node.color else { return node.selected ? .accentColor : .primary }
+        return color.color
+    }
+
+    @ViewBuilder private var field: some View {
+        let text = Binding(get: { context.typed.wrappedValue[node.id] ?? node.text ?? "" },
+                           set: { context.typed.wrappedValue[node.id] = $0 })
+        let prompt = Text(node.hint ?? "")
+        Group {
+            if node.secure { SecureField(node.hint ?? "", text: text, prompt: prompt) }
+            else if node.multiline { TextField(node.hint ?? "", text: text, prompt: prompt, axis: .vertical).lineLimit(3...8) }
+            else { TextField(node.hint ?? "", text: text, prompt: prompt) }
+        }
+        #if !os(tvOS)
+        .textFieldStyle(.roundedBorder)
+        #endif
+        #if os(iOS)
+        .keyboardType(node.keyboard == "number" ? .numberPad : node.keyboard == "url" ? .URL : node.keyboard == "email" ? .emailAddress : .default)
+        .textInputAutocapitalization(.never)
+        #endif
+        .disableAutocorrection()
+        .onSubmit { context.send(PluginEvent(window: context.window, kind: .submit, view: node.id, values: [node.id: .text(text.wrappedValue)])) }
+        .disabled(!node.enabled)
+    }
+
+    @ViewBuilder private var slider: some View {
+        #if os(tvOS)
+        HStack(spacing: 20) {
+            Button { context.change(node, .number(max(node.minimum, node.progress - node.step))) } label: { Image(systemName: "minus") }
+            Text("\(node.progress)").monospacedDigit().frame(minWidth: 80)
+            Button { context.change(node, .number(min(node.maximum, node.progress + node.step))) } label: { Image(systemName: "plus") }
+        }
+        #else
+        PluginSlider(node: node) { context.change(node, .number($0)) }
+        #endif
+    }
+
+    @ViewBuilder private var picture: some View {
+        if let data = node.image, let image = PlatformImage(data: data) {
+            let width = (node.width ?? Double(image.size.width) / 2) * scale, height = (node.height ?? Double(image.size.height) / 2) * scale
+            #if os(macOS)
+            let drawn = Image(nsImage: image)
+            #else
+            let drawn = Image(uiImage: image)
+            #endif
+            // Plugins' pictures are mostly QR codes: keep their pixels sharp.
+            VStack(spacing: 10 * scale) {
+                drawn.resizable().interpolation(.none)
+                    .aspectRatio(contentMode: node.fill ? .fill : .fit)
+                    .overlay { touchArea }
+                    .frame(maxWidth: width, maxHeight: height)
+                    .clipped()
+                if !node.touch { PluginCodeLink(image: data) }
+            }
+            .frame(maxWidth: .infinity)
+        } else {
+            spacer
+        }
+    }
+
+    /// On a picture the plugin reads touches on (a color wheel), a tap or the end of a drag sends where it landed.
+    @ViewBuilder private var touchArea: some View {
+        #if os(tvOS)
+        EmptyView()
+        #else
+        if node.touch, node.enabled {
+            GeometryReader { frame in
+                Color.clear.contentShape(Rectangle())
+                    .gesture(DragGesture(minimumDistance: 0).onEnded { drag in
+                        guard frame.size.width > 0, frame.size.height > 0 else { return }
+                        context.send(PluginEvent(window: context.window, kind: .touch, view: node.id,
+                                                 x: drag.location.x / frame.size.width, y: drag.location.y / frame.size.height))
+                    })
+            }
+        }
+        #endif
+    }
+
+    /// An empty view: a gap, or a line or block when the plugin colors it.
+    @ViewBuilder private var spacer: some View {
+        if let plate, let height = node.height {
+            Rectangle().fill(plate).frame(height: CGFloat(height * scale))
+                .frame(maxWidth: node.fillWidth ? .infinity : node.width.map { CGFloat($0 * scale) } ?? .infinity)
+        } else if node.weight != nil {
+            Spacer(minLength: 0)
+        } else if let height = node.height {
+            Color.clear.frame(height: CGFloat(height * scale))
+        }
+    }
+}
+
+#if !os(tvOS)
+/// A plugin's SeekBar: the plugin hears the value once the drag ends, as Android's onStopTrackingTouch.
+private struct PluginSlider: View {
+    let node: PluginNode
+    let commit: (Int) -> Void
+    @State private var value: Double?
+    var body: some View {
+        HStack {
+            Slider(value: Binding(get: { value ?? Double(node.progress) }, set: { value = $0 }),
+                   in: Double(node.minimum)...Double(max(node.minimum + 1, node.maximum)), step: Double(node.step)) { editing in
+                if !editing, let value { commit(Int(value)); self.value = nil }
+            }
+            Text("\(Int(value ?? Double(node.progress)))").monospacedDigit().frame(minWidth: 40)
+        }
+    }
+}
+#endif
+
+/// Taps on a plugin's own rows: no extra chrome (the plugin paints them), a lift on Apple TV focus.
+private struct PluginTapStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        #if os(tvOS)
+        PluginFocusLift(label: configuration.label, pressed: configuration.isPressed)
+        #else
+        configuration.label.opacity(configuration.isPressed ? 0.6 : 1)
+        #endif
+    }
+}
+
+#if os(tvOS)
+private struct PluginFocusLift<Label: View>: View {
+    @Environment(\.isFocused) private var focused
+    let label: Label
+    let pressed: Bool
+    var body: some View {
+        label
+            .overlay { RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.accentColor, lineWidth: focused ? 4 : 0) }
+            .scaleEffect(pressed ? 0.98 : focused ? 1.03 : 1)
+            .shadow(color: .black.opacity(focused ? 0.3 : 0), radius: 12, y: 6)
+            .animation(.easeOut(duration: 0.15), value: focused)
+    }
+}
+#endif
+
+private extension PluginColor {
+    var color: Color { Color(.sRGB, red: red, green: green, blue: blue, opacity: alpha) }
+}
+
+#if os(macOS)
+private typealias PlatformImage = NSImage
+#else
+private typealias PlatformImage = UIImage
+#endif
 
 struct VideoDetailView: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -1414,6 +2014,8 @@ struct VideoDetailView: View {
     #if os(iOS)
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @State private var fullScreen = false
+    /// Full Screen came from turning the phone sideways, so turning it upright again returns to the page.
+    @State private var turnedFullScreen = false
     @State private var showsAllEpisodes = false
     @State private var episodeScroll: Episode.ID?
     /// The page's player shows its picture (or an error); until then the page's cover stays over it.
@@ -1429,6 +2031,8 @@ struct VideoDetailView: View {
     @State private var detail: Video?
     /// Short labels (第1集) for lines whose episode names are file names, by episode id (#318). Display only.
     @State private var episodeLabels: [Episode.ID: String] = [:]
+    /// Resolution and size read from file names (4K · 5.2G, #620), under the episodes' names.
+    @State private var episodeDetails: [Episode.ID: String] = [:]
     @State private var error: String?
     @State private var busy = false
     @State private var pendingPlan: PlaybackPlan?
@@ -1450,8 +2054,7 @@ struct VideoDetailView: View {
     @State private var loadingEpisode: Episode.ID?
     /// A failed or blocked playback attempt, shown as an inline banner beside the artwork.
     @State private var playbackIssue: PlaybackIssue?
-    @State private var signingIn: CloudDrive?
-    /// A sign-in the source's CatPawOpen bundle runs itself (UC's TV token).
+    /// A drive sign-in the source's CatPawOpen bundle runs itself, with its own code (`CatPawSignIn`).
     @State private var bundleSignIn: BundleSignIn?
     @State private var choosingDownloads = false
     /// How many episodes were just queued, shown briefly under the header.
@@ -1541,54 +2144,16 @@ struct VideoDetailView: View {
             }
         }
         #endif
-        // Sign in where playback failed, then resume the episode that needed the account.
-        #if !os(tvOS)
-        .sheet(item: $bundleSignIn) { pending in
-            WithPerceptionTracking {
-            CatPawSignInView(client: client, provider: pending.provider) {
-                if let episode = playbackIssue?.episode { startRequest { await play(episode) } }
-            }
-
-            }
-        }
-        #endif
-        #if os(macOS)
-        .sheet(item: $signingIn) { drive in
-            WithPerceptionTracking {
-            if drive == .xunlei {
-                XunleiSignInView { if let episode = playbackIssue?.episode { startRequest { await play(episode) } } }
-            } else if drive == .baidu {
-                // Baidu signs in with a code to scan on a Mac, as in Settings.
-                CloudQRLoginView(drive: .baidu) { retryAfterSignIn() }
-            } else {
-                CloudLoginView(provider: drive.provider) { cookie, ticket in
-                    try await drive.provider.saveLogin(cookie, ticket: ticket)
-                    if let episode = playbackIssue?.episode { startRequest { await play(episode) } }
-                }
-            }
-
-            }
-        }
-        #elseif os(iOS)
-        // The drive's own sign-in page; the code is for signing in with another phone.
-        .sheet(item: $signingIn) { drive in
-            WithPerceptionTracking {
-            if drive == .xunlei { XunleiSignInView(signedIn: retryAfterSignIn) }
-            else {
-                WebSignInView(service: drive.webSignIn, signedIn: retryAfterSignIn) {
-                    CloudQRLoginView(drive: drive.qrDrive) { retryAfterSignIn() }
-                }
-            }
-
-            }
+        // The source's own sign-in where playback failed, then the episode that needed the account plays. Plugins that
+        // sign in by themselves show their code while the request runs (PluginSignIn); the app's sign-ins stay in
+        // Settings, whose accounts every source gets.
+        #if os(tvOS)
+        .fullScreenCover(item: $bundleSignIn) { pending in
+            CatPawSignInView(client: client, provider: pending.provider) { retryAfterSignIn() }
         }
         #else
-        .fullScreenCover(item: $signingIn) { drive in
-            WithPerceptionTracking {
-            if drive == .xunlei { XunleiSignInView(signedIn: retryAfterSignIn) }
-            else { CloudQRLoginView(drive: drive.qrDrive) { retryAfterSignIn() } }
-
-            }
+        .sheet(item: $bundleSignIn) { pending in
+            CatPawSignInView(client: client, provider: pending.provider) { retryAfterSignIn() }
         }
         #endif
         .downloadPicker(isPresented: $choosingDownloads) {
@@ -1663,7 +2228,7 @@ struct VideoDetailView: View {
         }
         if let issue = playbackIssue {
             HStack(alignment: .top, spacing: 14) {
-                Image(systemName: issue.drive != nil || issue.signIn != nil ? "person.crop.circle.badge.exclamationmark.fill" : "exclamationmark.triangle.fill")
+                Image(systemName: issue.signIn != nil ? "person.crop.circle.badge.exclamationmark.fill" : "exclamationmark.triangle.fill")
                     .font(.system(size: 16, weight: .semibold)).foregroundStyle(Brand.amber)
                     .frame(width: 36, height: 36)
                     .background(Brand.amber.opacity(0.15), in: Circle())
@@ -1676,20 +2241,15 @@ struct VideoDetailView: View {
                             .fixedSize(horizontal: false, vertical: true).selectable()
                     }
                     HStack(spacing: 8) {
-                        if let drive = issue.drive {
-                            Button(drive.signInTitle) { signingIn = drive }.settingsButton(prominent: true)
-                        }
-                        #if !os(tvOS)
                         if let provider = issue.signIn {
-                            Button(L10n.text("Get UC TV Token")) { bundleSignIn = BundleSignIn(provider: provider) }
-                                .settingsButton(prominent: true)
-                                .accessibilityIdentifier("playbackIssue.bundleSignIn")
+                            Button(provider == "ucToken" ? L10n.text("Get UC TV Token") : L10n.text("Sign In to %@", CatPawSignIn.driveName(provider))) {
+                                bundleSignIn = BundleSignIn(provider: provider)
+                            }
+                            .settingsButton(prominent: true)
+                            .accessibilityIdentifier("playbackIssue.bundleSignIn")
                         }
-                        #endif
-                        Button(L10n.text(issue.blockedBeforeRequest ? "Try Anyway" : "Retry")) {
-                            startRequest { await play(issue.episode, skipAccountCheck: true) }
-                        }
-                        .settingsButton(prominent: issue.drive == nil && issue.signIn == nil)
+                        Button(L10n.text("Retry")) { startRequest { await play(issue.episode) } }
+                            .settingsButton(prominent: issue.signIn == nil)
                         #if os(tvOS)
                         // A focusable action instead of the small corner close button.
                         Button(L10n.text("Dismiss")) { withAnimation(.tvSmooth(duration: 0.2)) { playbackIssue = nil } }.settingsButton()
@@ -1739,14 +2299,24 @@ struct VideoDetailView: View {
     private func loadDetail() async {
         guard !busy else { return }
         busy = true; error = nil
-        defer { busy = false }
+        let started = TVInstant.now
+        Diagnostics.shared.record(.info, "catalog.playback", "detail begin source=\(client.site.key)")
+        defer {
+            busy = false
+            Diagnostics.shared.record(.info, "catalog.playback", "detail end source=\(client.site.key) elapsed=\(started.duration(to: .now).seconds)s cancelled=\(Task.isCancelled)")
+        }
         do {
             let value = try await client.detail(video.id, cached: client.site.type == 3 || client.site.type == 4)
+            Diagnostics.shared.record(.info, "catalog.playback", "detail received source=\(client.site.key) cancelled=\(Task.isCancelled)")
             try Task.checkCancellation()
             // Worked out once, off the main thread: a line can hold thousands of episodes.
             let episodes = value.episodes
-            episodeLabels = await Task.detached(priority: .userInitiated) { EpisodeLabels.labels(episodes) }.value
+            (episodeLabels, episodeDetails) = await Task.detached(priority: .userInitiated) {
+                let labels = EpisodeLabels.labels(episodes)
+                return (labels, EpisodeFileInfo.details(episodes, labels: labels))
+            }.value
             detail = value
+            Diagnostics.shared.record(.info, "catalog.playback", "detail ready source=\(client.site.key) episodes=\(episodes.count)")
             // Start on the line watched last (#362), else on one that can play: not one from a drive the viewer has no
             // way to sign in to.
             if selectedFlag == nil { selectedFlag = watchedFlag ?? CloudDrive.preferredFlag(flags) }
@@ -1786,7 +2356,18 @@ struct VideoDetailView: View {
             Text(L10n.text("No playable sources were found for this video.")).foregroundStyle(.secondary)
         }
         #else
-        Text(L10n.text("No playable sources were found for this video.")).foregroundStyle(.secondary)
+        // Apple TV and the Mac don't open a config center (#651): the app's drive sign-ins reach the source instead.
+        if ConfigCenter.page(of: detail, site: client.site) != nil {
+            VStack(alignment: .leading, spacing: 14) {
+                Text(L10n.text("This source's settings page can't open on this device. Sign in to your drives in Cloud Drive Accounts, and the source uses those sign-ins."))
+                    .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                RouteLink { CloudDriveView() } label: { Text(L10n.text("Cloud Drive Accounts")) }
+                    .controlButton(prominent: true)
+                    .accessibilityIdentifier("detail.cloudDriveAccounts")
+            }
+        } else {
+            Text(L10n.text("No playable sources were found for this video.")).foregroundStyle(.secondary)
+        }
         #endif
     }
     #if os(iOS)
@@ -1809,8 +2390,17 @@ struct VideoDetailView: View {
     @ViewBuilder private var tmdbExtras: some View {
         if let details = tmdb.details {
             VStack(alignment: .leading, spacing: 22) {
-                if !details.cast.isEmpty { TMDBCastRow(cast: details.cast) }
-                TMDBInfoGrid(details: details)
+                // As Discover's title page (#505): people, studios and genres open their own pages.
+                if !details.cast.isEmpty { TMDBPeopleRow(title: L10n.text("Cast"), people: details.cast) }
+                if details.crew.contains(where: { $0.profile != nil }) { TMDBPeopleRow(title: L10n.text("Crew"), people: details.crew) }
+                #if os(tvOS)
+                let studiosShown = false
+                #else
+                let studiosShown = details.studios?.isEmpty == false
+                if studiosShown, let studios = details.studios { TMDBStudioRow(studios: studios) }
+                #endif
+                if !details.genres.isEmpty { TMDBGenreRow(details: details) }
+                TMDBInfoGrid(details: details, studiosShown: studiosShown)
                 if let related = details.recommendations, !related.isEmpty {
                     TMDBRelatedRow(titles: related) { store.searchVideos($0) }
                 }
@@ -1902,13 +2492,17 @@ struct VideoDetailView: View {
 
     @ViewBuilder private var playControl: some View {
         if let detail {
-            if let first = activeEpisodes.first ?? detail.episodes.first {
+            // The episode watched last, or the next one once it is finished, so Play continues the video instead of
+            // starting the line again (#593).
+            let continuation = watchHistory?.continuation(in: detail.episodes)
+            if let first = continuation ?? activeEpisodes.first ?? detail.episodes.first {
+                let continues = first.id == continuation?.id
                 // Beside the poster on a phone there is no room for both labels: Download drops to its icon.
                 Group {
             if #available(iOS 16, macOS 13, tvOS 16, *) {
                 ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 10) { playButton(first); downloadButton(iconOnly: false); videoFavoriteButton }
-                    HStack(spacing: 10) { playButton(first); downloadButton(iconOnly: true); videoFavoriteButton }
+                    HStack(spacing: 10) { playButton(first, continuation: continues); downloadButton(iconOnly: false); videoFavoriteButton }
+                    HStack(spacing: 10) { playButton(first, continuation: continues); downloadButton(iconOnly: true); videoFavoriteButton }
                 }
             } else {
                 HStack(spacing: 10) { playButton(first); downloadButton(iconOnly: true); videoFavoriteButton }
@@ -1947,11 +2541,11 @@ struct VideoDetailView: View {
             .accessibilityIdentifier("detail.goBack")
     }
     #endif
-    private func playButton(_ episode: Episode) -> some View {
+    private func playButton(_ episode: Episode, continuation: Bool = false) -> some View {
         Button { startRequest { await play(episode) } } label: {
             HStack(spacing: 8) {
-                if loadingEpisode == episode.id { ProgressView().controlSize(.small) } else { Image(systemName: "play.fill") }
-                Text(L10n.text("Play"))
+                if loadingEpisode == episode.id { ProgressView().appControlSize(.small) } else { Image(systemName: "play.fill") }
+                Text(L10n.text(continuation ? "Continue" : "Play"))
             }
             .font(.headline).lineLimit(1).fixedSize().padding(.horizontal, 8)
         }
@@ -2137,12 +2731,11 @@ struct VideoDetailView: View {
         let longNames = (items.map { (episodeLabels[$0.id] ?? $0.name).count }.max() ?? 0) > 6
         // Under a full-width banner, long names fill columns rather than one stretched list.
         let rowColumns = isWide ? [GridItem(.adaptive(minimum: 320), spacing: 8)] : [GridItem(.flexible())]
-        // TMDB's stills, when its season lines up with most of the episodes and has pictures for them; without
-        // pictures the small chips read better than empty tiles. While TMDB is still looking, tiles with the episode
-        // numbers, so its stills fade into the same tiles instead of chips turning into tiles.
+        // TMDB's stills, when its season lines up with most of the episodes and it has pictures (`episodeTiles`);
+        // without pictures the small chips read better than empty tiles. While TMDB is still looking, tiles with the
+        // episode numbers, so its stills fade into the same tiles instead of chips turning into tiles.
         let stills = tmdb.episodes(items)
-        let showsStills = items.count > 1
-            && (stills.values.filter { $0.still != nil }.count * 2 >= items.count || (tmdbPending && items.count <= 60))
+        let showsStills = items.count > 1 && (!tmdb.episodeTiles(items).isEmpty || (tmdbPending && items.count <= 60))
         let columns = showsStills ? [GridItem(.adaptive(minimum: TMDBMetrics.episodeTile), spacing: TMDBMetrics.spacing, alignment: .top)]
             : longNames ? rowColumns : [GridItem(.adaptive(minimum: episodeMin), spacing: 8)]
         return LazyVGrid(columns: columns, spacing: showsStills ? TMDBMetrics.spacing : longNames ? 4 : 8) {
@@ -2153,7 +2746,8 @@ struct VideoDetailView: View {
                 Group {
                     if showsStills {
                         Button { startRequest { await play(episode) } } label: {
-                            TMDBEpisodeTile(name: episodeTitle(episode), info: stills[episode.id], loading: loadingEpisode == episode.id, width: nil)
+                            TMDBEpisodeTile(name: episodeTitle(episode), info: stills[episode.id], detail: episodeDetails[episode.id],
+                                            loading: loadingEpisode == episode.id, width: nil, backdrops: tmdb.episodeBackdrops)
                         }
                         .tmdbCardButton()
                         .overlay(alignment: .topTrailing) {
@@ -2163,11 +2757,12 @@ struct VideoDetailView: View {
                         }
                         .accessibilityLabel(episode.name)
                     } else if longNames {
-                        EpisodeRow(name: episode.name, label: episodeLabels[episode.id], loading: loadingEpisode == episode.id, download: saved) {
+                        EpisodeRow(name: episode.name, label: episodeLabels[episode.id], file: episodeDetails[episode.id],
+                                   loading: loadingEpisode == episode.id, download: saved) {
                             startRequest { await play(episode) }
                         }
                     } else {
-                        Chip(title: episodeLabels[episode.id] ?? episode.name, selected: loadingEpisode == episode.id, fill: true) { startRequest { await play(episode) } }
+                        Chip(title: episodeLabels[episode.id] ?? episode.name, selected: loadingEpisode == episode.id, fill: true, subtitle: episodeDetails[episode.id]) { startRequest { await play(episode) } }
                             .overlay(alignment: .topTrailing) {
                                 WithPerceptionTracking {
  if saved?.status == .completed { DownloadedBadge() }
@@ -2238,34 +2833,38 @@ struct VideoDetailView: View {
     private func download(_ episode: Episode) -> DownloadItem? {
         DownloadLibrary.shared.item(for: DownloadSource(site: client.site, videoID: video.id, episode: episode))
     }
-    private func play(_ episode: Episode, skipAccountCheck: Bool = false) async {
+    private func play(_ episode: Episode) async {
         guard !busy else { return }
+        // Picking the episode watched last picks it up where it stopped; any other starts at 0 (#593).
+        let resume = resumePosition(for: episode)
         // A downloaded episode plays from the device: no link to fetch, and it works offline.
         if let saved = download(episode), saved.status == .completed {
             store.playing = DownloadLibrary.shared.channel(for: saved)
             return
         }
-        // Cloud-drive plugins wait for an in-app login that cannot appear on this platform,
-        // which surfaces only as a 60-second timeout. Ask for the account up front instead.
-        if !skipAccountCheck, let drive = CloudDrive.missingLogin(forFlag: episode.flag) {
-            withAnimation(.tvSmooth(duration: 0.25)) {
-                playbackIssue = PlaybackIssue(episode: episode, message: drive.loginHint, drive: drive, blockedBeforeRequest: true)
-            }
-            return
-        }
+        // A drive line goes to the plugin even without an app sign-in: the plugin asks for its account itself, with
+        // its own code, which the app shows (PluginSignIn, or the bundle's sign-in below).
         busy = true; loadingEpisode = episode.id
         withAnimation(.tvSmooth(duration: 0.2)) { playbackIssue = nil }
-        defer { busy = false; if !choosingQuality { loadingEpisode = nil } }
+        let started = TVInstant.now
+        Diagnostics.shared.record(.info, "catalog.playback", "plan begin source=\(client.site.key)")
+        defer {
+            busy = false; if !choosingQuality { loadingEpisode = nil }
+            Diagnostics.shared.record(.info, "catalog.playback", "plan end source=\(client.site.key) elapsed=\(started.duration(to: .now).seconds)s cancelled=\(Task.isCancelled)")
+        }
         do {
             let plan = try await client.preparePlayback(episode)
+            Diagnostics.shared.record(.info, "catalog.playback", "plan ready source=\(client.site.key) choices=\(plan.choices.count) web=\(plan.requiresWebDetection)")
             try Task.checkCancellation()
             if plan.choices.count > 1 {
                 pendingPlan = plan; pendingEpisode = episode; choosingQuality = true
             } else {
                 let playback = store.subscription.map { client.applying($0) } ?? client
+                Diagnostics.shared.record(.info, "catalog.playback", "resolve begin source=\(client.site.key)")
                 let resolved = try await playback.resolvePlayback(plan, choice: plan.choices[0])
+                Diagnostics.shared.record(.info, "catalog.playback", "resolve ready source=\(client.site.key) scheme=\(resolved.url.scheme ?? "-")")
                 try Task.checkCancellation()
-                store.playing = store.catalogChannel(resolved, video: currentVideo(), episode: episode, client: playback)
+                store.playing = store.catalogChannel(resolved, video: currentVideo(), episode: episode, client: playback, resumePosition: resume)
             }
         } catch { fail(episode, error) }
     }
@@ -2274,9 +2873,12 @@ struct VideoDetailView: View {
         defer { busy = false; pendingPlan = nil; pendingEpisode = nil; loadingEpisode = nil }
         do {
             let playback = store.subscription.map { client.applying($0) } ?? client
+            Diagnostics.shared.record(.info, "catalog.playback", "resolve begin source=\(client.site.key) choice=\(choice.id)")
             let resolved = try await playback.resolvePlayback(plan, choice: choice)
+            Diagnostics.shared.record(.info, "catalog.playback", "resolve ready source=\(client.site.key) scheme=\(resolved.url.scheme ?? "-")")
             try Task.checkCancellation()
-            store.playing = store.catalogChannel(resolved, video: currentVideo(), episode: episode, client: playback)
+            store.playing = store.catalogChannel(resolved, video: currentVideo(), episode: episode, client: playback,
+                                                 resumePosition: resumePosition(for: episode))
         } catch { fail(episode, error) }
     }
     private func retryAfterSignIn() {
@@ -2284,25 +2886,23 @@ struct VideoDetailView: View {
     }
     private func fail(_ episode: Episode, _ error: Error) {
         guard !Task.isCancelled, !(error is CancellationError) else { return }
-        let login = error as? CloudDriveLoginRequired ?? CloudDriveLoginRequired(bundleMessage: error.localizedDescription)
+        // A CatPawOpen bundle without a drive's sign-in sends the viewer to its config center ("请先去配置中心登录夸克"):
+        // its own sign-in for that drive runs here instead.
+        let provider = client.site.isCatPawOpen ? CatPawSignIn.provider(for: error.localizedDescription) : nil
         // A drive that needs signing in is expected, not a failure to report.
-        if login == nil {
+        if provider == nil && !(error is CloudDriveLoginRequired) {
             Diagnostics.shared.failure("catalog", "play \(client.reportContext) flag=\(episode.flag)", error)
         }
         withAnimation(.tvSmooth(duration: 0.25)) {
-            // Plugins report a missing or expired drive login in their own words ("夸克授权失败，请扫码登录");
-            // say what happened and offer the sign-in instead of echoing them.
-            if let login, let drive = CloudDrive(rawValue: login.rawValue) {
-                playbackIssue = PlaybackIssue(episode: episode, message: drive.expiredHint, drive: drive, blockedBeforeRequest: false)
-            } else if let provider = CatPawSignIn.provider(for: error.localizedDescription) {
-                // Signed in, but the bundle wants a token its own code gives; signing in again would change nothing.
-                playbackIssue = PlaybackIssue(episode: episode, message: L10n.text("You're signed in to UC, but this source plays UC accounts without premium through UC's TV app, which needs a token of its own. Get it once with the UC Browser app, or choose another line."),
-                                              drive: nil, blockedBeforeRequest: false, signIn: provider)
-            } else if let drive = CloudDrive(flag: episode.flag), CloudDrive.isLoginFailure(error.localizedDescription) {
-                playbackIssue = PlaybackIssue(episode: episode, message: drive.expiredHint, drive: drive, blockedBeforeRequest: false)
+            if let provider {
+                let message = provider == "ucToken"
+                    // Signed in, but the bundle wants a token its own code gives; signing in again would change nothing.
+                    ? L10n.text("You're signed in to UC, but this source plays UC accounts without premium through UC's TV app, which needs a token of its own. Get it once with the UC Browser app, or choose another line.")
+                    : L10n.text("This source needs your %@ account for this line. Sign in with its code, and the episode plays.", CatPawSignIn.driveName(provider))
+                playbackIssue = PlaybackIssue(episode: episode, message: message, signIn: provider)
             } else {
-                playbackIssue = PlaybackIssue(episode: episode, message: error.localizedDescription,
-                                              drive: CloudDrive.missingLogin(forFlag: episode.flag), blockedBeforeRequest: false)
+                // Other plugins say in their own words what their sign-in needs.
+                playbackIssue = PlaybackIssue(episode: episode, message: error.localizedDescription)
             }
         }
     }
@@ -2315,6 +2915,10 @@ struct VideoDetailView: View {
     /// Where the viewer stopped last time, for Continue.
     private var watchHistory: PlaybackHistoryEntry? {
         store.playbackHistory.entries.first { watchScopes.contains($0.context.id) }
+    }
+    /// Where an episode stopped last time, when it is the one watched last; any other starts at 0.
+    private func resumePosition(for episode: Episode) -> Double? {
+        watchHistory?.resumePosition(for: episode)
     }
     /// The line of the episode playing, else of the one watched last, while the details still have it: the page opens
     /// on that line so the episode shows in its list, not on the first line (#362).
@@ -2369,7 +2973,7 @@ struct VideoDetailView: View {
  if fullScreen { Color.black.ignoresSafeArea() }
             }
         }
-        .statusBarHidden(true)
+        .statusBarHidden(fullScreen)
         .tvToolbar(.hidden, for: .navigationBar)
         .background {
             WithPerceptionTracking {
@@ -2380,21 +2984,29 @@ struct VideoDetailView: View {
         .onAppear {
             store.watchPageScopes.formUnion(watchScopes)
             PlayerOrientation.holdPortrait(true)
+            UIDevice.current.beginGeneratingDeviceOrientationNotifications()
         }
         .tvOnChange(of: watchScopes) { old, new in
             store.watchPageScopes.subtract(old.subtracting(new)); store.watchPageScopes.formUnion(new)
         }
+        .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
+            phoneTurned()
+        }
         .onDisappear {
+            UIDevice.current.endGeneratingDeviceOrientationNotifications()
             // Leaving the page ends its playback, as the full-screen player's Back does.
             if watchChannel != nil { store.playing = nil }
             store.watchPageScopes.subtract(watchScopes)
             if fullScreen { fullScreen = false; PlayerOrientation.set(landscape: false) }
+            turnedFullScreen = false
             PlayerOrientation.holdPortrait(false)
         }
         .tvOnChange(of: watchChannel == nil) { _, ended in
             playerStarted = false
             if ended { playerSession = nil }
             if ended && fullScreen { setFullScreen(landscape: false) }
+            // Started with the phone already sideways: Full Screen at once, as turning it would.
+            if !ended { phoneTurned() }
         }
         .sheet(isPresented: $showsAllEpisodes) {
             WithPerceptionTracking {
@@ -2428,13 +3040,38 @@ struct VideoDetailView: View {
 
     private func setFullScreen(landscape: Bool) {
         let entering = !fullScreen
+        // A button's Full Screen stays until the viewer leaves it; turning the phone back upright ends only a
+        // Full Screen the turning opened.
+        if !entering { turnedFullScreen = false }
         withAnimation(.tvSmooth(duration: 0.3)) { fullScreen = entering }
         // A landscape picture turns the phone; a portrait one fills the screen upright.
         if !entering { PlayerOrientation.set(landscape: false) } else if landscape { PlayerOrientation.set(landscape: true) }
     }
 
-    /// The cover's Play: where the viewer stopped, else the line's first episode.
+    /// Turning the phone sideways while its video plays opens Full Screen, as the player's button does, and turning
+    /// it upright again returns to the page. The watch page holds the interface upright (`PlayerOrientation`), so it
+    /// doesn't turn by itself: this listens to the phone's own turning instead.
+    private func phoneTurned() {
+        guard watchChannel != nil, PlayerOrientation.available else { return }
+        switch UIDevice.current.orientation {
+        case .landscapeLeft, .landscapeRight:
+            guard !fullScreen else { return }
+            turnedFullScreen = true
+            setFullScreen(landscape: true)
+        case .portrait:
+            guard fullScreen, turnedFullScreen else { return }
+            setFullScreen(landscape: false)
+        default:
+            break
+        }
+    }
+
+    /// The cover's Play: where the viewer stopped (the next episode once that one is finished), else the line's
+    /// first episode.
     private func playWatchCover() {
+        if let watchHistory, watchHistory.completed, let next = detail.flatMap({ watchHistory.continuation(in: $0.episodes) }) {
+            startRequest { await play(next) }; return
+        }
         if let watchHistory { store.resume(watchHistory); return }
         guard let first = activeEpisodes.first ?? detail?.episodes.first else { return }
         startRequest { await play(first) }
@@ -2593,27 +3230,29 @@ struct VideoDetailView: View {
         }
     }
 
-    /// TMDB's stills for the line's episodes, when its season lines up with most of them and has pictures for them;
-    /// otherwise none, and the episodes keep their small cards.
+    /// TMDB's episodes for picture tiles (`TMDBLookup.episodeTiles`); otherwise none, and the episodes keep their small
+    /// cards.
     private func watchStills(_ items: [Episode]) -> [Episode.ID: TMDBMatch.EpisodeInfo] {
-        let stills = tmdb.episodes(items)
-        return items.count > 1 && stills.values.filter { $0.still != nil }.count * 2 >= items.count ? stills : [:]
+        tmdb.episodeTiles(items)
     }
 
     /// The width of the small tiles when every name is short (第1集, 01, 4K国语), or nil for two-line cards. The tiles
     /// are as wide as the widest name, at least 64 points: a fixed 64 cut off names of four or five characters such as
     /// 4K国语 or 第100集 (#290). Measures one name, in the same pass that checks their lengths.
     private func compactTileWidth(_ items: [Episode]) -> CGFloat? {
-        var widest = "", widestUnits = 0
+        var widest = "", widestUnits = 0, widestDetail = ""
         for item in items {
             let title = episodeTitle(item)
             guard title.count <= 5 else { return nil }
+            if let detail = episodeDetails[item.id], detail.count > widestDetail.count { widestDetail = detail }
             // Chinese and other wide characters take about twice the room of digits and Latin letters.
             let units = title.unicodeScalars.reduce(0) { $0 + ($1.isASCII ? 1 : 2) }
             if units > widestUnits { widest = title; widestUnits = units }
         }
         let font = UIFont.systemFont(ofSize: UIFont.preferredFont(forTextStyle: .subheadline).pointSize, weight: .semibold)
-        let text = (widest as NSString).size(withAttributes: [.font: font]).width
+        let small = UIFont.monospacedDigitSystemFont(ofSize: UIFont.preferredFont(forTextStyle: .caption2).pointSize, weight: .regular)
+        let text = max((widest as NSString).size(withAttributes: [.font: font]).width,
+                       (widestDetail as NSString).size(withAttributes: [.font: small]).width)
         // 8 points of padding on each side, and a little room for the bold of the episode playing.
         return max(64, (text + 20).rounded(.up))
     }
@@ -2627,6 +3266,7 @@ struct VideoDetailView: View {
         let current = episode.id == currentEpisodeID
         let saved = download(episode)
         let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+        let detail = episodeDetails[episode.id]
         return Button {
             chosen?()
             // The episode already playing keeps playing.
@@ -2634,8 +3274,8 @@ struct VideoDetailView: View {
             startRequest { await play(episode) }
         } label: {
             if let info {
-                TMDBEpisodeTile(name: episodeTitle(episode), info: info, current: current, loading: loadingEpisode == episode.id,
-                                width: fill ? nil : 168)
+                TMDBEpisodeTile(name: episodeTitle(episode), info: info, detail: detail, current: current, loading: loadingEpisode == episode.id,
+                                width: fill ? nil : 168, backdrops: tmdb.episodeBackdrops)
                     .overlay(alignment: .topTrailing) {
                         WithPerceptionTracking {
  if saved?.status == .completed { DownloadedBadge().padding(4) }
@@ -2643,9 +3283,13 @@ struct VideoDetailView: View {
                     }
             } else {
             HStack(spacing: 6) {
-                if loadingEpisode == episode.id { ProgressView().controlSize(.small) }
-                Text(episodeTitle(episode)).lineLimit(compact ? 1 : 2)
-                    .multilineTextAlignment(compact ? .center : .leading)
+                if loadingEpisode == episode.id { ProgressView().appControlSize(.small) }
+                VStack(alignment: compact ? .center : .leading, spacing: 1) {
+                    // With the small line under it, a long name keeps to one line so the card keeps its height.
+                    Text(episodeTitle(episode)).lineLimit(compact || detail != nil ? 1 : 2)
+                        .multilineTextAlignment(compact ? .center : .leading)
+                    if let detail { EpisodeFileDetail(text: detail) }
+                }
             }
             .font(.subheadline.weight(current ? .semibold : .regular))
             .foregroundStyle(current ? Brand.onAccent : Color.primary)
@@ -2778,9 +3422,6 @@ extension PlaybackHistoryEntry {
 private struct PlaybackIssue {
     let episode: Episode
     let message: String
-    let drive: CloudDrive?
-    /// True when playback was not attempted because a required account is missing.
-    let blockedBeforeRequest: Bool
     /// A sign-in the source's CatPawOpen bundle runs itself (`CatPawSignIn.provider(for:)`).
     var signIn: String? = nil
 }
@@ -2790,13 +3431,11 @@ private struct BundleSignIn: Identifiable {
     var id: String { provider }
 }
 
-/// Cloud drives whose plugins need a saved login before they can return a stream.
-private enum CloudDrive: String, Identifiable {
+/// Cloud drives a line plays from, to start a video on a line that can play now.
+private enum CloudDrive {
     /// Xunlei's sign-in is only for CatPawOpen bundles, which say when it is missing; other sources play their Xunlei
-    /// lines without it, so those lines are never held back for it. Baidu comes only from a plugin's error
-    /// (`CloudDriveLoginRequired`), never from a line's name: other plugins sign in to it with their own code.
-    case quark, uc, xunlei, baidu
-    var id: String { rawValue }
+    /// lines without it, so those lines are never held back for it.
+    case quark, uc, xunlei
     /// FTY names its lines after drive nicknames: 夸父 is Quark, 优汐 is UC.
     init?(flag: String) {
         let text = flag.lowercased()
@@ -2811,7 +3450,8 @@ private enum CloudDrive: String, Identifiable {
         let text = flag.lowercased()
         return ["嘟嘟", "百度", "度盘", "baidu", "阿狸", "阿里", "aliyun"].contains { text.contains($0) }
     }
-    /// The first line that can play now: not from a drive without a sign-in, nor one whose sign-in is missing.
+    /// The first line that can play now: not from a drive without a sign-in, nor one without the app's sign-in.
+    /// Those lines still play when chosen: their plugin asks for the account with its own code.
     static func preferredFlag(_ flags: [String]) -> String? {
         let accounts = (try? CloudDriveAccounts.load()) ?? CloudDriveAccounts()
         return flags.first { flag in
@@ -2821,46 +3461,15 @@ private enum CloudDrive: String, Identifiable {
             return !cookie.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
     }
-    var name: String {
-        switch self {
-        case .quark: L10n.text("Quark")
-        case .uc: "UC"
-        case .xunlei: L10n.text("Xunlei")
-        case .baidu: L10n.text("Baidu Netdisk")
-        }
-    }
-    var signInTitle: String {
-        switch self {
-        case .quark: L10n.text("Sign In to Quark")
-        case .uc: L10n.text("Sign In to UC")
-        case .xunlei, .baidu: L10n.text("Sign In to %@", name)
-        }
-    }
-    #if os(macOS)
-    var provider: CloudProvider { self == .quark ? .quark : .uc }
-    #else
-    var qrDrive: CloudDriveQRLogin.Drive { self == .quark ? .quark : self == .baidu ? .baidu : .uc }
-    var webSignIn: WebSignIn { self == .quark ? .quark : self == .baidu ? .baidu : .uc }
-    #endif
-    var loginHint: String { L10n.text("This source plays from %@ and needs you to sign in first.", name) }
-    var expiredHint: String { L10n.text("Your %@ sign-in is missing or has expired. Sign in again to play this episode.", name) }
-    static func missingLogin(forFlag flag: String) -> CloudDrive? {
-        guard let drive = CloudDrive(flag: flag), drive != .xunlei else { return nil }
-        let accounts = (try? CloudDriveAccounts.load()) ?? CloudDriveAccounts()
-        let cookie = drive == .quark ? accounts.quarkCookie : accounts.ucCookie
-        return cookie.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? drive : nil
-    }
-    static func isLoginFailure(_ message: String) -> Bool {
-        let text = message.lowercased()
-        return ["授权", "登录", "扫码", "cookie", "login", "unauthorized"].contains { text.contains($0) }
-    }
 }
 
 /// Episode names often lead with a size tag ("[1.18GB] S01E41.mkv"); show it as trailing detail.
-private struct EpisodeRow: View {
+struct EpisodeRow: View {
     let name: String
     /// The episode's short label (第1集), shown in place of the name; the size tag stays as detail.
     var label: String? = nil
+    /// Resolution and size from the file name (4K · 5.2G), shown in place of the size tag.
+    var file: String? = nil
     let loading: Bool
     var download: DownloadItem? = nil
     let action: () -> Void
@@ -2886,7 +3495,7 @@ private struct EpisodeRow: View {
     }
     private var parts: (title: String, detail: String?) {
         let parts = Self.split(name)
-        return (label ?? parts.title, parts.detail)
+        return (label ?? parts.title, file ?? parts.detail)
     }
     var body: some View {
         WithPerceptionTracking {
@@ -2894,7 +3503,7 @@ private struct EpisodeRow: View {
         let button = Button(action: action) {
             HStack(spacing: 10) {
                 ZStack {
-                    if loading { ProgressView().controlSize(.mini) }
+                    if loading { ProgressView().appControlSize(.mini) }
                     else { Image(systemName: "play.fill").font(.system(size: Self.metrics.icon)).foregroundStyle(hovering ? .primary : .tertiary) }
                 }
                 .frame(width: Self.metrics.icon + 6)
