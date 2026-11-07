@@ -67,11 +67,12 @@ public actor SubtitleSearch {
     /// The search, all at once (for tests and callers that don't show progress).
     public func results(_ hint: SubtitleHint, sources: [SubtitleSearchSource]) async -> SubtitleSearchProgress {
         var last = SubtitleSearchProgress()
-        await run(hint, sources: sources) { last = $0 }
+        for await progress in search(hint, sources: sources) { last = progress }
         return last
     }
 
-    private func run(_ hint: SubtitleHint, sources: [SubtitleSearchSource], report: (SubtitleSearchProgress) -> Void) async {
+    /// @brief Publishes Sendable progress snapshots; only this actor mutates search state.
+    private func run(_ hint: SubtitleHint, sources: [SubtitleSearchSource], report: @Sendable (SubtitleSearchProgress) -> Void) async {
         var progress = SubtitleSearchProgress()
         var found: [String: [SubtitleCandidate]] = [:]
         var waiting: [SubtitleSearchSource] = []

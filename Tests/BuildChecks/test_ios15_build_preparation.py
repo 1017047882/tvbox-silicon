@@ -13,6 +13,12 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
 class DeploymentTests(unittest.TestCase):
+    def test_subtitle_progress_callback_is_sendable(self):
+        text = (ROOT / "Sources/TVCore/SubtitleSearch.swift").read_text(encoding="utf-8")
+        signature = next(line for line in text.splitlines() if "private func run(" in line)
+        self.assertIn("report: @Sendable (SubtitleSearchProgress) -> Void", signature)
+        self.assertNotIn("{ last = $0 }", text)
+
     def test_synced_core_uses_legacy_regex_and_locale_interfaces(self):
         proxy = (ROOT / "Sources/TVCore/CatPawOpen.swift").read_text(encoding="utf-8")
         locale = (ROOT / "Sources/TVCore/MangaHost.swift").read_text(encoding="utf-8")
