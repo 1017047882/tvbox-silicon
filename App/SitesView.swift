@@ -1878,7 +1878,7 @@ private struct PluginNodeView: View {
         .keyboardType(node.keyboard == "number" ? .numberPad : node.keyboard == "url" ? .URL : node.keyboard == "email" ? .emailAddress : .default)
         .textInputAutocapitalization(.never)
         #endif
-        .disableAutocorrection()
+        .disableAutocorrection(true)
         .onSubmit { context.send(PluginEvent(window: context.window, kind: .submit, view: node.id, values: [node.id: .text(text.wrappedValue)])) }
         .disabled(!node.enabled)
     }

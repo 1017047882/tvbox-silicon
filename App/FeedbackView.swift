@@ -709,9 +709,7 @@ private struct FeedbackAttachmentTile: View {
 
             }
         }
-        .accessibilityActions {
-            if let preview { Button(L10n.text("Open"), action: preview) }
-        }
+        .tvAccessibilityOpen(preview)
         .task(id: attachment.id) {
             guard let data = attachment.thumbnail else { return }
             image = feedbackImage(from: data)

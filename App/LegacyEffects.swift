@@ -11,11 +11,11 @@ enum TVContentTransition {
 }
 enum TVImpactWeight: Equatable { case light, medium }
 enum TVFeedback {
-    case selection, impact(weight: TVImpactWeight)
+    case selection, alignment, impact(weight: TVImpactWeight)
     @MainActor func play() {
         #if os(iOS)
         switch self {
-        case .selection: UISelectionFeedbackGenerator().selectionChanged()
+        case .selection, .alignment: UISelectionFeedbackGenerator().selectionChanged()
         case .impact(let weight): UIImpactFeedbackGenerator(style: weight == .light ? .light : .medium).impactOccurred()
         }
         #endif
@@ -42,6 +42,10 @@ extension View {
     }
     func tvSensoryFeedback<Value: Equatable>(trigger: Value, _ feedback: @escaping (Value, Value) -> TVFeedback?) -> some View {
         tvOnChange(of: trigger) { old, next in feedback(old, next)?.play() }
+    }
+    /// @brief Evaluates feedback conditions on the main actor, including alignment on iOS 15.
+    func tvSensoryFeedback<Value: Equatable>(_ feedback: TVFeedback, trigger: Value, condition: @escaping (Value, Value) -> Bool) -> some View {
+        tvOnChange(of: trigger) { old, next in if condition(old, next) { feedback.play() } }
     }
     func tvSensoryFeedback<Value: Equatable>(_ feedback: TVFeedback, trigger: Value) -> some View {
         tvOnChange(of: trigger) { feedback.play() }

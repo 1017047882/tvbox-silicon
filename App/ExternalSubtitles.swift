@@ -442,7 +442,7 @@ struct SubtitleAddressPrompt: ViewModifier {
                             #if os(iOS)
                             .keyboardType(.URL).textInputAutocapitalization(.never)
                             #endif
-                            .disableAutocorrection()
+                            .disableAutocorrection(true)
                         Button(L10n.text("Cancel"), role: .cancel) { address = "" }
                         Button(L10n.text("Add")) { subtitles.add(address: address); address = "" }
                     } message: {
@@ -472,7 +472,7 @@ struct SubtitleAddressPrompt: ViewModifier {
                             #if os(iOS)
                             .keyboardType(.URL).textInputAutocapitalization(.never)
                             #endif
-                            .disableAutocorrection()
+                            .disableAutocorrection(true)
                     } footer: {
                         Text(L10n.text("An SRT, WebVTT or ASS file, up to 8 MB."))
                     }

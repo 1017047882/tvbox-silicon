@@ -13,6 +13,16 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
 class DeploymentTests(unittest.TestCase):
+    def test_synced_app_uses_ios15_modifier_forms(self):
+        for name in ["ExternalSubtitles.swift", "MangaSourcesView.swift", "SitesView.swift", "SubtitleSourcesView.swift"]:
+            text = (ROOT / "App" / name).read_text(encoding="utf-8")
+            self.assertNotIn(".disableAutocorrection()", text, name)
+        text = (ROOT / "App/TMDBViews.swift").read_text(encoding="utf-8")
+        self.assertNotIn(".wholeMatch(of:", text)
+        for name in ["MangaReaderView.swift", "MangaView.swift"]:
+            text = (ROOT / "App" / name).read_text(encoding="utf-8")
+            self.assertNotIn(".menuStyle(.button)", text, name)
+
     def test_subtitle_progress_callback_is_sendable(self):
         text = (ROOT / "Sources/TVCore/SubtitleSearch.swift").read_text(encoding="utf-8")
         signature = next(line for line in text.splitlines() if "private func run(" in line)

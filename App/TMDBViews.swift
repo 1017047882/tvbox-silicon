@@ -1085,7 +1085,9 @@ struct TMDBEpisodeTile: View {
 
     /// TMDB's stand-in for an episode it has no title for yet (第08集, Episode 8), which only repeats the number.
     static func isPlaceholder(_ name: String) -> Bool {
-        name.wholeMatch(of: /(?:第\s*\d+\s*[集话話]|[Ee]pisode\s*\d+|[Ee][Pp]\.?\s*\d+)/) != nil
+        guard let expression = try? NSRegularExpression(pattern: #"(?:第\s*\d+\s*[集话話]|[Ee]pisode\s*\d+|[Ee][Pp]\.?\s*\d+)"#) else { return false }
+        let whole = NSRange(name.startIndex..., in: name)
+        return expression.firstMatch(in: name, range: whole)?.range == whole
     }
 }
 

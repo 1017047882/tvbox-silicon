@@ -184,32 +184,7 @@ struct SubscriptionImportView: View {
         NBNavigationStack {
             WithPerceptionTracking {
 
-            VStack(alignment: .leading, spacing: 18) {
-                Image(systemName: "link.badge.plus")
-                    .font(.system(size: 40)).foregroundStyle(Brand.accent)
-                    .frame(maxWidth: .infinity)
-                Text(L10n.text("Add This Subscription?"))
-                    .font(.title3.weight(.bold)).multilineTextAlignment(.center)
-                    .frame(maxWidth: .infinity)
-                VStack(alignment: .leading, spacing: 10) {
-                    field(L10n.text("Subscription URL"), link.address.absoluteString)
-                    if let name = link.name { field(L10n.text("Name"), name) }
-                }
-                .padding(14)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentPanel(cornerRadius: 16)
-                Text(L10n.text("A page can only ask: Yingxia adds this subscription after you agree, never on its own."))
-                    .font(.footnote).foregroundStyle(.secondary)
-                if let failure {
-                    Label(failure, systemImage: "exclamationmark.triangle.fill")
-                        .font(.callout).foregroundStyle(Brand.amber)
-                }
-                if let added {
-                    Label(added, systemImage: "checkmark.circle.fill")
-                        .font(.callout).foregroundStyle(.green)
-                }
-                Spacer(minLength: 0)
-            }
+            importContent
             .padding(24)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .background {
@@ -218,19 +193,7 @@ struct SubscriptionImportView: View {
                 }
             }
             .navigationTitle(L10n.text("Subscription"))
-            .toolbar {
-                if added == nil {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button(L10n.text("Cancel")) { dismiss() }
-                    }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    if added != nil { Button(L10n.text("Done")) { dismiss() }.tvFontWeight(.semibold) }
-                    // Settings may be importing already, and the store takes one import at a time.
-                    else if adding || store.importing { ProgressView() }
-                    else { Button(L10n.text("Add"), action: add).tvFontWeight(.semibold) }
-                }
-            }
+            .toolbar { importToolbar }
 
             }
         }
@@ -239,6 +202,49 @@ struct SubscriptionImportView: View {
         #endif
 
         }
+    }
+
+    private var importContent: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Image(systemName: "link.badge.plus")
+                .font(.system(size: 40)).foregroundStyle(Brand.accent)
+                .frame(maxWidth: .infinity)
+            Text(L10n.text("Add This Subscription?"))
+                .font(.title3.weight(.bold)).multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
+            VStack(alignment: .leading, spacing: 10) {
+                field(L10n.text("Subscription URL"), link.address.absoluteString)
+                if let name = link.name { field(L10n.text("Name"), name) }
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentPanel(cornerRadius: 16)
+            Text(L10n.text("A page can only ask: Yingxia adds this subscription after you agree, never on its own."))
+                .font(.footnote).foregroundStyle(.secondary)
+            if let failure {
+                Label(failure, systemImage: "exclamationmark.triangle.fill")
+                    .font(.callout).foregroundStyle(Brand.amber)
+            }
+            if let added {
+                Label(added, systemImage: "checkmark.circle.fill")
+                    .font(.callout).foregroundStyle(.green)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    @ToolbarContentBuilder private var importToolbar: some ToolbarContent {
+            if added == nil {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(L10n.text("Cancel")) { dismiss() }
+                }
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                if added != nil { Button(L10n.text("Done")) { dismiss() }.tvFontWeight(.semibold) }
+                // Settings may be importing already, and the store takes one import at a time.
+                else if adding || store.importing { ProgressView() }
+                else { Button(L10n.text("Add"), action: add).tvFontWeight(.semibold) }
+            }
     }
 
     private func field(_ title: String, _ value: String) -> some View {

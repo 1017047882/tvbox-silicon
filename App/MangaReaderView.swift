@@ -880,7 +880,7 @@ private struct MangaReaderChrome: View {
                     ForEach(MangaReaderMode.allCases) { Label($0.title, systemImage: $0.symbol).tag($0) }
                 }
             } label: { Image(systemName: model.mode.symbol).font(.headline).frame(width: 36, height: 36) }
-            .menuStyle(.button).buttonStyle(.plain).glassSurface(MangaReaderChrome.glass, in: Circle())
+            .tvButtonMenuStyle().buttonStyle(.plain).glassSurface(MangaReaderChrome.glass, in: Circle())
             .accessibilityLabel(L10n.text("Reading Mode"))
             if !model.single {
                 Button { showsChapters = true } label: { Image(systemName: "list.bullet").font(.headline).frame(width: 36, height: 36) }

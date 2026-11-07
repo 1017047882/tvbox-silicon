@@ -789,7 +789,7 @@ private struct MangaSourceSwitch: View {
                 .glassOrFill(.regular.interactive(), Color.primary.opacity(0.06), in: Circle())
                 .contentShape(Circle())
         }
-        .menuStyle(.button).buttonStyle(.plain).tint(.primary)
+        .tvButtonMenuStyle().buttonStyle(.plain).tint(.primary)
         .accessibilityLabel(L10n.text("Comic Sources"))
         .accessibilityIdentifier("manga.source.switch")
     

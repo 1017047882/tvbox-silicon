@@ -65,7 +65,7 @@ struct SubtitleSourcesView: View {
                     #if os(iOS)
                     .keyboardType(.URL).textInputAutocapitalization(.never)
                     #endif
-                    .disableAutocorrection()
+                    .disableAutocorrection(true)
                     .onSubmit(add)
                 Button { add() } label: {
                     HStack {
@@ -217,7 +217,7 @@ struct SubtitleSourcePage: View {
                                         #if os(iOS)
                                         .textInputAutocapitalization(.never)
                                         #endif
-                                        .disableAutocorrection()
+                                        .disableAutocorrection(true)
                                 }
                             }
                             .labelsHidden()
@@ -279,7 +279,7 @@ struct SubtitleSearchSheet: View {
                 Section {
                     TextField(L10n.text("Title"), text: $title)
                         .onSubmit(search)
-                        .disableAutocorrection()
+                        .disableAutocorrection(true)
                     HStack {
                         TextField(L10n.text("Season"), text: $season)
                         TextField(L10n.text("Episode"), text: $episode)

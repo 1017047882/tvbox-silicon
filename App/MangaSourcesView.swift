@@ -55,7 +55,7 @@ struct MangaSourcesView: View {
             SettingsGroup(title: L10n.text("Add by Address"), footer: message) {
                 // A plain field: an alert or sheet on a pushed page hangs tvOS 27 (#272).
                 TextField(L10n.text("Source address (.js)"), text: $address)
-                    .textContentType(.URL).keyboardType(.URL).textInputAutocapitalization(.never).disableAutocorrection()
+                    .textContentType(.URL).keyboardType(.URL).textInputAutocapitalization(.never).disableAutocorrection(true)
                     .onSubmit(installAddress)
                     .padding(.horizontal, 12)
                 TVSettingsAction(title: L10n.text("Install"), busy: working, action: installAddress)
@@ -129,7 +129,7 @@ struct MangaSourcesView: View {
                 TextField(L10n.text("Source address (.js)"), text: $address)
                     .textContentType(.URL)
                     #if os(iOS)
-                    .keyboardType(.URL).textInputAutocapitalization(.never).disableAutocorrection()
+                    .keyboardType(.URL).textInputAutocapitalization(.never).disableAutocorrection(true)
                     #endif
                     .onSubmit(installAddress)
                 Button(action: installAddress) {
@@ -373,6 +373,10 @@ struct MangaSourceSettingsView: View {
     @ViewBuilder private func tvSettingRow(_ setting: MangaSourceInfo.Setting, info: MangaSourceInfo) -> some View {
         let title = info.text(setting.title)
         let saved = MangaSourceData.shared.setting(key, setting.key)
+        let savedText: String? = saved.map { String(describing: $0) }
+        let selected: String = savedText ?? setting.defaultValue ?? setting.options.first ?? ""
+        let fieldValue: String = savedText ?? setting.defaultValue ?? ""
+        let defaultEnabled: Bool = setting.defaultValue == "true" || setting.defaultValue == "1"
         switch setting.type {
         case "select":
             let current = (saved as? String) ?? (saved.map { "\($0)" }) ?? setting.defaultValue ?? setting.options.first ?? ""
@@ -384,7 +388,7 @@ struct MangaSourceSettingsView: View {
             }
         case "switch":
             TVSettingsToggle(title: title, isOn: Binding(
-                get: { (saved as? Bool) ?? (setting.defaultValue.map { $0 == "true" || $0 == "1" }) ?? false },
+                get: { (saved as? Bool) ?? defaultEnabled },
                 set: { change(setting.key, $0) }))
         case "callback":
             TVSettingsAction(title: title) {
@@ -394,7 +398,7 @@ struct MangaSourceSettingsView: View {
                 }
             }
         default:
-            MangaSettingField(title: title, value: (saved as? String) ?? (saved.map { "\($0)" }) ?? setting.defaultValue ?? "") { change(setting.key, $0) }
+            MangaSettingField(title: title, value: fieldValue) { change(setting.key, $0) }
         }
     }
 
@@ -411,7 +415,7 @@ struct MangaSourceSettingsView: View {
             } else {
                 if info.canSignIn {
                     TextField(L10n.text("Account"), text: $account)
-                        .textContentType(.username).textInputAutocapitalization(.never).disableAutocorrection()
+                        .textContentType(.username).textInputAutocapitalization(.never).disableAutocorrection(true)
                         .padding(.horizontal, 12)
                     SecureField(L10n.text("Password"), text: $password).textContentType(.password)
                         .padding(.horizontal, 12)
@@ -426,7 +430,7 @@ struct MangaSourceSettingsView: View {
 
                         TextField(field, text: Binding(get: { cookies.indices.contains(index) ? cookies[index] : "" },
                                                        set: { if cookies.indices.contains(index) { cookies[index] = $0 } }))
-                            .textInputAutocapitalization(.never).disableAutocorrection()
+                            .textInputAutocapitalization(.never).disableAutocorrection(true)
                             .padding(.horizontal, 12)
                     
                         }
@@ -488,7 +492,7 @@ struct MangaSourceSettingsView: View {
         switch setting.type {
         case "select":
             Picker(title, selection: Binding(
-                get: { (saved as? String) ?? (saved.map { "\($0)" }) ?? setting.defaultValue ?? setting.options.first ?? "" },
+                get: { selected },
                 set: { change(setting.key, $0) })) {
                 ForEach(Array(setting.options.enumerated()), id: \.offset) { index, value in
                     WithPerceptionTracking {
@@ -532,7 +536,7 @@ struct MangaSourceSettingsView: View {
                     TextField(L10n.text("Account"), text: $account)
                         .textContentType(.username)
                         #if os(iOS)
-                        .textInputAutocapitalization(.never).disableAutocorrection()
+                        .textInputAutocapitalization(.never).disableAutocorrection(true)
                         #endif
                     SecureField(L10n.text("Password"), text: $password).textContentType(.password)
                     Button { signIn { try await MangaRuntime.shared.signIn(key, account: account, password: password) } } label: {
@@ -547,7 +551,7 @@ struct MangaSourceSettingsView: View {
                         TextField(field, text: Binding(get: { cookies.indices.contains(index) ? cookies[index] : "" },
                                                        set: { if cookies.indices.contains(index) { cookies[index] = $0 } }))
                             #if os(iOS)
-                            .textInputAutocapitalization(.never).disableAutocorrection()
+                            .textInputAutocapitalization(.never).disableAutocorrection(true)
                             #endif
                     
                         }
@@ -593,7 +597,7 @@ private struct MangaSettingField: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title).font(.system(size: 25, weight: .semibold)).foregroundStyle(.secondary).padding(.leading, 28)
             TextField(title, text: Binding(get: { draft ?? value }, set: { draft = $0 }))
-                .textInputAutocapitalization(.never).disableAutocorrection()
+                .textInputAutocapitalization(.never).disableAutocorrection(true)
                 .onSubmit { if let draft, draft != value { save(draft) } }
                 .padding(.horizontal, 12)
         }
@@ -602,7 +606,7 @@ private struct MangaSettingField: View {
             TextField(title, text: Binding(get: { draft ?? value }, set: { draft = $0 }))
                 .multilineTextAlignment(.trailing)
                 #if os(iOS)
-                .textInputAutocapitalization(.never).disableAutocorrection()
+                .textInputAutocapitalization(.never).disableAutocorrection(true)
                 #endif
                 .onSubmit { if let draft, draft != value { save(draft) } }
         }

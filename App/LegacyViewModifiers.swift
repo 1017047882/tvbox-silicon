@@ -1,4 +1,5 @@
 import SwiftUI
+import TVCore
 #if os(iOS)
 import UIKit
 #endif
@@ -46,6 +47,18 @@ private struct TVFontWeight: ViewModifier {
 }
 
 extension View {
+    /// @brief Retains the platform's default menu style before iOS 16.
+    @ViewBuilder func tvButtonMenuStyle() -> some View {
+        if #available(iOS 16, macOS 11, tvOS 17, *) { menuStyle(.button) }
+        else { self }
+    }
+
+    /// @brief Adds the optional Open action using the iOS 15 accessibility API.
+    @ViewBuilder func tvAccessibilityOpen(_ action: (() -> Void)?) -> some View {
+        if let action { accessibilityAction(named: Text(L10n.text("Open")), action) }
+        else { self }
+    }
+
     /// @brief iOS 15 retains the system overlay policy; all presentation stays on the main actor.
     @ViewBuilder func tvPersistentSystemOverlays(_ visibility: Visibility) -> some View {
         if #available(iOS 16, macOS 13, tvOS 16, *) { persistentSystemOverlays(visibility) }
