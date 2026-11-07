@@ -1223,16 +1223,18 @@ extension View {
 
 // MARK: Skeleton loading
 
+/// @brief Redraw only the loading highlight; do not start a repeating layout animation.
+/// @note No mutable phase or asynchronous task; timeline updates stay inside the overlay.
 struct Shimmer: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var phase: CGFloat = 0
     func body(content: Content) -> some View {
         WithPerceptionTracking {
         content.overlay {
             WithPerceptionTracking {
             if !reduceMotion {
                 GeometryReader { proxy in
-                    WithPerceptionTracking {
+                    TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
+                    let phase = CGFloat(timeline.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.35) / 1.35)
                     LinearGradient(colors: [.clear, .white.opacity(0.20), .clear], startPoint: .leading, endPoint: .trailing)
                         .frame(width: proxy.size.width * 0.6)
                         .offset(x: -proxy.size.width * 0.6 + phase * proxy.size.width * 1.6)
@@ -1244,7 +1246,6 @@ struct Shimmer: ViewModifier {
 
             }
         }
-        .onAppear { withAnimation(.linear(duration: 1.35).repeatForever(autoreverses: false)) { phase = 1 } }
 
         }
     }

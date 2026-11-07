@@ -59,6 +59,14 @@
 
 [Pulse] 本地 24 项 BuildChecks、SitesView 的 iOS Debug/Release 语法解析和差异检查通过，未执行 Apple 编译或真机验证。验收：进入哔哩哔哩及其他平台后不触摸 10 秒，加载完成后 viewportY/viewportHeight 应保持稳定（旋转、键盘和正常导航过渡除外）；再验证输入搜索与收起键盘、切分类、分页、横竖屏和返回重进。旧探针保留用于对照，不以本地构建检查代替真机布局验收。
 
+### 完整日志：跳动周期与加载闪光周期吻合
+
+[Argus] 用户提供 diagnostics-export.jsonl，共 52 条记录，其中 34 条为 site-layout。15:44:52.607 至 15:45:00.857 的同一 probe，全部采样均为 idle、busy=false、videos=18、contentHeight=1584、offsetY=0、insetTop=0、insetBottom=91。viewportY 在 61.1～152.0 之间周期变化；以相邻采样顶部回落超过 40 点识别复位，间隔为 1.500、1.255、1.263、1.481、1.253 秒，均值 1.350 秒（采样间隔 0.25 秒会使单次间隔量化）。文件未包含提交 SHA，不能从日志单独确认其是否包含上一轮父布局约束。
+
+[Nova] 排查发现 Shimmer 在 onAppear 用 withAnimation(.linear(duration: 1.35).repeatForever(autoreverses: false)) 写入 phase，周期与故障完全吻合。这为重复动画事务影响旧系统布局提供了强关联证据，但还没有系统布局调用栈或真机 A/B 结果，不能声称根因已最终证实。本次仅将 Shimmer 渐变改为 TimelineView 根据时间计算位置，不再使用可变 phase、withAnimation 或 repeatForever；保留 1.35 秒闪光周期和减少动态效果开关，以最多约 30 次/秒的时间线刷新覆盖层，不改变占位内容尺寸及来源逻辑。
+
+[Pulse] 本地 24 项 BuildChecks、GlassKit 的 iOS Debug/Release tree-sitter 语法解析、git diff --check 均通过；这些检查不验证 UIKit 动画与实际 Apple Swift 编译。设备回归：冷启动加载首页后进入哔哩哔哩，观察空闲 10 秒视口是否稳定；覆盖有/无推荐预览、慢网/正常网络、快速返回重进，并确认加载占位仍闪光、开启减少动态效果后无闪光，搜索/分类/分页仍可用。现有 34 条采样作为失败基线，新 IPA 的探针记录作为对照；没有取得真机通过或 MC/DC 数据。日志另含 live.huya 的 HTTP 0 脚本错误，不作为固定周期布局故障的根因，本次未修改该请求链路。
+
 [Argus] 新证据：11:59:42 的 ExcUserFault 记录显示启动时 `NSUbiquitousKeyValueStore.defaultStore` 经 SyncedDefaults 触发 `EXC_GUARD / Application Triggered Fault`，记录带 isSimulated=1，不能直接等同于发现页进程崩溃。侧载构建明确写入 `TVBoxCloudSyncAvailable=false`；Store 检查该标志后跳过 CloudSync 初始化，收藏、历史和订阅继续使用原有本地存储。正常具备权限的工程不设置该标志，沿用原同步行为。
 
 [Pulse] 新回归：未授予 iCloud 权限侧载后冷启动，添加收藏/历史/订阅并重启确认本地持久化，进入发现页，核对是否还有新的崩溃记录。此处不是通过加入无效权限声明来绕过系统检查。
