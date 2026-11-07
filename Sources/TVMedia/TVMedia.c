@@ -653,7 +653,8 @@ struct Mapper {
 
 static void *map_worker(void *opaque) {
     Mapper *mapper = ((MapWorker *)opaque)->mapper;
-    VTPixelTransferSessionRef transfer = NULL, shrink = NULL;
+    /* Worker-owned references persist between jobs; the iOS 16 types stay inside availability checks. */
+    CFTypeRef transfer = NULL, shrink = NULL;
     pthread_mutex_lock(&mapper->lock);
     for (;;) {
         MapJob *job = NULL;
@@ -672,7 +673,11 @@ static void *map_worker(void *opaque) {
         int64_t began = av_gettime_relative();
         int status = AVERROR(ENOSYS);
         if (__builtin_available(iOS 16.0, tvOS 16.0, macOS 10.8, *)) {
-            status = map_picture(&transfer, &shrink, pool, (CVPixelBufferRef)job->source->data[3], (CVPixelBufferRef)job->target->data[3]);
+            VTPixelTransferSessionRef activeTransfer = (VTPixelTransferSessionRef)transfer;
+            VTPixelTransferSessionRef activeShrink = (VTPixelTransferSessionRef)shrink;
+            status = map_picture(&activeTransfer, &activeShrink, pool, (CVPixelBufferRef)job->source->data[3], (CVPixelBufferRef)job->target->data[3]);
+            transfer = activeTransfer;
+            shrink = activeShrink;
         }
         int64_t spent = av_gettime_relative() - began;
         pthread_mutex_lock(&mapper->lock);
@@ -682,8 +687,8 @@ static void *map_worker(void *opaque) {
     }
     pthread_mutex_unlock(&mapper->lock);
     if (__builtin_available(iOS 16.0, tvOS 16.0, macOS 10.8, *)) {
-        if (transfer) { VTPixelTransferSessionInvalidate(transfer); CFRelease(transfer); }
-        if (shrink) { VTPixelTransferSessionInvalidate(shrink); CFRelease(shrink); }
+        if (transfer) { VTPixelTransferSessionInvalidate((VTPixelTransferSessionRef)transfer); CFRelease(transfer); }
+        if (shrink) { VTPixelTransferSessionInvalidate((VTPixelTransferSessionRef)shrink); CFRelease(shrink); }
     }
     return NULL;
 }

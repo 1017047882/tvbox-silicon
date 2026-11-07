@@ -13,6 +13,12 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
 class DeploymentTests(unittest.TestCase):
+    def test_pixel_transfer_worker_has_no_ios16_type_before_guard(self):
+        text = (ROOT / "Sources/TVMedia/TVMedia.c").read_text(encoding="utf-8")
+        worker = text.split("static void *map_worker(void *opaque) {", 1)[1].split("static Mapper *mapper_start", 1)[0]
+        before_guard = worker.split("if (__builtin_available", 1)[0]
+        self.assertNotIn("VTPixelTransferSessionRef", before_guard)
+
     def test_subtitle_parser_avoids_ios16_interfaces(self):
         text = (ROOT / "Sources/TVCore/SubtitleFile.swift").read_text(encoding="utf-8")
         for unavailable in ["timeout: Duration", "Task.sleep(for:", ".host()", ".firstMatch(of:", "let clock = /", "let timing = /"]:
