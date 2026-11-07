@@ -18,33 +18,41 @@ import TVCore
     static let feeds: [TMDBCatalog.Feed] = [.trending, .nowPlaying, .onTheAir, .variety, .chinese, .animation, .topMovies, .topTelevision, .family, .kids, .netflix, .disney, .appleTV, .hbo, .warner, .universal, .paramount, .sony]
     func items(_ feed: TMDBCatalog.Feed) -> [TMDBCatalog.Item] { pages[feed]?.items ?? [] }
 
+    private enum LoadResult: Sendable {
+        case page(TMDBCatalog.Feed, TMDBCatalog.Page?)
+        case collections(TMDBCatalog.Collections?)
+        case calendar(TMDBCalendar.Kind, TMDBCalendar.Week?)
+    }
+
+    /// @brief Load all shelves in a task group, avoiding async-let teardown on iOS 15.5.
+    /// @note Child tasks return Sendable values; only the main actor changes model state.
+    /// Reentrant calls are ignored while loading; cancellation propagates to child tasks.
     func load(refresh: Bool = false) async {
         guard !loading else { return }
         loading = true
         defer { loading = false }
         let pending = Self.feeds.filter { refresh || pages[$0] == nil }
-        async let metadata = try? TMDBCatalog.collections()
-        async let anime = try? TMDBCalendar.week(.anime)
-        async let series = try? TMDBCalendar.week(.tv)
-        await withTaskGroup(of: (TMDBCatalog.Feed, TMDBCatalog.Page?).self) { group in
+        await withTaskGroup(of: LoadResult.self) { group in
+            group.addTask { .collections(try? await TMDBCatalog.collections()) }
+            for kind in [TMDBCalendar.Kind.anime, .tv] {
+                group.addTask { .calendar(kind, try? await TMDBCalendar.week(kind)) }
+            }
             for feed in pending {
-                group.addTask { (feed, try? await TMDBCatalog.page(feed)) }
+                group.addTask { .page(feed, try? await TMDBCatalog.page(feed)) }
             }
-            for await (feed, page) in group {
-                guard !Task.isCancelled else { continue }
-                if let page { pages[feed] = page; failures.remove(feed) }
-                else { failures.insert(feed) }
+            for await result in group {
+                guard !Task.isCancelled else { group.cancelAll(); break }
+                switch result {
+                case let .page(feed, page):
+                    if let page { pages[feed] = page; failures.remove(feed) }
+                    else { failures.insert(feed) }
+                case let .collections(fresh):
+                    if let fresh { collections = fresh; collectionsFailed = false }
+                    else { collectionsFailed = true }
+                case let .calendar(kind, week):
+                    if let week { calendar[kind] = week }
+                }
             }
-        }
-        let fresh = await metadata
-        let weeks = (anime: await anime, series: await series)
-        if !Task.isCancelled {
-            if let week = weeks.anime { calendar[.anime] = week }
-            if let week = weeks.series { calendar[.tv] = week }
-        }
-        if !Task.isCancelled {
-            if let fresh { collections = fresh; collectionsFailed = false }
-            else { collectionsFailed = true }
         }
     }
 
@@ -160,11 +168,11 @@ struct DiscoverView: View {
                 .modifier(DiscoverScrollObserver(offset: Binding(get: { heroState.scrollY }, set: { heroState.scrollY = $0 })))
                 .tvScrollIndicators(.hidden)
                 .refreshable {
-                    if doubanShown {
-                        async let douban: Void = model.loadDouban(refresh: true)
-                        await model.load(refresh: true)
-                        await douban
-                    } else { await model.load(refresh: true) }
+                    let loader = model
+                    await withTaskGroup(of: Void.self) { group in
+                        group.addTask { await loader.load(refresh: true) }
+                        if doubanShown { group.addTask { await loader.loadDouban(refresh: true) } }
+                    }
                 }
             }
 

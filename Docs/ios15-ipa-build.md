@@ -4,6 +4,12 @@
 
 工作流先运行已有 Core/App 源码编译检查，成功后执行 **Build iPhone iOS 15 unsigned IPA**。第一次需要构建 JVM、原生绑定和 Python 扩展，可能耗时较长；完整运行时缓存命中后会跳过这些步骤。macOS runner 排队时间取决于 GitHub 容量。
 
+构建提速：Core 检查和 IPA job 共享已编译的 iPhone FFmpeg 缓存，只缓存完整 XCFramework，不缓存源码和中间目录；键包含操作系统、架构、Xcode 版本和 FFmpeg 脚本哈希。FFmpeg 完成后立即保存，即使后续 Swift 编译失败也能在下次复用。脚本仍负责恢复链接和校验，不跳过 iOS 15 编译与 IPA 二进制检查。
+
+完整 Java/Python/Node 缓存仅随其构建脚本、Runtime 和相关 Config 变化失效，单独修改 IPA 打包或二进制检查脚本不会触发运行时重建。三个运行时全部准备完成后立即保存缓存，后续归档失败也不丢失已完成的依赖构建。缓存键本次升级为 v2，首次需要重新生成运行时缓存；后续命中时收益才会体现。缓存可能被 GitHub 驱逐，未命中时仍执行完整构建；没有设置跨版本的模糊恢复键。
+
+[Pulse] 验证提速：在同分支、相同 Xcode 上连续运行两次，第二次应显示 FFmpeg 与运行时缓存命中，FFmpeg 日志含 `FFmpeg is up to date`，Java/Python/Node 构建步骤跳过。比较步骤耗时与排队耗时，不能将 runner 排队减少算成编译加速。首次缓存生成及实际节省时间需云端验证，本地未测得提速比例。
+
 仅构建 iPhone arm64、最低 iOS 15.0 的 App，不构建 iPad、tvOS、模拟器或 Mac App。macOS JDK/jlink 等是构建 iPhone 运行时所需的宿主工具。正式项目由 project.yml 临时裁剪，其他平台配置保持原样。
 
 成功后下载 `Yingxia-iPhone-iOS15-unsigned-运行编号`，解压得到：

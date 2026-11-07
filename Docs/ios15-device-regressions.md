@@ -21,6 +21,26 @@
 
 可测性：视频铺满条件是简单布尔决策；视图布局与系统旋转依赖 UIKit，需要设备测试。现有 Python 构建准备测试不覆盖这些行为，未取得 UI 回归通过或 MC/DC 覆盖率数据。本地只能检查差异和 Swift 条件/括号结构，真实编译由 Actions 验证。
 
+## 2026-11-07：发现页并发回收崩溃
+
+[Argus] 失败基线：`TVBox-iOS-2026-11-07-091727.ips`，iPhone12,1、iOS 15.5、1.8.8（46），启动约 2.7 秒后主线程 `EXC_CRASH / SIGABRT`。触发栈为 `swift_Concurrency_fatalError → swift_task_dealloc → asyncLet_finish_after_task_completion → 应用未符号化帧 → SwiftUI._TaskModifier`。这次是实际进程崩溃，与此前带 isSimulated 的 iCloud fault 不同。应用 UUID 为 `eabd514b-d7ca-3449-a72a-a6361ced3144`，应用两帧偏移分别为 842333、108893；精确定位需要同 UUID 的 dSYM。
+
+[Nova] 排查范围：发现页首页加载同时声明三个 `async let`（栏目元数据、动漫日历、剧集日历），下拉刷新另有一个。栈已确认退出发生于 async-let 任务回收阶段，但尚未符号化到具体声明；针对该路径避免生成 async-let 回收代码，不能据此宣称解决所有闪退。
+
+本次改动：首页加载改用携带 Sendable 结果的任务组，栏目、元数据和两类日历仍并行请求；返回主 actor 后分发状态，取消时取消剩余子任务。下拉刷新也改为任务组，豆瓣启用时仍与首页并行刷新。未修改页面布局。用户提供的构建链接为 https://github.com/1017047882/tvbox-silicon/actions/runs/41998141066 ；当前环境读取 GitHub API 失败，未核验其提交及 dSYM。
+
+[Pulse] 先记录真机失败基线，再按以下用例验收新 IPA：
+
+1. 冷启动后点击发现，等待所有网络请求完成；重复进入/退出 10 次，不应闪退。
+2. 请求尚未完成时切换标签、退入后台、返回前台，确认取消时无闪退，再进入仍能加载。
+3. 连续下拉刷新，分别启用/关闭豆瓣栏目；榜单、人物/平台栏目、动漫与剧集日历均保留。
+4. 断网进入、恢复网络重试；单个栏目失败不应影响其他栏目，加载状态应结束。
+5. 页面跳动单独复现和采集应用日志；本次崩溃栈不提供该布局问题的根因证据。
+
+可测性：任务组结果分发可按成功/失败、父任务取消/未取消覆盖分支；实际回收崩溃依赖 iOS 15.5 的 Swift 并发运行时，Windows 源码检查和 Python 构建测试不能重现或验证。以上是待执行的设备回归用例，未取得 MC/DC 数据。
+
+本地验证：24 项 BuildChecks 通过；修改后的 DiscoverView 在 iOS Debug/Release 条件分支下 tree-sitter 解析均无错误；`git diff --check` 通过。没有在本机运行 Apple Swift 编译、IPA 打包或 iOS 15.5 真机测试，未宣称闪退已解决。
+
 [Argus] 新证据：11:59:42 的 ExcUserFault 记录显示启动时 `NSUbiquitousKeyValueStore.defaultStore` 经 SyncedDefaults 触发 `EXC_GUARD / Application Triggered Fault`，记录带 isSimulated=1，不能直接等同于发现页进程崩溃。侧载构建明确写入 `TVBoxCloudSyncAvailable=false`；Store 检查该标志后跳过 CloudSync 初始化，收藏、历史和订阅继续使用原有本地存储。正常具备权限的工程不设置该标志，沿用原同步行为。
 
 [Pulse] 新回归：未授予 iCloud 权限侧载后冷启动，添加收藏/历史/订阅并重启确认本地持久化，进入发现页，核对是否还有新的崩溃记录。此处不是通过加入无效权限声明来绕过系统检查。

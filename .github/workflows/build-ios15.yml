@@ -149,13 +149,13 @@ jobs:
 
       - name: Restore complete device runtimes
         id: runtimes
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: |
             build/AppleRuntime/iphoneos
             build/ApplePython/iphoneos
             build/NodeMobile
-          key: iphone-ios15-arm64-v1-${{ steps.toolchain.outputs.version }}-${{ hashFiles('Scripts/**', 'Runtime/**', 'Config/Python/**', 'Config/iOS/**') }}
+          key: iphone-ios15-arm64-v2-${{ steps.toolchain.outputs.version }}-${{ hashFiles('Scripts/build-java-host.sh', 'Scripts/package-apple-runtime.sh', 'Scripts/build-apple-jvm.sh', 'Scripts/build-apple-libffi.sh', 'Scripts/build-apple-interpreter.sh', 'Scripts/build-apple-native-bindings.sh', 'Scripts/sync-apple-javahost.sh', 'Scripts/build-apple-python*.sh', 'Scripts/fetch-node-mobile.sh', 'Scripts/preserve-build-path.sh', 'Runtime/**', 'Config/Python/**', 'Config/iOS/**') }}
 
       - name: Build Java host and device JVM with native bindings
         if: steps.runtimes.outputs.cache-hit != 'true'
@@ -179,11 +179,35 @@ jobs:
           set -euo pipefail
           bash Scripts/fetch-node-mobile.sh 2>&1 | tee artifacts/node-device.log
 
+      - name: Save complete device runtimes before app compilation
+        if: steps.runtimes.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            build/AppleRuntime/iphoneos
+            build/ApplePython/iphoneos
+            build/NodeMobile
+          key: ${{ steps.runtimes.outputs.cache-primary-key }}
+
+      - name: Restore compiled iPhone FFmpeg
+        id: ffmpeg
+        uses: actions/cache/restore@v4
+        with:
+          path: build/ffmpeg-cache/*-ios/FFmpeg.xcframework
+          key: iphone-ffmpeg-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.version }}-${{ hashFiles('Scripts/build-apple-ffmpeg.sh') }}
+
       - name: Build FFmpeg for iPhone arm64 only
         shell: bash
         run: |
           set -euo pipefail
           bash Scripts/build-apple-ffmpeg.sh ios 2>&1 | tee artifacts/ipa-ffmpeg.log
+
+      - name: Save compiled iPhone FFmpeg
+        if: steps.ffmpeg.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: build/ffmpeg-cache/*-ios/FFmpeg.xcframework
+          key: ${{ steps.ffmpeg.outputs.cache-primary-key }}
 
       - name: Archive and package the iPhone IPA
         shell: bash
@@ -250,6 +274,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Record toolchain and verify package symlinks
+        id: toolchain
         shell: bash
         run: |
           set -euo pipefail
@@ -261,6 +286,7 @@ jobs:
             xcrun swift --version
             xcrun --sdk iphoneos --show-sdk-version
           } 2>&1 | tee artifacts/compiler-toolchain.txt
+          echo "version=$(xcodebuild -version | shasum -a 256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
           for link in Package.swift Sources Vendor Tests/TVCoreTests; do
             test -L "Packages/TVCore/$link"
             test -e "Packages/TVCore/$link"
@@ -283,12 +309,26 @@ jobs:
           bash Scripts/build-apple-libffi.sh ios 2>&1 | tee artifacts/libffi-build.log
           xcrun ar -t build/apple-runtime/libffi-ios-3.4.8/install/lib/libffi.a > artifacts/libffi-members.txt
 
+      - name: Restore compiled iPhone FFmpeg
+        id: ffmpeg
+        uses: actions/cache/restore@v4
+        with:
+          path: build/ffmpeg-cache/*-ios/FFmpeg.xcframework
+          key: iphone-ffmpeg-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.version }}-${{ hashFiles('Scripts/build-apple-ffmpeg.sh') }}
+
       - name: Build FFmpeg for iPhone arm64 only
         shell: bash
         run: |
           set -euo pipefail
           bash Scripts/build-apple-ffmpeg.sh ios 2>&1 | tee artifacts/ffmpeg-build.log
           plutil -lint Vendor/FFmpeg/FFmpeg.xcframework/Info.plist
+
+      - name: Save compiled iPhone FFmpeg before Swift compilation
+        if: steps.ffmpeg.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: build/ffmpeg-cache/*-ios/FFmpeg.xcframework
+          key: ${{ steps.ffmpeg.outputs.cache-primary-key }}
 
       - name: Compile TVCore against the iOS 15 device target
         shell: bash
