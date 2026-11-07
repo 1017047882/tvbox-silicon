@@ -51,6 +51,14 @@
 
 [Pulse] 设备采集步骤：安装含探针的新 IPA，从推荐进入有问题的平台，前 10 秒保持不触摸；再正常滚动、切分类和返回重进，确认探针没有改变交互。在设置 → 诊断日志 → 导出日志中导出完整文件。若前 10 秒未出现跳动，返回重进后重新采集。核对 `site-layout` 类别和采样结束标志，再按时间比较各指标。可测性：计时、UIKit 布局和系统滚动需要 iOS 15.5 真机；本地语法和 BuildChecks 不能验证这些行为，未取得 MC/DC 数据。
 
+### 根据截图约束来源页父布局
+
+[Argus] 用户补充同一 probe 的 sample 13、14、16、17、18：空闲且加载完成，18 个视频、contentHeight=1584、offsetY=0、insetTop=0、insetBottom=91 均不变；viewportY 分别为 109.9、126.9、68、84.9、101.9，viewportHeight 分别为 824、791.5、904、871.5、839。证据指向滚动视图外层的反复布局，而非内容高度变化或用户拖动；截图足以继续修复，不要求完整导出作为前提。尚不能从这些数值确定具体系统布局回调。
+
+[Nova] iOS 15 的 sourceCatalogSearchable 使用 GeometryReader 读取父层可用尺寸，明确约束搜索栏和滚动区组成的 VStack 宽高；搜索栏仍按自身固定高度布局，滚动区优先占据剩余空间。几何读取不写入 State，不引入测量/状态更新循环；不硬编码屏幕高度或安全区，不修改滚动偏移。仅修改这个来源页布局分支，iOS 16 以上不受影响。此为针对已观测到的父布局问题的修复候选，效果仍需设备验证。
+
+[Pulse] 本地 24 项 BuildChecks、SitesView 的 iOS Debug/Release 语法解析和差异检查通过，未执行 Apple 编译或真机验证。验收：进入哔哩哔哩及其他平台后不触摸 10 秒，加载完成后 viewportY/viewportHeight 应保持稳定（旋转、键盘和正常导航过渡除外）；再验证输入搜索与收起键盘、切分类、分页、横竖屏和返回重进。旧探针保留用于对照，不以本地构建检查代替真机布局验收。
+
 [Argus] 新证据：11:59:42 的 ExcUserFault 记录显示启动时 `NSUbiquitousKeyValueStore.defaultStore` 经 SyncedDefaults 触发 `EXC_GUARD / Application Triggered Fault`，记录带 isSimulated=1，不能直接等同于发现页进程崩溃。侧载构建明确写入 `TVBoxCloudSyncAvailable=false`；Store 检查该标志后跳过 CloudSync 初始化，收藏、历史和订阅继续使用原有本地存储。正常具备权限的工程不设置该标志，沿用原同步行为。
 
 [Pulse] 新回归：未授予 iCloud 权限侧载后冷启动，添加收藏/历史/订阅并重启确认本地持久化，进入发现页，核对是否还有新的崩溃记录。此处不是通过加入无效权限声明来绕过系统检查。

@@ -4,12 +4,14 @@ import SwiftUI
 import TVCore
 
 private extension View {
-    /// @brief Keep iOS 15 source content below search without navigation-drawer inset updates.
+    /// @brief Bound the iOS 15 search and scroll layout to the parent's available size.
+    /// @note Geometry is read without writing state; scroll content cannot resize this container.
     @ViewBuilder func sourceCatalogSearchable(text: Binding<String>, prompt: String) -> some View {
         #if os(iOS)
         if #available(iOS 16, *) {
             catalogSearchable(text: text, prompt: prompt)
         } else {
+            GeometryReader { geometry in
             VStack(spacing: 0) {
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
@@ -24,8 +26,10 @@ private extension View {
                 .padding(.horizontal, 16).padding(.vertical, 8)
                 .fixedSize(horizontal: false, vertical: true)
                 self.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .layoutPriority(1)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
+            }
         }
         #else
         catalogSearchable(text: text, prompt: prompt)

@@ -1287,6 +1287,13 @@ struct DiagnosticsView: View {
     @State private var dropped = 0
     @State private var error: String?
     @State private var exportURL: URL?
+    #if os(iOS)
+    private struct LogShare: Identifiable {
+        let id = UUID()
+        let url: URL
+    }
+    @State private var logShare: LogShare?
+    #endif
     @State private var exporting = false
     @State private var selected: LogEntry?
     private var filtered: [LogEntry] {
@@ -1340,6 +1347,11 @@ struct DiagnosticsView: View {
         .frame(maxWidth: Layout.maxWidth).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .screenBackdrop()
         .screenTitle(L10n.text("Diagnostic Logs"))
+        #if os(iOS)
+        .sheet(item: $logShare) { share in
+            TVActivitySheet(item: share.url)
+        }
+        #endif
         .sheet(item: $selected) { entry in
             WithPerceptionTracking {
  DiagnosticDetail(entry: entry)
@@ -1506,11 +1518,16 @@ struct DiagnosticsView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     private func export() {
+        guard !exporting else { return }
+        error = nil
         exporting = true
         Task {
             defer { exporting = false }
             do {
                 exportURL = try await Diagnostics.shared.export()
+                #if os(iOS)
+                if let exportURL { logShare = LogShare(url: exportURL) }
+                #endif
                 #if os(macOS)
                 if let exportURL { NSWorkspace.shared.activateFileViewerSelecting([exportURL]) }
                 #endif

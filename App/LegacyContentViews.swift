@@ -85,7 +85,7 @@ struct TVShareLink<Label: View>: View {
 }
 
 #if os(iOS)
-private struct TVActivitySheet: UIViewControllerRepresentable {
+struct TVActivitySheet: UIViewControllerRepresentable {
     let item: URL
     func makeUIViewController(context: Context) -> UIActivityViewController {
         UIActivityViewController(activityItems: [item], applicationActivities: nil)
