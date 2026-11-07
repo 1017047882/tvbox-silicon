@@ -1147,6 +1147,16 @@ struct SiteView: View {
                         }
                         .opacity(browser.busy && !browser.videos.isEmpty ? 0.55 : 1).animation(.tvSmooth, value: browser.busy)
                     }.pageContainer()
+                    #if os(iOS)
+                    .background {
+                        if #available(iOS 16, *) {
+                            EmptyView()
+                        } else {
+                            SourceScrollDiagnostics(loading: browser.busy, videos: browser.videos.count)
+                                .allowsHitTesting(false)
+                        }
+                    }
+                    #endif
                 }
                 .safeAreaInset(edge: .bottom) {
                     WithPerceptionTracking {
