@@ -2133,27 +2133,7 @@ struct VideoDetailView: View {
         #else
         .screenBackdrop()
         #endif
-        .screenTitle(video.name).task {
-            store.searchModel.suspend()
-            #if os(iOS)
-            // From Continue Watching the watch page resumes at once, resolving its own details.
-            let continues = watchLayout && watchChannel == nil && store.resumingHistoryID == nil
-            if continues, let resume { store.resume(resume) }
-            #endif
-            if detail == nil { await loadDetail() }
-            #if os(iOS)
-            // A video of one episode then plays by itself, from where the viewer stopped if watched before. One of
-            // several waits on its cover for the viewer to choose the line and episode (#260).
-            if continues, resume == nil, watchChannel == nil, store.resumingHistoryID == nil, activeEpisodes.count <= 1 {
-                playWatchCover()
-            }
-            #endif
-            #if DEBUG
-            // `-qaDownloadPicker 1` opens the episode picker, for screenshots.
-            if UserDefaults.standard.bool(forKey: "qaDownloadPicker") { choosingDownloads = true }
-            #endif
-        }
-        .onDisappear { requestTask?.cancel() }
+        .screenTitle(video.name)
         .task(id: detail?.id) { await startTMDB() }
         .tvOnChange(of: choosingQuality) { _, open in if !open && !busy { loadingEpisode = nil } }
         #if os(iOS)
@@ -2195,6 +2175,38 @@ struct VideoDetailView: View {
         }
 
         }
+        .onAppear {
+            Diagnostics.shared.record(.info, "catalog.playback", "detail appear source=\(client.site.key)")
+            if detail == nil { startRequest { await openDetail() } }
+        }
+        .onDisappear {
+            Diagnostics.shared.record(.info, "catalog.playback", "detail disappear source=\(client.site.key)")
+            requestTask?.cancel()
+        }
+    }
+
+    /// @brief Own initial loading at the page boundary, outside the tracked layout's task lifecycle.
+    /// Main actor only. Serialize with retries and cancel on leaving; never auto-play a cancelled request.
+    private func openDetail() async {
+        store.searchModel.suspend()
+        #if os(iOS)
+        // From Continue Watching the watch page resumes at once, resolving its own details.
+        let continues = watchLayout && watchChannel == nil && store.resumingHistoryID == nil
+        if continues, let resume { store.resume(resume) }
+        #endif
+        if detail == nil { await loadDetail() }
+        guard !Task.isCancelled, detail != nil else { return }
+        #if os(iOS)
+        // A video of one episode then plays by itself, from where the viewer stopped if watched before. One of
+        // several waits on its cover for the viewer to choose the line and episode (#260).
+        if continues, resume == nil, watchChannel == nil, store.resumingHistoryID == nil, activeEpisodes.count <= 1 {
+            playWatchCover()
+        }
+        #endif
+        #if DEBUG
+        // `-qaDownloadPicker 1` opens the episode picker, for screenshots.
+        if UserDefaults.standard.bool(forKey: "qaDownloadPicker") { choosingDownloads = true }
+        #endif
     }
 
     /// One page on Mac, iPad and Apple TV: the banner, the synopsis, the episodes, then TMDB's cast and facts. An episode
@@ -2330,10 +2342,12 @@ struct VideoDetailView: View {
             try Task.checkCancellation()
             // Worked out once, off the main thread: a line can hold thousands of episodes.
             let episodes = value.episodes
-            (episodeLabels, episodeDetails) = await Task.detached(priority: .userInitiated) {
+            let (labels, details) = await Task.detached(priority: .userInitiated) {
                 let labels = EpisodeLabels.labels(episodes)
                 return (labels, EpisodeFileInfo.details(episodes, labels: labels))
             }.value
+            try Task.checkCancellation()
+            episodeLabels = labels; episodeDetails = details
             detail = value
             Diagnostics.shared.record(.info, "catalog.playback", "detail ready source=\(client.site.key) episodes=\(episodes.count)")
             // Start on the line watched last (#362), else on one that can play: not one from a drive the viewer has no

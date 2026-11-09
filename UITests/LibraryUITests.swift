@@ -25,6 +25,47 @@ final class LibraryUITests: XCTestCase {
         expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.buttons["player.close"])
         waitForExpectations(timeout: 10)
     }
+    /// A delayed response must survive the navigation push and page updates on iOS 15.
+    @MainActor func testPhoneDetailsFinishLoadingAfterNavigation() throws {
+        continueAfterFailure = false
+        XCUIDevice.shared.orientation = .portrait
+        let app = launch("sites", page: "open-detail:qa-slow:1", extra: ["-qaResetHistory", "1", "-qaResetCache", "1"])
+        try XCTSkipIf(app.frame.width >= 600, "The watch page uses the iPhone layout")
+        let open = app.buttons["qa.open-detail"]
+        XCTAssertTrue(open.waitForExistence(timeout: 20))
+        open.tap()
+        // The fixture has 36 episodes: it must show Play instead of automatically starting one.
+        XCTAssertTrue(app.buttons["watch.play"].waitForExistence(timeout: 15))
+        XCTAssertFalse(app.buttons["player.close"].exists)
+        app.buttons["返回"].tap()
+        XCTAssertTrue(open.waitForExistence(timeout: 10))
+        open.tap()
+        XCTAssertTrue(app.buttons["watch.play"].waitForExistence(timeout: 15))
+    }
+
+    /// Leaving while the response is pending must not start playback behind the source page.
+    @MainActor func testPhoneCanLeavePendingDetailsAndOpenAgain() throws {
+        continueAfterFailure = false
+        XCUIDevice.shared.orientation = .portrait
+        let app = launch("sites", page: "open-detail:qa-slow:drive", extra: ["-qaResetHistory", "1", "-qaResetCache", "1"])
+        try XCTSkipIf(app.frame.width >= 600, "The watch page uses the iPhone layout")
+        let open = app.buttons["qa.open-detail"]
+        XCTAssertTrue(open.waitForExistence(timeout: 20))
+        open.tap()
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.15)).tap()
+        let back = app.buttons["返回"]
+        XCTAssertTrue(back.waitForExistence(timeout: 5))
+        back.tap()
+        XCTAssertTrue(open.waitForExistence(timeout: 10))
+        // This fixture has one episode per line and normally auto-plays. Leaving must prevent that.
+        // Wait longer than its two-second response delay.
+        let appeared = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true"), object: app.staticTexts["player.qa.position"])
+        XCTAssertEqual(XCTWaiter.wait(for: [appeared], timeout: 3), .timedOut)
+        XCTAssertFalse(app.buttons["player.close"].exists)
+        open.tap()
+        wait(app.staticTexts["player.qa.position"], "value != %@", "0.0", timeout: 30)
+    }
+
     @MainActor func testAutomaticDanmakuAndSilentAbsenceOrFailure() {
         continueAfterFailure = false
         var app = launch(extra: ["-qaResetCache", "1"])
