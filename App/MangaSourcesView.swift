@@ -374,7 +374,6 @@ struct MangaSourceSettingsView: View {
         let title = info.text(setting.title)
         let saved = MangaSourceData.shared.setting(key, setting.key)
         let savedText: String? = saved.map { String(describing: $0) }
-        let selected: String = savedText ?? setting.defaultValue ?? setting.options.first ?? ""
         let fieldValue: String = savedText ?? setting.defaultValue ?? ""
         let defaultEnabled: Bool = setting.defaultValue == "true" || setting.defaultValue == "1"
         switch setting.type {
@@ -489,9 +488,13 @@ struct MangaSourceSettingsView: View {
     @ViewBuilder private func settingRow(_ setting: MangaSourceInfo.Setting, info: MangaSourceInfo) -> some View {
         let title = info.text(setting.title)
         let saved = MangaSourceData.shared.setting(key, setting.key)
+        let savedText: String? = saved.map { String(describing: $0) }
+        let selected: String = savedText ?? setting.defaultValue ?? setting.options.first ?? ""
+        let fieldValue: String = savedText ?? setting.defaultValue ?? ""
+        let defaultEnabled: Bool = setting.defaultValue == "true" || setting.defaultValue == "1"
         switch setting.type {
         case "select":
-            Picker(title, selection: Binding(
+            Picker(title, selection: Binding<String>(
                 get: { selected },
                 set: { change(setting.key, $0) })) {
                 ForEach(Array(setting.options.enumerated()), id: \.offset) { index, value in
@@ -504,7 +507,7 @@ struct MangaSourceSettingsView: View {
             }
         case "switch":
             Toggle(title, isOn: Binding(
-                get: { (saved as? Bool) ?? (setting.defaultValue.map { $0 == "true" || $0 == "1" }) ?? false },
+                get: { (saved as? Bool) ?? defaultEnabled },
                 set: { change(setting.key, $0) }))
         case "callback":
             Button(title) {
@@ -514,7 +517,7 @@ struct MangaSourceSettingsView: View {
                 }
             }
         default:
-            MangaSettingField(title: title, value: (saved as? String) ?? (saved.map { "\($0)" }) ?? setting.defaultValue ?? "") { change(setting.key, $0) }
+            MangaSettingField(title: title, value: fieldValue) { change(setting.key, $0) }
         }
     }
 

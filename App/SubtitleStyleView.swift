@@ -142,7 +142,7 @@ struct SubtitlePreview: View {
                     .subtitlePlacement(shown, in: CGRect(origin: .zero, size: size))
             }
             .frame(width: size.width, height: size.height, alignment: .topLeading)
-            .coordinateSpace(.named(Self.picture))
+            .coordinateSpace(name: Self.picture)
         
             }
         }

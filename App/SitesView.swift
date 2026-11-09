@@ -1868,7 +1868,26 @@ private struct PluginNodeView: View {
         let prompt = Text(node.hint ?? "")
         Group {
             if node.secure { SecureField(node.hint ?? "", text: text, prompt: prompt) }
-            else if node.multiline { TextField(node.hint ?? "", text: text, prompt: prompt, axis: .vertical).lineLimit(3...8) }
+            else if node.multiline {
+                if #available(iOS 16, macOS 13, tvOS 16, *) {
+                    TextField(node.hint ?? "", text: text, prompt: prompt, axis: .vertical).lineLimit(3...8)
+                } else {
+                    #if os(iOS) || os(macOS)
+                    // TextEditor preserves multiline editing before the axis-based TextField API.
+                    TextEditor(text: text)
+                        .frame(height: 96)
+                        .overlay(alignment: .topLeading) {
+                            if text.wrappedValue.isEmpty {
+                                prompt.foregroundStyle(.secondary).padding(.horizontal, 5).padding(.vertical, 8)
+                                    .allowsHitTesting(false).accessibilityHidden(true)
+                            }
+                        }
+                        .accessibilityLabel(node.hint ?? "")
+                    #else
+                    TextField(node.hint ?? "", text: text, prompt: prompt)
+                    #endif
+                }
+            }
             else { TextField(node.hint ?? "", text: text, prompt: prompt) }
         }
         #if !os(tvOS)
@@ -2505,7 +2524,7 @@ struct VideoDetailView: View {
                     HStack(spacing: 10) { playButton(first, continuation: continues); downloadButton(iconOnly: true); videoFavoriteButton }
                 }
             } else {
-                HStack(spacing: 10) { playButton(first); downloadButton(iconOnly: true); videoFavoriteButton }
+                HStack(spacing: 10) { playButton(first, continuation: continues); downloadButton(iconOnly: true); videoFavoriteButton }
             }
         }
             } else {

@@ -234,17 +234,15 @@ struct SubscriptionImportView: View {
     }
 
     @ToolbarContentBuilder private var importToolbar: some ToolbarContent {
-            if added == nil {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(L10n.text("Cancel")) { dismiss() }
-                }
-            }
-            ToolbarItem(placement: .confirmationAction) {
-                if added != nil { Button(L10n.text("Done")) { dismiss() }.tvFontWeight(.semibold) }
-                // Settings may be importing already, and the store takes one import at a time.
-                else if adding || store.importing { ProgressView() }
-                else { Button(L10n.text("Add"), action: add).tvFontWeight(.semibold) }
-            }
+        ToolbarItem(placement: .cancellationAction) {
+            if added == nil { Button(L10n.text("Cancel")) { dismiss() } }
+        }
+        ToolbarItem(placement: .confirmationAction) {
+            if added != nil { Button(L10n.text("Done")) { dismiss() }.tvFontWeight(.semibold) }
+            // Settings may be importing already, and the store takes one import at a time.
+            else if adding || store.importing { ProgressView() }
+            else { Button(L10n.text("Add"), action: add).tvFontWeight(.semibold) }
+        }
     }
 
     private func field(_ title: String, _ value: String) -> some View {

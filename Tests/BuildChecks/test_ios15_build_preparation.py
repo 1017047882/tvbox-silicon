@@ -13,6 +13,23 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
 class DeploymentTests(unittest.TestCase):
+    def test_iphone_manga_picker_has_typed_local_selection(self):
+        text = (ROOT / "App/MangaSourcesView.swift").read_text(encoding="utf-8")
+        row = text.split("private func settingRow(", 1)[1].split("private func change(", 1)[0]
+        self.assertIn("let selected: String", row)
+        self.assertIn("selection: Binding<String>(", row)
+
+    def test_subtitle_preview_uses_legacy_named_coordinate_space(self):
+        text = (ROOT / "App/SubtitleStyleView.swift").read_text(encoding="utf-8")
+        self.assertIn(".coordinateSpace(name: Self.picture)", text)
+        self.assertNotIn(".coordinateSpace(.named(", text)
+
+    def test_import_toolbar_has_no_conditional_toolbar_items(self):
+        text = (ROOT / "App/TVBoxApp.swift").read_text(encoding="utf-8")
+        toolbar = text.split("private var importToolbar:", 1)[1].split("private func field(", 1)[0]
+        self.assertNotIn("if added == nil {\n                ToolbarItem", toolbar)
+        self.assertLess(toolbar.index("ToolbarItem"), toolbar.index("if added"))
+
     def test_synced_app_uses_ios15_modifier_forms(self):
         for name in ["ExternalSubtitles.swift", "MangaSourcesView.swift", "SitesView.swift", "SubtitleSourcesView.swift"]:
             text = (ROOT / "App" / name).read_text(encoding="utf-8")
